@@ -9,8 +9,7 @@
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "declaration": false,
-    "sourceMap": true,
-    "incremental": true
+    "sourceMap": true
   },
   "include": ["src/**/*.ts"]
 }
