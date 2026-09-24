@@ -1,0 +1,25 @@
+{
+  "name": "travelclaw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted travel desk gateway. One process for sessions, skills, and memory.",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "predev": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build",
+    "dev": "pnpm --parallel --filter @travelclaw/api --filter @travelclaw/web dev",
+    "dev:api": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build && pnpm --filter @travelclaw/api dev",
+    "dev:web": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/web dev",
+    "build": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build && pnpm --filter @travelclaw/api build && pnpm --filter @travelclaw/web build",
+    "test": "pnpm --filter @travelclaw/shared test && pnpm --filter @travelclaw/agent-core test && pnpm --filter @travelclaw/api test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:reset": "rm -f data/travelclaw.db"
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3"
+  }
+}

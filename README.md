@@ -1,1 +1,62 @@
-# travelclaw
+# TravelClaw
+
+A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the skills that outline a trip. The control UI is where you talk to the desk.
+
+The layout follows the OpenClaw monorepo idea: a gateway, workspace markdown, skills, channel slots, and a web control surface, managed with pnpm. TravelClaw is not a fork of OpenClaw and is not affiliated with it. The gateway is NestJS. The control UI is React on Vite.
+
+It does not book flights or rooms. Estimates are estimates. Visa notes are a checklist, not a ruling.
+
+## Workspace
+
+```text
+apps/api            NestJS gateway
+apps/web            Vite control UI
+packages/shared     Session keys, zod schemas, records
+packages/agent-core Skill engine and turn loop
+skills/             SKILL.md procedures
+workspace/          SOUL, identity, traveler, desk rules, memory
+docs/               Architecture, roadmap, extension guides
+```
+
+## Quick start
+
+```bash
+corepack enable
+pnpm install
+cp .env.example .env
+pnpm dev
+```
+
+Open http://localhost:5173. The UI proxies API calls, so the browser does not talk to a hardcoded port.
+
+Set `TRAVELCLAW_MODEL_PROVIDER=openai` and `TRAVELCLAW_MODEL_API_KEY` if you want a live model to narrate skill results. Without a key, the desk still answers from the skills.
+
+## Build order
+
+New work should follow `docs/roadmap.md`:
+
+1. Shared contracts
+2. Agent core and skills
+3. Gateway
+4. Control UI
+
+That order is already how this repo is built. Pick the next unchecked roadmap item rather than starting a second framework inside the UI.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Gateway on 3000, control UI on 5173 |
+| `pnpm test` | Shared, agent-core, and gateway tests |
+| `pnpm build` | Compile packages, gateway, and UI |
+| `pnpm db:reset` | Delete the local SQLite file |
+
+Production build serves the UI from the gateway when `apps/web/dist` exists.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Skill and channel guides are in `docs/`.
+
+## License
+
+MIT
