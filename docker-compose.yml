@@ -1,0 +1,17 @@
+services:
+  gateway:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_PATH: /app/data/travelclaw.db
+      WORKSPACE_PATH: /app/workspace
+      TRAVELCLAW_MODEL_PROVIDER: mock
+    volumes:
+      - travelclaw-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  travelclaw-data:

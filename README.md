@@ -29,6 +29,12 @@ pnpm dev
 
 Open http://localhost:5173. The UI proxies API calls, so the browser does not talk to a hardcoded port.
 
+Docker serves both from one process, still without auth:
+
+```bash
+docker compose up --build
+```
+
 Set `TRAVELCLAW_MODEL_PROVIDER=openai` and `TRAVELCLAW_MODEL_API_KEY` if you want a live model to narrate skill results. Without a key, the desk still answers from the skills.
 
 ## Build order
@@ -44,12 +50,12 @@ That order is already how this repo is built. Pick the next unchecked roadmap it
 
 ## Scripts
 
-| Command | What it does |
-| --- | --- |
-| `pnpm dev` | Gateway on 3000, control UI on 5173 |
-| `pnpm test` | Shared, agent-core, and gateway tests |
-| `pnpm build` | Compile packages, gateway, and UI |
-| `pnpm db:reset` | Delete the local SQLite file |
+| Command         | What it does                          |
+| --------------- | ------------------------------------- |
+| `pnpm dev`      | Gateway on 3000, control UI on 5173   |
+| `pnpm test`     | Shared, agent-core, and gateway tests |
+| `pnpm build`    | Compile packages, gateway, and UI     |
+| `pnpm db:reset` | Delete the local SQLite file          |
 
 Production build serves the UI from the gateway when `apps/web/dist` exists.
 
