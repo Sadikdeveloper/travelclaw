@@ -20,16 +20,16 @@ Node 22.13 or newer is required. The gateway uses the built-in `node:sqlite` mod
 
 ## Where to start
 
-Read `docs/roadmap.md` and take the first unchecked item you can finish. The build order is intentional: contracts, then the skill engine, then the gateway, then the UI.
+Read `docs/roadmap.md` and take the first unchecked item you can finish. The build order is intentional: contracts, then the tool engine, then the gateway, then the UI.
 
-| Task | Start here |
-| --- | --- |
-| Change a request or response shape | `packages/shared` |
-| Add or fix a skill | `docs/adding-a-skill.md` |
-| Change how a turn is assembled | `packages/agent-core/src/turn.ts` |
-| Add an HTTP route | `apps/api/src/<feature>` |
-| Add a channel | `docs/adding-a-channel.md` |
-| Change the desk UI | `apps/web/src` |
+| Task                               | Start here                        |
+| ---------------------------------- | --------------------------------- |
+| Change a request or response shape | `packages/shared`                 |
+| Add or fix a tool                  | `docs/adding-a-tool.md`           |
+| Change how a turn is assembled     | `packages/agent-core/src/turn.ts` |
+| Add an HTTP route                  | `apps/api/src/<feature>`          |
+| Add a channel                      | `docs/adding-a-channel.md`        |
+| Change the desk UI                 | `apps/web/src`                    |
 
 ## Commands
 
@@ -48,10 +48,10 @@ pnpm db:reset
 - TypeScript strict. No `any` unless a third-party type forces it, and then narrow it immediately.
 - Comments explain why, not what. Put contributor instructions in `docs/` instead of narrating the code.
 - Zod schemas in `@travelclaw/shared` are the input contract. Do not duplicate them as class-validator DTOs.
-- Skills stay deterministic. The model may narrate results. It may not be the only source of a price or a forecast.
+- Tools stay deterministic. The model may narrate results. It may not be the only source of a price or a forecast.
 - Do not add a dependency for a ten-line helper.
 - Commit messages: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
 
 ## Pull requests
 
-Say which roadmap item you picked, how you tested it, and what you left undone. A skill without a test will not land.
+Say which roadmap item you picked, how you tested it, and what you left undone. A tool without a test will not land.

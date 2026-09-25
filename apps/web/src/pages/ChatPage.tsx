@@ -140,11 +140,11 @@ export function ChatPage() {
               ) : (
                 <RichText text={message.content} />
               )}
-              {message.skills.length ? (
+              {message.tools.length ? (
                 <div className="meta">
-                  {message.skills.map((skill) => (
-                    <span key={skill.name} className={skill.ok ? 'pill' : 'pill bad'}>
-                      {skill.name}
+                  {message.tools.map((tool) => (
+                    <span key={tool.name} className={tool.ok ? 'pill' : 'pill bad'}>
+                      {tool.name}
                     </span>
                   ))}
                 </div>

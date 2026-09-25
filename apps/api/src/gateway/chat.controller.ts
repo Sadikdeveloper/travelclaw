@@ -1,6 +1,11 @@
 import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { chatSchema, sendMessageSchema, type ChatInput, type SendMessageInput } from '@travelclaw/shared';
+import {
+  chatSchema,
+  sendMessageSchema,
+  type ChatInput,
+  type SendMessageInput,
+} from '@travelclaw/shared';
 import { ZodValidationPipe } from '../common/zod-pipe';
 import { GatewayService } from './gateway.service';
 

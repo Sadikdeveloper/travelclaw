@@ -1,8 +1,8 @@
 # TravelClaw
 
-A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the skills that outline a trip. The control UI is where you talk to the desk.
+A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the tools that outline a trip. The control UI is where you talk to the desk.
 
-The layout follows the OpenClaw monorepo idea: a gateway, workspace markdown, skills, channel slots, and a web control surface, managed with pnpm. TravelClaw is not a fork of OpenClaw and is not affiliated with it. The gateway is NestJS. The control UI is React on Vite.
+The layout follows the OpenClaw monorepo idea: a gateway, workspace markdown, tools, channel slots, and a web control surface, managed with pnpm. TravelClaw is not a fork of OpenClaw and is not affiliated with it. The gateway is NestJS. The control UI is React on Vite. Markdown skill files are not part of this version.
 
 It does not book flights or rooms. Estimates are estimates. Visa notes are a checklist, not a ruling.
 
@@ -12,8 +12,7 @@ It does not book flights or rooms. Estimates are estimates. Visa notes are a che
 apps/api            NestJS gateway
 apps/web            Vite control UI
 packages/shared     Session keys, zod schemas, records
-packages/agent-core Skill engine and turn loop
-skills/             SKILL.md procedures
+packages/agent-core Tool engine and turn loop
 workspace/          SOUL, identity, traveler, desk rules, memory
 docs/               Architecture, roadmap, extension guides
 ```
@@ -35,14 +34,14 @@ Docker serves both from one process, still without auth:
 docker compose up --build
 ```
 
-Set `TRAVELCLAW_MODEL_PROVIDER=openai` and `TRAVELCLAW_MODEL_API_KEY` if you want a live model to narrate skill results. Without a key, the desk still answers from the skills.
+Set `TRAVELCLAW_MODEL_PROVIDER=openai` and `TRAVELCLAW_MODEL_API_KEY` if you want a live model to narrate tool results. Without a key, the desk still answers from the tools.
 
 ## Build order
 
 New work should follow `docs/roadmap.md`:
 
 1. Shared contracts
-2. Agent core and skills
+2. Agent core and tools
 3. Gateway
 4. Control UI
 
@@ -61,7 +60,7 @@ Production build serves the UI from the gateway when `apps/web/dist` exists.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Skill and channel guides are in `docs/`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Tool and channel guides are in `docs/`.
 
 ## License
 

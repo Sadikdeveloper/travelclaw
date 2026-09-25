@@ -66,8 +66,8 @@ export function DeskPage() {
           <strong>{desk.sessions.length}</strong>
         </article>
         <article className="card stat">
-          <span>Skills</span>
-          <strong>{desk.skills.length}</strong>
+          <span>Tools</span>
+          <strong>{desk.tools.length}</strong>
         </article>
         <article className="card stat">
           <span>Memory</span>

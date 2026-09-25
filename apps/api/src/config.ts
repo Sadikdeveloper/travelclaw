@@ -37,7 +37,10 @@ export function loadEnvFiles(cwd = process.cwd()): void {
   }
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): AppConfig {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+): AppConfig {
   const provider = env.TRAVELCLAW_MODEL_PROVIDER === 'openai' ? 'openai' : 'mock';
   return {
     host: env.HOST || '0.0.0.0',
@@ -45,9 +48,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     databasePath: resolve(cwd, env.DATABASE_PATH || '../../data/travelclaw.db'),
     workspacePath: resolve(cwd, env.WORKSPACE_PATH || '../../workspace'),
     modelProvider: provider,
-    modelBaseUrl: (env.TRAVELCLAW_MODEL_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, ''),
+    modelBaseUrl: (env.TRAVELCLAW_MODEL_BASE_URL || 'https://api.openai.com/v1').replace(
+      /\/$/,
+      '',
+    ),
     modelApiKey: env.TRAVELCLAW_MODEL_API_KEY || '',
-    modelName: env.TRAVELCLAW_MODEL_NAME || (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
+    modelName:
+      env.TRAVELCLAW_MODEL_NAME ||
+      (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
     network: env.TRAVELCLAW_NETWORK !== '0',
     seed: env.TRAVELCLAW_SEED !== '0',
     version: GATEWAY_VERSION,

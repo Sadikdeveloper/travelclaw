@@ -1,31 +1,30 @@
 # Architecture
 
-TravelClaw is a pluggable monolith. One NestJS process is the gateway. The Vite app is the control UI. Shared packages hold the contracts and the skill engine so both can be tested without HTTP.
+TravelClaw is a pluggable monolith. One NestJS process is the gateway. The Vite app is the control UI. Shared packages hold the contracts and the tool engine so both can be tested without HTTP.
 
 ```mermaid
 flowchart LR
   UI["Control UI"] --> GW["Gateway"]
   EXT["Channel extensions"] --> GW
   GW --> LOOP["Turn loop"]
-  LOOP --> SK["Skills"]
+  LOOP --> TOOLS["Tools"]
   LOOP --> MODEL["Model provider"]
-  SK --> TRIPS["Trips"]
-  SK --> MEM["Memory"]
+  TOOLS --> TRIPS["Trips"]
+  TOOLS --> MEM["Memory"]
   GW --> SES["Sessions"]
   HB["Heartbeat"] --> TRIPS
 ```
 
 ## Why it is split this way
 
-| Path | Role |
-| --- | --- |
-| `apps/api` | Gateway. Owns SQLite, HTTP, WebSocket, scheduling. |
-| `apps/web` | Control UI. Talks to the gateway with relative `/api` URLs. |
-| `packages/shared` | Wire types and zod schemas. Safe to import from the browser. |
-| `packages/agent-core` | Prompt assembly, routing, skills. No Nest, no database. |
-| `skills/` | `SKILL.md` procedures. Triggers live here. Code lives in agent-core. |
-| `workspace/` | Persona files the gateway reads on every turn. |
-| `extensions/` | Reserved. Not a workspace glob until a real package exists. |
+| Path                  | Role                                                         |
+| --------------------- | ------------------------------------------------------------ |
+| `apps/api`            | Gateway. Owns SQLite, HTTP, WebSocket, scheduling.           |
+| `apps/web`            | Control UI. Talks to the gateway with relative `/api` URLs.  |
+| `packages/shared`     | Wire types and zod schemas. Safe to import from the browser. |
+| `packages/agent-core` | Prompt assembly, routing, tools. No Nest, no database.       |
+| `workspace/`          | Persona files the gateway reads on every turn.               |
+| `extensions/`         | Reserved. Not a workspace glob until a real package exists.  |
 
 ## Session keys
 
@@ -35,12 +34,14 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 
 1. Persist the traveler message.
 2. Load persona files, recent memory, and the active trip.
-3. Route to at most three skills from `SKILL.md` triggers plus a few structured patterns (city + dates, currency pair, "remember").
-4. Run those skills in code. Markdown never executes.
-5. Ask the model to narrate the skill results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
+3. Route to at most three tools from triggers on the tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
+4. Run those tools. They are TypeScript functions, not markdown.
+5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
 6. Persist the assistant message and emit `chat.completed`.
 
-Skills run before the model so a missing key cannot invent prices, weather, or a booking.
+Tools run before the model so a missing key cannot invent prices, weather, or a booking.
+
+Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
 ## Channels
 

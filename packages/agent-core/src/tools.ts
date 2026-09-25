@@ -9,20 +9,19 @@ import type {
   PackingData,
   PlacesData,
   RememberData,
-  SkillContext,
-  SkillDoc,
-  SkillRunResult,
+  ToolContext,
+  ToolResult,
   ThemeCard,
   TripHints,
   VisaData,
   WeatherData,
 } from './types';
 
-interface SkillRunner {
+interface ToolDefinition {
   name: string;
   description: string;
   triggers: string[];
-  run: (text: string, ctx: SkillContext) => Promise<SkillRunResult>;
+  run: (text: string, ctx: ToolContext) => Promise<ToolResult>;
 }
 
 const USD_RATES: Record<string, number> = {
@@ -41,7 +40,7 @@ const USD_RATES: Record<string, number> = {
   ISK: 137,
 };
 
-export const BUNDLED_SKILLS: SkillRunner[] = [
+export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'trip.outline',
     description: 'Build a day-by-day outline from a destination and dates.',
@@ -53,7 +52,8 @@ export const BUNDLED_SKILLS: SkillRunner[] = [
         return {
           name: 'trip.outline',
           ok: false,
-          summary: 'Need a city and dates in YYYY-MM-DD, or a start date plus a day count under 19.',
+          summary:
+            'Need a city and dates in YYYY-MM-DD, or a start date plus a day count under 19.',
           data: null,
         };
       }
@@ -76,7 +76,8 @@ export const BUNDLED_SKILLS: SkillRunner[] = [
         return {
           name: 'budget.estimate',
           ok: false,
-          summary: 'Need a city and a length (two dates or a day count) before I estimate a budget.',
+          summary:
+            'Need a city and a length (two dates or a day count) before I estimate a budget.',
           data: null,
         };
       }
@@ -142,7 +143,12 @@ export const BUNDLED_SKILLS: SkillRunner[] = [
           data: null,
         };
       }
-      const data = await convertCurrency(hints.amount, hints.fromCurrency, hints.toCurrency, ctx);
+      const data = await convertCurrency(
+        hints.amount,
+        hints.fromCurrency,
+        hints.toCurrency,
+        ctx,
+      );
       return {
         name: 'currency.convert',
         ok: true,
@@ -199,7 +205,8 @@ export const BUNDLED_SKILLS: SkillRunner[] = [
         return {
           name: 'memory.remember',
           ok: false,
-          summary: 'Say what to remember, for example "/remember I prefer trains to taxis".',
+          summary:
+            'Say what to remember, for example "/remember I prefer trains to taxis".',
           data: null,
         };
       }
@@ -214,37 +221,19 @@ export const BUNDLED_SKILLS: SkillRunner[] = [
   },
 ];
 
-export function defaultSkillDocs(): SkillDoc[] {
-  return BUNDLED_SKILLS.map((skill) => ({
-    name: skill.name,
-    description: skill.description,
-    triggers: skill.triggers,
-    body: '',
-  }));
-}
-
-export function mergeSkillDocs(docs: SkillDoc[]): SkillDoc[] {
-  const byName = new Map(defaultSkillDocs().map((doc) => [doc.name, doc]));
-  for (const doc of docs) {
-    const current = byName.get(doc.name);
-    byName.set(doc.name, {
-      name: doc.name,
-      description: doc.description || current?.description || doc.name,
-      triggers: doc.triggers.length ? doc.triggers : current?.triggers ?? [],
-      body: doc.body,
-    });
-  }
-  return [...byName.values()];
-}
-
-export function routeSkills(text: string, docs = defaultSkillDocs()): string[] {
+export function routeTools(
+  text: string,
+  tools: Array<{ name: string; triggers: string[] }> = BUNDLED_TOOLS,
+): string[] {
   const lower = text.toLowerCase();
   const hinted = extractHints(text);
-  const scored = docs
-    .map((doc) => {
-      const triggerHit = doc.triggers.some((trigger) => lower.includes(trigger.toLowerCase()));
-      const structured = structuredHit(doc.name, hinted, lower);
-      return { name: doc.name, score: (triggerHit ? 2 : 0) + (structured ? 3 : 0) };
+  const scored = tools
+    .map((tool) => {
+      const triggerHit = tool.triggers.some((trigger) =>
+        lower.includes(trigger.toLowerCase()),
+      );
+      const structured = structuredHit(tool.name, hinted, lower);
+      return { name: tool.name, score: (triggerHit ? 2 : 0) + (structured ? 3 : 0) };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
@@ -258,27 +247,32 @@ export function routeSkills(text: string, docs = defaultSkillDocs()): string[] {
 }
 
 function structuredHit(name: string, hints: TripHints, lower: string): boolean {
-  if (name === 'trip.outline' && hints.destination && (hints.startDate || /\bplan\b|\boutline\b|\btrip\b/.test(lower))) {
+  if (
+    name === 'trip.outline' &&
+    hints.destination &&
+    (hints.startDate || /\bplan\b|\boutline\b|\btrip\b/.test(lower))
+  ) {
     return Boolean(hints.startDate || hints.days);
   }
   if (name === 'budget.estimate' && hints.destination && (hints.days || hints.startDate)) {
     return /\b(budget|cost|spend|how much)\b/.test(lower);
   }
-  if (name === 'currency.convert') return Boolean(hints.amount && hints.fromCurrency && hints.toCurrency);
+  if (name === 'currency.convert')
+    return Boolean(hints.amount && hints.fromCurrency && hints.toCurrency);
   if (name === 'memory.remember') return Boolean(hints.rememberText);
   return false;
 }
 
-export async function runSkills(
+export async function runTools(
   text: string,
   names: string[],
-  ctx: SkillContext,
-): Promise<SkillRunResult[]> {
-  const results: SkillRunResult[] = [];
+  ctx: ToolContext,
+): Promise<ToolResult[]> {
+  const results: ToolResult[] = [];
   for (const name of names) {
-    const skill = BUNDLED_SKILLS.find((item) => item.name === name);
-    if (!skill) continue;
-    results.push(await skill.run(text, ctx));
+    const tool = BUNDLED_TOOLS.find((item) => item.name === name);
+    if (!tool) continue;
+    results.push(await tool.run(text, ctx));
   }
   return results;
 }
@@ -292,7 +286,10 @@ export function buildOutline(hints: TripHints): OutlineData | null {
   }
   const profile = findDestinationByName(hints.destination);
   const pace = hints.pace ?? 'steady';
-  const themes = orderThemes(profile?.themes ?? genericThemes(hints.destination), hints.interests);
+  const themes = orderThemes(
+    profile?.themes ?? genericThemes(hints.destination),
+    hints.interests,
+  );
   const dates = eachDate(hints.startDate, hints.endDate);
   const days = dates.map((date, index) => {
     const theme = themes[index % themes.length];
@@ -302,15 +299,20 @@ export function buildOutline(hints: TripHints): OutlineData | null {
       return {
         date,
         title: `Arrival in ${profile?.neighborhoods[0]?.name ?? 'the center'}`,
-        summary: 'Check in, learn the walk to food, and stop early. Do not spend the arrival day on a far-side attraction.',
-        places: profile?.neighborhoods.slice(0, 2).map((item) => item.name) ?? ['Central streets', 'A nearby grocer'],
+        summary:
+          'Check in, learn the walk to food, and stop early. Do not spend the arrival day on a far-side attraction.',
+        places: profile?.neighborhoods.slice(0, 2).map((item) => item.name) ?? [
+          'Central streets',
+          'A nearby grocer',
+        ],
       };
     }
     if (departure) {
       return {
         date,
         title: 'Leave with a buffer',
-        summary: 'One morning anchor near your bag. Airport transfers are not in this outline.',
+        summary:
+          'One morning anchor near your bag. Airport transfers are not in this outline.',
         places: [theme.places[0] ?? 'A cafe near the door'],
       };
     }
@@ -344,11 +346,12 @@ export function estimateBudget(hints: TripHints): BudgetData | null {
   const days =
     hints.startDate && hints.endDate
       ? inclusiveDayCount(hints.startDate, hints.endDate)
-      : hints.days ?? 0;
+      : (hints.days ?? 0);
   if (days <= 0 || days > 60) return null;
   const profile = findDestinationByName(hints.destination);
   const style = hints.style ?? 'comfortable';
-  const daily = profile?.dailyUsd[style] ?? (style === 'lean' ? 90 : style === 'splurge' ? 280 : 150);
+  const daily =
+    profile?.dailyUsd[style] ?? (style === 'lean' ? 90 : style === 'splurge' ? 280 : 150);
   const travelers = hints.travelers ?? 1;
   const stay = Math.round(daily * 0.46);
   const food = Math.round(daily * 0.27);
@@ -371,35 +374,99 @@ export function estimateBudget(hints: TripHints): BudgetData | null {
 export function buildPackingList(hints: TripHints): PackingData {
   const profile = hints.destination ? findDestinationByName(hints.destination) : undefined;
   const climate = profile?.climate ?? 'temperate';
-  const days = hints.days ?? (hints.startDate && hints.endDate ? inclusiveDayCount(hints.startDate, hints.endDate) : 5);
+  const days =
+    hints.days ??
+    (hints.startDate && hints.endDate
+      ? inclusiveDayCount(hints.startDate, hints.endDate)
+      : 5);
   const safeDays = Math.min(Math.max(days || 5, 1), 21);
   const items: PackingData['items'] = [
-    { name: 'Passport and a paper copy', qty: '1', category: 'documents', why: 'The copy stays separate from the passport.' },
-    { name: 'Any medicine you already take', qty: 'enough for the trip plus two days', category: 'health', why: 'Do not start a new drug because a list suggested it.' },
-    { name: 'Phone charger and a plug adapter', qty: '1', category: 'kit', why: 'Check the plug type before you buy a second adapter.' },
-    { name: 'Shirts or tops', qty: String(Math.min(Math.ceil(safeDays / 2), 6)), category: 'clothes', why: 'Laundry exists. A full day-per-shirt bag does not help.' },
-    { name: 'Underwear and socks', qty: String(Math.min(safeDays, 8)), category: 'clothes', why: 'The item people underpack.' },
+    {
+      name: 'Passport and a paper copy',
+      qty: '1',
+      category: 'documents',
+      why: 'The copy stays separate from the passport.',
+    },
+    {
+      name: 'Any medicine you already take',
+      qty: 'enough for the trip plus two days',
+      category: 'health',
+      why: 'Do not start a new drug because a list suggested it.',
+    },
+    {
+      name: 'Phone charger and a plug adapter',
+      qty: '1',
+      category: 'kit',
+      why: 'Check the plug type before you buy a second adapter.',
+    },
+    {
+      name: 'Shirts or tops',
+      qty: String(Math.min(Math.ceil(safeDays / 2), 6)),
+      category: 'clothes',
+      why: 'Laundry exists. A full day-per-shirt bag does not help.',
+    },
+    {
+      name: 'Underwear and socks',
+      qty: String(Math.min(safeDays, 8)),
+      category: 'clothes',
+      why: 'The item people underpack.',
+    },
   ];
   if (climate === 'hot-humid' || climate === 'hot-dry') {
     items.push(
-      { name: 'Breathable clothes', qty: 'the tops above', category: 'climate', why: 'Heat is the constraint, not outfits.' },
-      { name: 'Sun layer and a hat', qty: '1', category: 'climate', why: profile?.packingNotes[0] ?? 'Midday is long.' },
+      {
+        name: 'Breathable clothes',
+        qty: 'the tops above',
+        category: 'climate',
+        why: 'Heat is the constraint, not outfits.',
+      },
+      {
+        name: 'Sun layer and a hat',
+        qty: '1',
+        category: 'climate',
+        why: profile?.packingNotes[0] ?? 'Midday is long.',
+      },
     );
   }
   if (climate === 'cold' || climate === 'alpine') {
     items.push(
-      { name: 'Warm midlayer', qty: '1', category: 'climate', why: 'Evenings drop even when the noon photo looks mild.' },
-      { name: 'Windproof shell', qty: '1', category: 'climate', why: profile?.packingNotes[0] ?? 'Wind matters more than a fashion coat.' },
+      {
+        name: 'Warm midlayer',
+        qty: '1',
+        category: 'climate',
+        why: 'Evenings drop even when the noon photo looks mild.',
+      },
+      {
+        name: 'Windproof shell',
+        qty: '1',
+        category: 'climate',
+        why: profile?.packingNotes[0] ?? 'Wind matters more than a fashion coat.',
+      },
     );
   }
   if (climate === 'temperate' || climate === 'variable') {
-    items.push({ name: 'Light rain shell', qty: '1', category: 'climate', why: 'A shell beats an umbrella on cobbles and ferries.' });
+    items.push({
+      name: 'Light rain shell',
+      qty: '1',
+      category: 'climate',
+      why: 'A shell beats an umbrella on cobbles and ferries.',
+    });
   }
   if (climate === 'alpine') {
-    items.push({ name: 'Sun protection at altitude', qty: '1', category: 'climate', why: 'The air is thin and the sun is not milder.' });
+    items.push({
+      name: 'Sun protection at altitude',
+      qty: '1',
+      category: 'climate',
+      why: 'The air is thin and the sun is not milder.',
+    });
   }
   for (const note of profile?.packingNotes ?? []) {
-    items.push({ name: note, qty: '1', category: 'desk note', why: `From the ${profile?.name} card.` });
+    items.push({
+      name: note,
+      qty: '1',
+      category: 'desk note',
+      why: `From the ${profile?.name} card.`,
+    });
   }
   return {
     destination: profile?.name ?? hints.destination ?? 'a city you have not named',
@@ -415,12 +482,14 @@ export function suggestPlaces(hints: TripHints): PlacesData {
     return {
       destination: hints.destination ?? 'unknown',
       known: false,
-      places: genericThemes(hints.destination ?? 'the city').slice(0, 3).map((theme) => ({
-        name: theme.places[0] ?? theme.title,
-        area: 'center',
-        kind: 'template',
-        note: theme.summary,
-      })),
+      places: genericThemes(hints.destination ?? 'the city')
+        .slice(0, 3)
+        .map((theme) => ({
+          name: theme.places[0] ?? theme.title,
+          area: 'center',
+          kind: 'template',
+          note: theme.summary,
+        })),
     };
   }
   const themes = orderThemes(profile.themes, hints.interests);
@@ -445,7 +514,7 @@ export async function convertCurrency(
   amount: number,
   from: string,
   to: string,
-  ctx: SkillContext,
+  ctx: ToolContext,
 ): Promise<CurrencyData> {
   if (ctx.network && ctx.fetchImpl) {
     try {
@@ -495,7 +564,10 @@ export async function convertCurrency(
   };
 }
 
-export async function weatherOutlook(hints: TripHints, ctx: SkillContext): Promise<WeatherData> {
+export async function weatherOutlook(
+  hints: TripHints,
+  ctx: ToolContext,
+): Promise<WeatherData> {
   const profile = hints.destination ? findDestinationByName(hints.destination) : undefined;
   const destination = profile?.name ?? hints.destination ?? 'that city';
   if (ctx.network && ctx.fetchImpl && profile) {
@@ -537,7 +609,9 @@ export async function weatherOutlook(hints: TripHints, ctx: SkillContext): Promi
       // Seasonal card below.
     }
   }
-  const month = hints.startDate ? Number(hints.startDate.slice(5, 7)) : ctx.now.getUTCMonth() + 1;
+  const month = hints.startDate
+    ? Number(hints.startDate.slice(5, 7))
+    : ctx.now.getUTCMonth() + 1;
   return {
     destination,
     source: 'seasonal-card',
@@ -586,7 +660,10 @@ function orderThemes(themes: ThemeCard[], interests: string[]): ThemeCard[] {
 
 function scoreTheme(theme: ThemeCard, interests: string[]): number {
   const blob = `${theme.title} ${theme.summary} ${theme.places.join(' ')}`.toLowerCase();
-  return interests.reduce((total, interest) => total + (blob.includes(interest) ? 1 : 0), 0);
+  return interests.reduce(
+    (total, interest) => total + (blob.includes(interest) ? 1 : 0),
+    0,
+  );
 }
 
 function genericThemes(city: string): ThemeCard[] {
@@ -620,7 +697,11 @@ function weatherLabel(code: number | undefined): string {
   return 'storms';
 }
 
-async function fetchWithTimeout(fetchImpl: typeof fetch, url: string, ms: number): Promise<Response> {
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  ms: number,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {

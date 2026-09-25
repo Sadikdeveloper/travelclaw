@@ -28,7 +28,7 @@ export interface SessionRecord {
   updatedAt: string;
 }
 
-export interface SkillTrace {
+export interface ToolTrace {
   name: string;
   ok: boolean;
   summary: string;
@@ -39,7 +39,7 @@ export interface MessageRecord {
   sessionId: string;
   role: MessageRole;
   content: string;
-  skills: SkillTrace[];
+  tools: ToolTrace[];
   provider: string | null;
   model: string | null;
   createdAt: string;
@@ -109,18 +109,17 @@ export interface ChannelPlugin extends ChannelRecord {
   configured: boolean;
 }
 
-export interface SkillRecord {
+export interface ToolRecord {
   name: string;
   description: string;
   triggers: string[];
-  implemented: boolean;
 }
 
-export interface SkillRunRecord {
+export interface ToolRunRecord {
   id: string;
   sessionId: string | null;
   tripId: string | null;
-  skill: string;
+  tool: string;
   ok: boolean;
   summary: string;
   createdAt: string;
@@ -129,7 +128,7 @@ export interface SkillRunRecord {
 export interface ChatResponse {
   session: SessionRecord;
   message: MessageRecord;
-  skills: SkillTrace[];
+  tools: ToolTrace[];
   provider: string;
   model: string;
 }
@@ -158,7 +157,7 @@ export interface DeskSnapshot {
   trips: TripRecord[];
   sessions: SessionRecord[];
   heartbeats: HeartbeatRecord[];
-  skills: SkillRecord[];
+  tools: ToolRecord[];
   channels: ChannelRecord[];
   memoryCount: number;
 }

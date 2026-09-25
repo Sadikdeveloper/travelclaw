@@ -2,7 +2,7 @@
   "name": "travelclaw",
   "version": "0.1.0",
   "private": true,
-  "description": "Self-hosted travel desk gateway. One process for sessions, skills, and memory.",
+  "description": "Self-hosted travel desk gateway. One process for sessions, tools, and memory.",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=22.13"

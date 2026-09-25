@@ -2,7 +2,13 @@ import { z } from 'zod';
 
 export const paceSchema = z.enum(['relaxed', 'steady', 'packed']);
 export const budgetStyleSchema = z.enum(['lean', 'comfortable', 'splurge']);
-export const tripStatusSchema = z.enum(['draft', 'planning', 'booked', 'traveling', 'done']);
+export const tripStatusSchema = z.enum([
+  'draft',
+  'planning',
+  'booked',
+  'traveling',
+  'done',
+]);
 export const memoryKindSchema = z.enum(['preference', 'fact', 'decision']);
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 

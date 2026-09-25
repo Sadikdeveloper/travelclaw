@@ -22,20 +22,13 @@ export interface DestinationProfile {
   themes: ThemeCard[];
 }
 
-export interface SkillDoc {
-  name: string;
-  description: string;
-  triggers: string[];
-  body: string;
-}
-
-export interface SkillTrace {
+export interface ToolTrace {
   name: string;
   ok: boolean;
   summary: string;
 }
 
-export interface SkillRunResult<T = unknown> {
+export interface ToolResult<T = unknown> {
   name: string;
   ok: boolean;
   summary: string;
@@ -177,17 +170,16 @@ export interface TurnRequest {
   memory: string[];
   history: HistoryTurn[];
   activeTrip?: ActiveTripHint | null;
-  skillDocs?: SkillDoc[];
 }
 
 export interface TurnResult {
   reply: string;
-  skills: SkillTrace[];
-  skillResults: SkillRunResult[];
+  tools: ToolTrace[];
+  toolResults: ToolResult[];
   provider: string;
   model: string;
   remembered?: RememberData;
-  command?: 'skills' | 'remember' | 'new';
+  command?: 'tools' | 'remember' | 'new';
 }
 
 export interface ModelCompletion {
@@ -207,7 +199,7 @@ export interface ModelProvider {
   }): Promise<ModelCompletion>;
 }
 
-export interface SkillContext {
+export interface ToolContext {
   now: Date;
   network: boolean;
   fetchImpl?: typeof fetch;

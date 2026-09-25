@@ -15,7 +15,8 @@ interface MemoryRow {
   created_at: string;
 }
 
-const BULLET = /^- \[(preference|fact|decision)\]\s+(.+?)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/gm;
+const BULLET =
+  /^- \[(preference|fact|decision)\]\s+(.+?)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/gm;
 
 @Injectable()
 export class MemoryService implements OnModuleInit {
@@ -46,7 +47,10 @@ export class MemoryService implements OnModuleInit {
       .map((note) => `[${note.kind}] ${note.body}`);
   }
 
-  remember(agentId: string, input: { kind: MemoryKind; title: string; body: string; noteDate?: string }): MemoryRecord {
+  remember(
+    agentId: string,
+    input: { kind: MemoryKind; title: string; body: string; noteDate?: string },
+  ): MemoryRecord {
     const existing = this.db.get<MemoryRow>(
       'SELECT * FROM memory_notes WHERE agent_id = ? AND body = ?',
       agentId,
@@ -85,7 +89,11 @@ export class MemoryService implements OnModuleInit {
       const body = match[2].trim();
       const noteDate = match[3];
       const title = body.length > 52 ? `${body.slice(0, 52)}…` : body;
-      const existing = this.db.get('SELECT id FROM memory_notes WHERE agent_id = ? AND body = ?', agentId, body);
+      const existing = this.db.get(
+        'SELECT id FROM memory_notes WHERE agent_id = ? AND body = ?',
+        agentId,
+        body,
+      );
       if (existing) continue;
       this.db.run(
         `INSERT INTO memory_notes (id, agent_id, kind, title, body, note_date, created_at)

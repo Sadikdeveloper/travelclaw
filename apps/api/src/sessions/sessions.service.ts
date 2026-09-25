@@ -6,7 +6,7 @@ import {
   type MessageRecord,
   type MessageRole,
   type SessionRecord,
-  type SkillTrace,
+  type ToolTrace,
 } from '@travelclaw/shared';
 import { newId, nowIso, parseJson, titleFrom } from '../common/util';
 import { DatabaseService } from '../db/database.service';
@@ -28,7 +28,7 @@ interface MessageRow {
   session_id: string;
   role: MessageRole;
   content: string;
-  skills_json: string;
+  tools_json: string;
   provider: string | null;
   model: string | null;
   created_at: string;
@@ -87,44 +87,60 @@ export class SessionsService {
       .map(mapMessage);
   }
 
-  recentHistory(sessionId: string, limit = 12): Array<{ role: 'user' | 'assistant'; content: string }> {
+  recentHistory(
+    sessionId: string,
+    limit = 12,
+  ): Array<{ role: 'user' | 'assistant'; content: string }> {
     return this.messages(sessionId)
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .slice(-limit)
-      .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
+      .map((message) => ({
+        role: message.role as 'user' | 'assistant',
+        content: message.content,
+      }));
   }
 
   append(
     sessionId: string,
     role: MessageRole,
     content: string,
-    skills: SkillTrace[] = [],
+    tools: ToolTrace[] = [],
     meta?: { provider?: string; model?: string },
   ): MessageRecord {
     const session = this.get(sessionId);
     const now = nowIso();
     const id = newId();
     this.db.run(
-      `INSERT INTO messages (id, session_id, role, content, skills_json, provider, model, created_at)
+      `INSERT INTO messages (id, session_id, role, content, tools_json, provider, model, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       sessionId,
       role,
       content,
-      JSON.stringify(skills),
+      JSON.stringify(tools),
       meta?.provider || null,
       meta?.model || null,
       now,
     );
-    const title = session.title === 'New chat' && role === 'user' ? titleFrom(content) : session.title;
-    this.db.run('UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?', now, title, sessionId);
+    const title =
+      session.title === 'New chat' && role === 'user' ? titleFrom(content) : session.title;
+    this.db.run(
+      'UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?',
+      now,
+      title,
+      sessionId,
+    );
     return mapMessage(this.db.get<MessageRow>('SELECT * FROM messages WHERE id = ?', id)!);
   }
 
   reset(sessionId: string): SessionRecord {
     this.get(sessionId);
     this.db.run('DELETE FROM messages WHERE session_id = ?', sessionId);
-    this.append(sessionId, 'system', 'Session reset. Earlier turns are gone from this chat.');
+    this.append(
+      sessionId,
+      'system',
+      'Session reset. Earlier turns are gone from this chat.',
+    );
     this.db.run('UPDATE sessions SET title = ? WHERE id = ?', 'New chat', sessionId);
     return this.get(sessionId);
   }
@@ -149,7 +165,7 @@ function mapMessage(row: MessageRow): MessageRecord {
     sessionId: row.session_id,
     role: row.role,
     content: row.content,
-    skills: parseJson<SkillTrace[]>(row.skills_json, []),
+    tools: parseJson<ToolTrace[]>(row.tools_json, []),
     provider: row.provider,
     model: row.model,
     createdAt: row.created_at,

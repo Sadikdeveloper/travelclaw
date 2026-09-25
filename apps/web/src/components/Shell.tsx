@@ -8,7 +8,7 @@ const links = [
   { to: '/', label: 'Desk', icon: Compass, end: true },
   { to: '/chat', label: 'Chat', icon: MessageSquare, end: false },
   { to: '/trips', label: 'Trips', icon: Map, end: false },
-  { to: '/skills', label: 'Skills', icon: Sparkles, end: false },
+  { to: '/tools', label: 'Tools', icon: Sparkles, end: false },
   { to: '/memory', label: 'Memory', icon: BookOpen, end: false },
   { to: '/agents', label: 'Agents', icon: UserRound, end: false },
 ];

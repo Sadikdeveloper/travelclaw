@@ -27,7 +27,10 @@ export class HeartbeatService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    const existing = this.db.get('SELECT id FROM heartbeat_jobs WHERE name = ?', 'departure-watch');
+    const existing = this.db.get(
+      'SELECT id FROM heartbeat_jobs WHERE name = ?',
+      'departure-watch',
+    );
     if (existing) return;
     const now = new Date();
     this.db.run(
@@ -41,7 +44,9 @@ export class HeartbeatService implements OnModuleInit {
   }
 
   list(): HeartbeatRecord[] {
-    return this.db.all<JobRow>('SELECT * FROM heartbeat_jobs ORDER BY name ASC').map(mapJob);
+    return this.db
+      .all<JobRow>('SELECT * FROM heartbeat_jobs ORDER BY name ASC')
+      .map(mapJob);
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -60,7 +65,9 @@ export class HeartbeatService implements OnModuleInit {
     if (!job) throw new NotFoundException(`No heartbeat ${id}`);
     const upcoming = this.trips.upcoming(14);
     const result = upcoming.length
-      ? upcoming.map((trip) => `${trip.destination} starts ${trip.startDate} (${trip.status})`).join('; ')
+      ? upcoming
+          .map((trip) => `${trip.destination} starts ${trip.startDate} (${trip.status})`)
+          .join('; ')
       : 'NO_REPLY';
     const now = new Date();
     this.db.run(

@@ -37,7 +37,9 @@ const CURRENCIES = [
 export function extractHints(text: string): TripHints {
   const dates = [...text.matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)].map((match) => match[1]);
   const dayCount = text.match(/\b(\d{1,2})\s*[- ]?days?\b/i);
-  const travelers = text.match(/\b(\d{1,2})\s*(travelers|travellers|people|adults|guests)\b/i);
+  const travelers = text.match(
+    /\b(\d{1,2})\s*(travelers|travellers|people|adults|guests)\b/i,
+  );
   const forParty = text.match(/\bfor\s+(\d{1,2})\b/i);
   const origin = text.match(/\bfrom\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\b/);
   const passport = text.match(/\bpassport\s+(?:from|of|:)\s+([A-Za-z][A-Za-z ]{1,40})/i);
@@ -66,7 +68,11 @@ export function extractHints(text: string): TripHints {
     startDate,
     endDate,
     days,
-    travelers: travelers ? Number(travelers[1]) : forParty ? Number(forParty[1]) : undefined,
+    travelers: travelers
+      ? Number(travelers[1])
+      : forParty
+        ? Number(forParty[1])
+        : undefined,
     pace,
     style,
     interests,

@@ -56,7 +56,7 @@ describe('gateway', () => {
     expect(planned.body.status).toBe('planning');
   });
 
-  it('answers a packing question from skills', async () => {
+  it('answers a packing question from tools', async () => {
     const res = await request(app.getHttpServer()).post('/api/chat').send({
       content: 'What should I pack for Reykjavik for 4 days?',
     });

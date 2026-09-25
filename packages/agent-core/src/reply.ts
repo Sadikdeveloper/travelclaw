@@ -4,13 +4,20 @@ import type {
   OutlineData,
   PackingData,
   PlacesData,
-  SkillRunResult,
+  ToolResult,
   VisaData,
   WeatherData,
 } from './types';
 
-export function renderFallback(text: string, results: SkillRunResult[], agentName: string): string {
-  const rendered = results.filter((result) => result.ok).map(renderResult).filter(Boolean);
+export function renderFallback(
+  text: string,
+  results: ToolResult[],
+  agentName: string,
+): string {
+  const rendered = results
+    .filter((result) => result.ok)
+    .map(renderResult)
+    .filter(Boolean);
   const failed = results.filter((result) => !result.ok);
   if (rendered.length || failed.length) {
     const parts = [
@@ -23,7 +30,7 @@ export function renderFallback(text: string, results: SkillRunResult[], agentNam
   return renderUngrounded(text, agentName);
 }
 
-export function renderResult(result: SkillRunResult): string {
+export function renderResult(result: ToolResult): string {
   switch (result.name) {
     case 'trip.outline':
       return renderOutline(result.data as OutlineData);
@@ -48,11 +55,16 @@ export function renderResult(result: SkillRunResult): string {
 
 function renderOutline(data: OutlineData): string {
   const days = data.days
-    .map((day) => `**${day.date} — ${day.title}**\n${day.summary}\nAnchors: ${day.places.join(', ')}.`)
+    .map(
+      (day) =>
+        `**${day.date} — ${day.title}**\n${day.summary}\nAnchors: ${day.places.join(', ')}.`,
+    )
     .join('\n\n');
   return [
     `Outline for ${data.destination}, ${data.days.length} days, ${data.pace} pace.`,
-    data.known ? '' : 'This city is not on the desk card, so the days are a pacing template.',
+    data.known
+      ? ''
+      : 'This city is not on the desk card, so the days are a pacing template.',
     days,
     data.assumptions.map((item) => `- ${item}`).join('\n'),
   ]
@@ -79,7 +91,9 @@ function renderPacking(data: PackingData): string {
 }
 
 function renderPlaces(data: PlacesData): string {
-  const lines = data.places.map((place) => `- ${place.name} (${place.area}, ${place.kind}) — ${place.note}`);
+  const lines = data.places.map(
+    (place) => `- ${place.name} (${place.area}, ${place.kind}) — ${place.note}`,
+  );
   return [`Anchors in ${data.destination}.`, ...lines].join('\n');
 }
 
@@ -102,5 +116,5 @@ function renderUngrounded(text: string, agentName: string): string {
   if (/\b(book|flight|hotel|reservation|hold a room)\b/i.test(text)) {
     return `I don't book flights or rooms, and I won't pretend a fare is available. I can shape the days, a budget ceiling, and a packing list so the booking is a smaller decision. Where are you going, and on which dates?`;
   }
-  return `I don't have a skill result for that. I can outline a city, estimate on-the-ground spend, pack a bag, check a short forecast, convert a currency, or store a preference. The useful version starts with a city and dates in YYYY-MM-DD.`;
+  return `I don't have a tool result for that. I can outline a city, estimate on-the-ground spend, pack a bag, check a short forecast, convert a currency, or store a preference. The useful version starts with a city and dates in YYYY-MM-DD.`;
 }

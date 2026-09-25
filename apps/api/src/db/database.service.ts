@@ -20,7 +20,38 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     mkdirSync(dirname(databasePath), { recursive: true });
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA foreign_keys = ON');
+    this.migrateLegacyNames();
     this.db.exec(SCHEMA);
+  }
+
+  /** Old installs used a skill catalog. Rename before CREATE so history is kept. */
+  private migrateLegacyNames() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (tables.has('messages')) {
+      const columns = this.all<{ name: string }>('PRAGMA table_info(messages)');
+      const names = new Set(columns.map((column) => column.name));
+      if (names.has('skills_json') && !names.has('tools_json')) {
+        this.db.exec('ALTER TABLE messages RENAME COLUMN skills_json TO tools_json');
+      }
+    }
+    let runTable: string | null = null;
+    if (tables.has('skill_runs') && !tables.has('tool_runs')) {
+      this.db.exec('ALTER TABLE skill_runs RENAME TO tool_runs');
+      runTable = 'tool_runs';
+    } else if (tables.has('tool_runs')) {
+      runTable = 'tool_runs';
+    }
+    if (runTable) {
+      const columns = this.all<{ name: string }>(`PRAGMA table_info(${runTable})`);
+      const names = new Set(columns.map((column) => column.name));
+      if (names.has('skill') && !names.has('tool')) {
+        this.db.exec(`ALTER TABLE ${runTable} RENAME COLUMN skill TO tool`);
+      }
+    }
   }
 
   onModuleDestroy() {

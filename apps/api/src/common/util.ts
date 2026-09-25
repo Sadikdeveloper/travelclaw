@@ -41,7 +41,10 @@ export function slug(value: string): string {
 }
 
 export function titleFrom(text: string): string {
-  const clean = text.replace(/^\/\w+\s*/, '').replace(/\s+/g, ' ').trim();
+  const clean = text
+    .replace(/^\/\w+\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!clean) return 'New desk note';
   return clean.length > 52 ? `${clean.slice(0, 52)}…` : clean;
 }

@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS messages (
   session_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
-  skills_json TEXT NOT NULL DEFAULT '[]',
+  tools_json TEXT NOT NULL DEFAULT '[]',
   provider TEXT,
   model TEXT,
   created_at TEXT NOT NULL,
@@ -88,11 +88,11 @@ CREATE TABLE IF NOT EXISTS heartbeat_jobs (
   last_result TEXT
 );
 
-CREATE TABLE IF NOT EXISTS skill_runs (
+CREATE TABLE IF NOT EXISTS tool_runs (
   id TEXT PRIMARY KEY,
   session_id TEXT,
   trip_id TEXT,
-  skill TEXT NOT NULL,
+  tool TEXT NOT NULL,
   ok INTEGER NOT NULL,
   summary TEXT NOT NULL,
   created_at TEXT NOT NULL

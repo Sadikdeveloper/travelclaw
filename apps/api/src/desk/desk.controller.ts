@@ -7,7 +7,7 @@ import { HealthService } from '../health/health.service';
 import { HeartbeatService } from '../heartbeat/heartbeat.service';
 import { MemoryService } from '../memory/memory.service';
 import { SessionsService } from '../sessions/sessions.service';
-import { SkillsService } from '../skills/skills.service';
+import { ToolsService } from '../tools/tools.service';
 import { TripsService } from '../trips/trips.service';
 
 @ApiTags('desk')
@@ -19,7 +19,7 @@ export class DeskController {
     private readonly trips: TripsService,
     private readonly sessions: SessionsService,
     private readonly heartbeats: HeartbeatService,
-    private readonly skills: SkillsService,
+    private readonly tools: ToolsService,
     private readonly channels: ChannelsService,
     private readonly memory: MemoryService,
   ) {}
@@ -33,7 +33,7 @@ export class DeskController {
       trips: this.trips.list(),
       sessions: this.sessions.list(),
       heartbeats: this.heartbeats.list(),
-      skills: this.skills.list(),
+      tools: this.tools.list(),
       channels: this.channels.list(),
       memoryCount: this.memory.list().length,
     };

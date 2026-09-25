@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { inclusiveDayCount } from './dates';
-import { parseSkillMarkdown } from './skill-doc';
 import {
   buildOutline,
   buildPackingList,
   estimateBudget,
-  routeSkills,
+  routeTools,
   visaNotes,
-} from './skills';
+} from './tools';
 import { completeTurn, mockProvider } from './turn';
 import { assemblePrompt } from './prompt';
 
@@ -68,13 +67,13 @@ describe('packing', () => {
 
 describe('router', () => {
   it('sends a visa question to the checklist, not an outline', () => {
-    const names = routeSkills('Do I need a visa for Japan with a Canadian passport?');
+    const names = routeTools('Do I need a visa for Japan with a Canadian passport?');
     expect(names[0]).toBe('visa.notes');
     expect(names).not.toContain('trip.outline');
   });
 
-  it('caps a planning sentence at three skills', () => {
-    const names = routeSkills(
+  it('caps a planning sentence at three tools', () => {
+    const names = routeTools(
       'Plan 5 days in Lisbon from 2026-10-01, budget for 2 travelers, and suggest places',
     );
     expect(names.length).toBeLessThanOrEqual(3);
@@ -84,7 +83,11 @@ describe('router', () => {
 
 describe('visa notes', () => {
   it('does not claim a nationality can enter', () => {
-    const notes = visaNotes({ destination: 'Japan', passportCountry: 'Canada', interests: [] });
+    const notes = visaNotes({
+      destination: 'Japan',
+      passportCountry: 'Canada',
+      interests: [],
+    });
     expect(notes.disclaimer).toMatch(/not an entry ruling/i);
     expect(notes.checks.join(' ')).not.toMatch(/visa-free/i);
   });
@@ -95,7 +98,13 @@ describe('prompt', () => {
     const prompt = assemblePrompt(
       {
         text: 'hello',
-        persona: { name: 'Marlow', soul: 'Be brief.', identity: '', user: '   ', agents: '' },
+        persona: {
+          name: 'Marlow',
+          soul: 'Be brief.',
+          identity: '',
+          user: '   ',
+          agents: '',
+        },
         memory: [],
         history: [],
       },
@@ -107,7 +116,7 @@ describe('prompt', () => {
 });
 
 describe('completeTurn', () => {
-  it('answers a packing question from skills without a model', async () => {
+  it('answers a packing question from tools without a model', async () => {
     const turn = await completeTurn(
       {
         text: 'What should I pack for Reykjavik for 4 days?',
@@ -115,24 +124,13 @@ describe('completeTurn', () => {
         memory: [],
         history: [],
       },
-      { provider: mockProvider(), ctx: { now: new Date('2026-03-01T00:00:00Z'), network: false } },
+      {
+        provider: mockProvider(),
+        ctx: { now: new Date('2026-03-01T00:00:00Z'), network: false },
+      },
     );
     expect(turn.provider).toBe('mock');
-    expect(turn.skills.some((skill) => skill.name === 'packing.list' && skill.ok)).toBe(true);
+    expect(turn.tools.some((tool) => tool.name === 'packing.list' && tool.ok)).toBe(true);
     expect(turn.reply).toMatch(/windproof/i);
-  });
-});
-
-describe('skill markdown', () => {
-  it('reads triggers', () => {
-    const doc = parseSkillMarkdown(`---
-name: visa.notes
-description: Checklist.
-triggers:
-  - visa
-  - entry
----
-Do not rule.`);
-    expect(doc?.triggers).toEqual(['visa', 'entry']);
   });
 });

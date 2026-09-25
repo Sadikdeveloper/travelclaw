@@ -5,7 +5,7 @@ import { HealthModule } from '../health/health.module';
 import { HeartbeatModule } from '../heartbeat/heartbeat.module';
 import { MemoryModule } from '../memory/memory.module';
 import { SessionsModule } from '../sessions/sessions.module';
-import { SkillsModule } from '../skills/skills.module';
+import { ToolsModule } from '../tools/tools.module';
 import { TripsModule } from '../trips/trips.module';
 import { DeskController } from './desk.controller';
 
@@ -16,7 +16,7 @@ import { DeskController } from './desk.controller';
     TripsModule,
     SessionsModule,
     HeartbeatModule,
-    SkillsModule,
+    ToolsModule,
     ChannelsModule,
     MemoryModule,
   ],

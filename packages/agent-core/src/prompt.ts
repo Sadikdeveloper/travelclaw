@@ -1,8 +1,8 @@
-import type { SkillRunResult, TurnRequest } from './types';
+import type { ToolResult, TurnRequest } from './types';
 
 const EMPTY = /^\s*$/;
 
-export function assemblePrompt(input: TurnRequest, skills: SkillRunResult[]): string {
+export function assemblePrompt(input: TurnRequest, tools: ToolResult[]): string {
   const files = [
     section('Soul', input.persona.soul),
     section('Identity', input.persona.identity),
@@ -13,21 +13,24 @@ export function assemblePrompt(input: TurnRequest, skills: SkillRunResult[]): st
   const trip = input.activeTrip
     ? `Active trip: ${input.activeTrip.title} in ${input.activeTrip.destination}, ${input.activeTrip.startDate} to ${input.activeTrip.endDate}, status ${input.activeTrip.status}.`
     : 'No active trip is open.';
-  const skillBlock = skills.length
-    ? skills
-        .map((skill) => `### ${skill.name} (${skill.ok ? 'ok' : 'needs input'})\n${skill.summary}\n${JSON.stringify(skill.data)}`)
+  const toolBlock = tools.length
+    ? tools
+        .map(
+          (tool) =>
+            `### ${tool.name} (${tool.ok ? 'ok' : 'needs input'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
+        )
         .join('\n\n')
-    : 'No skill ran.';
+    : 'No tool ran.';
 
   return [
     `You are ${input.persona.name}, answering inside TravelClaw.`,
-    'Lead with skill results when they exist. Do not contradict them. Do not add prices, weather numbers, or entry rulings that are not in those results.',
+    'Lead with tool results when they exist. Do not contradict them. Do not add prices, weather numbers, or entry rulings that are not in those results.',
     'Never say a flight, room, or ticket is booked or available.',
     ...files,
     section('Memory', memory.join('\n')),
     trip,
-    'Skill results for this turn:',
-    skillBlock,
+    'Tool results for this turn:',
+    toolBlock,
   ]
     .filter(Boolean)
     .join('\n\n');

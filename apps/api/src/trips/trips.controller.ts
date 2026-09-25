@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   createTripSchema,
@@ -36,7 +45,10 @@ export class TripsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update trip fields or status' })
-  update(@Param('id') id: string, @Body(new ZodValidationPipe(updateTripSchema)) body: UpdateTripInput) {
+  update(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(updateTripSchema)) body: UpdateTripInput,
+  ) {
     return this.trips.update(id, body);
   }
 
@@ -48,8 +60,11 @@ export class TripsController {
   }
 
   @Post(':id/plan')
-  @ApiOperation({ summary: 'Replace itinerary days from the outline skill' })
-  plan(@Param('id') id: string, @Body(new ZodValidationPipe(planTripSchema)) body: PlanTripInput) {
+  @ApiOperation({ summary: 'Replace itinerary days from the outline tool' })
+  plan(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(planTripSchema)) body: PlanTripInput,
+  ) {
     return this.trips.plan(id, body);
   }
 }

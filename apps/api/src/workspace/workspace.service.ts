@@ -1,10 +1,20 @@
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { workspaceFileSchema, type WorkspaceFileName, type WorkspaceFiles } from '@travelclaw/shared';
+import {
+  workspaceFileSchema,
+  type WorkspaceFileName,
+  type WorkspaceFiles,
+} from '@travelclaw/shared';
 import { loadConfig } from '../config';
 
-const FILES: WorkspaceFileName[] = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'MEMORY.md'];
+const FILES: WorkspaceFileName[] = [
+  'SOUL.md',
+  'IDENTITY.md',
+  'USER.md',
+  'AGENTS.md',
+  'MEMORY.md',
+];
 
 const FALLBACK: Record<WorkspaceFileName, string> = {
   'SOUL.md': '# Soul\n\nYou are Marlow. Be specific. Never claim a booking.\n',
@@ -56,7 +66,10 @@ export class WorkspaceService implements OnModuleInit {
   write(file: WorkspaceFileName, content: string) {
     const parsed = workspaceFileSchema.safeParse(file);
     if (!parsed.success) throw new BadRequestException('That file is not editable');
-    writeFileSync(this.resolveFile(parsed.data), content.endsWith('\n') ? content : `${content}\n`);
+    writeFileSync(
+      this.resolveFile(parsed.data),
+      content.endsWith('\n') ? content : `${content}\n`,
+    );
     return this.readFiles();
   }
 
@@ -73,7 +86,9 @@ export class WorkspaceService implements OnModuleInit {
   }
 
   identityField(label: string): string | undefined {
-    return new RegExp(`^- ${label}:\\s*(.+)$`, 'm').exec(this.read('IDENTITY.md'))?.[1]?.trim();
+    return new RegExp(`^- ${label}:\\s*(.+)$`, 'm')
+      .exec(this.read('IDENTITY.md'))?.[1]
+      ?.trim();
   }
 
   private resolveFile(file: WorkspaceFileName): string {

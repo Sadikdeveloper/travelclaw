@@ -1,25 +1,22 @@
 export { parseIsoDate, addDays, eachDate, inclusiveDayCount } from './dates';
 export { DESTINATIONS, findDestination, findDestinationByName } from './destinations';
 export { extractHints } from './extract';
-export { parseSkillMarkdown } from './skill-doc';
 export {
-  BUNDLED_SKILLS,
+  BUNDLED_TOOLS,
   buildOutline,
   buildPackingList,
   convertCurrency,
-  defaultSkillDocs,
   estimateBudget,
-  mergeSkillDocs,
   rememberFromText,
-  routeSkills,
-  runSkills,
+  routeTools,
+  runTools,
   suggestPlaces,
   visaNotes,
   weatherOutlook,
-} from './skills';
+} from './tools';
 export { assemblePrompt } from './prompt';
 export { renderFallback } from './reply';
-export { completeTurn, formatSkillList, mockProvider, parseCommand } from './turn';
+export { completeTurn, formatToolList, mockProvider, parseCommand } from './turn';
 export type {
   ActiveTripHint,
   BudgetData,
@@ -33,9 +30,9 @@ export type {
   PersonaBundle,
   PlacesData,
   RememberData,
-  SkillContext,
-  SkillDoc,
-  SkillRunResult,
+  ToolContext,
+  ToolResult,
+  ToolTrace,
   TripHints,
   TurnRequest,
   TurnResult,

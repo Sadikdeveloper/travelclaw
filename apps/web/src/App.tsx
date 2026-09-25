@@ -6,7 +6,7 @@ import { AgentsPage } from './pages/AgentsPage';
 import { ChatPage } from './pages/ChatPage';
 import { DeskPage } from './pages/DeskPage';
 import { MemoryPage } from './pages/MemoryPage';
-import { SkillsPage } from './pages/SkillsPage';
+import { ToolsPage } from './pages/ToolsPage';
 import { TripPage } from './pages/TripPage';
 import { TripsPage } from './pages/TripsPage';
 
@@ -38,7 +38,7 @@ export function App() {
           <Route path="chat/:sessionId" element={<ChatPage />} />
           <Route path="trips" element={<TripsPage />} />
           <Route path="trips/:tripId" element={<TripPage />} />
-          <Route path="skills" element={<SkillsPage />} />
+          <Route path="tools" element={<ToolsPage />} />
           <Route path="memory" element={<MemoryPage />} />
           <Route path="agents" element={<AgentsPage />} />
           <Route path="*" element={<Missing />} />

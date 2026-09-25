@@ -1,5 +1,14 @@
-import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { DEFAULT_AGENT_ID, type AgentRecord, type CreateAgentInput } from '@travelclaw/shared';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
+import {
+  DEFAULT_AGENT_ID,
+  type AgentRecord,
+  type CreateAgentInput,
+} from '@travelclaw/shared';
 import { nowIso, slug } from '../common/util';
 import { loadConfig } from '../config';
 import { DatabaseService } from '../db/database.service';
@@ -43,7 +52,9 @@ export class AgentsService implements OnModuleInit {
   }
 
   list(): AgentRecord[] {
-    return this.db.all<AgentRow>('SELECT * FROM agents ORDER BY is_default DESC, name ASC').map(mapAgent);
+    return this.db
+      .all<AgentRow>('SELECT * FROM agents ORDER BY is_default DESC, name ASC')
+      .map(mapAgent);
   }
 
   get(id: string): AgentRecord {

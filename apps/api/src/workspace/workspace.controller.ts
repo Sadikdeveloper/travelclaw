@@ -17,7 +17,13 @@ export class WorkspaceController {
 
   @Patch()
   @ApiOperation({ summary: 'Replace one allowlisted persona file' })
-  update(@Body(new ZodValidationPipe(updateWorkspaceSchema)) body: { file: 'SOUL.md' | 'IDENTITY.md' | 'USER.md' | 'AGENTS.md' | 'MEMORY.md'; content: string }) {
+  update(
+    @Body(new ZodValidationPipe(updateWorkspaceSchema))
+    body: {
+      file: 'SOUL.md' | 'IDENTITY.md' | 'USER.md' | 'AGENTS.md' | 'MEMORY.md';
+      content: string;
+    },
+  ) {
     return this.workspace.write(body.file, body.content);
   }
 }

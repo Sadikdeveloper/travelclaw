@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { buildOutline, type OutlineData } from '@travelclaw/agent-core';
 import type {
   CreateTripInput,
@@ -72,7 +77,9 @@ export class TripsService implements OnModuleInit {
   }
 
   list(): TripRecord[] {
-    return this.db.all<TripRow>('SELECT * FROM trips ORDER BY start_date ASC').map((row) => this.hydrate(row, false));
+    return this.db
+      .all<TripRow>('SELECT * FROM trips ORDER BY start_date ASC')
+      .map((row) => this.hydrate(row, false));
   }
 
   upcoming(withinDays: number): TripRecord[] {
@@ -135,7 +142,8 @@ export class TripsService implements OnModuleInit {
     const current = this.get(id);
     const startDate = input.startDate || current.startDate;
     const endDate = input.endDate || current.endDate;
-    if (endDate < startDate) throw new BadRequestException('endDate must be on or after startDate');
+    if (endDate < startDate)
+      throw new BadRequestException('endDate must be on or after startDate');
     this.db.run(
       `UPDATE trips SET title = ?, destination = ?, origin = ?, start_date = ?, end_date = ?,
         travelers = ?, budget_cents = ?, currency = ?, pace = ?, status = ?, interests_json = ?,
@@ -175,10 +183,12 @@ export class TripsService implements OnModuleInit {
       interests: input.interests ?? trip.interests,
     });
     if (!outline) {
-      throw new BadRequestException('Could not outline that range. Keep it to 18 days and use YYYY-MM-DD.');
+      throw new BadRequestException(
+        'Could not outline that range. Keep it to 18 days and use YYYY-MM-DD.',
+      );
     }
     this.replaceDays(id, outline);
-    this.recordRun(id, 'trip.outline', true, outline.days.length + ' days outlined');
+    this.recordRun(id, 'trip.outline', true, `${outline.days.length} days outlined`);
     return this.update(id, {
       status: trip.status === 'draft' ? 'planning' : trip.status,
       pace: outline.pace,
@@ -186,13 +196,20 @@ export class TripsService implements OnModuleInit {
     });
   }
 
-  createFromOutline(agentId: string, outline: OutlineData, extras?: { travelers?: number; origin?: string }): TripRecord {
+  createFromOutline(
+    agentId: string,
+    outline: OutlineData,
+    extras?: { travelers?: number; origin?: string },
+  ): TripRecord {
     const trip = this.create({
       agentId,
       destination: outline.destination,
       origin: extras?.origin,
       startDate: outline.days[0]?.date || new Date().toISOString().slice(0, 10),
-      endDate: outline.days.at(-1)?.date || outline.days[0]?.date || new Date().toISOString().slice(0, 10),
+      endDate:
+        outline.days.at(-1)?.date ||
+        outline.days[0]?.date ||
+        new Date().toISOString().slice(0, 10),
       travelers: extras?.travelers ?? 1,
       pace: outline.pace,
       currency: 'USD',
@@ -222,13 +239,13 @@ export class TripsService implements OnModuleInit {
     });
   }
 
-  private recordRun(tripId: string, skill: string, ok: boolean, summary: string) {
+  private recordRun(tripId: string, tool: string, ok: boolean, summary: string) {
     this.db.run(
-      `INSERT INTO skill_runs (id, session_id, trip_id, skill, ok, summary, created_at)
+      `INSERT INTO tool_runs (id, session_id, trip_id, tool, ok, summary, created_at)
        VALUES (?, NULL, ?, ?, ?, ?, ?)`,
       newId(),
       tripId,
-      skill,
+      tool,
       ok ? 1 : 0,
       summary,
       nowIso(),
@@ -260,7 +277,10 @@ export class TripsService implements OnModuleInit {
 
   private days(tripId: string): ItineraryDayRecord[] {
     return this.db
-      .all<DayRow>('SELECT * FROM itinerary_days WHERE trip_id = ? ORDER BY day_index ASC', tripId)
+      .all<DayRow>(
+        'SELECT * FROM itinerary_days WHERE trip_id = ? ORDER BY day_index ASC',
+        tripId,
+      )
       .map((row) => ({
         id: row.id,
         tripId: row.trip_id,

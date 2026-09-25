@@ -1,4 +1,9 @@
-import { OnGatewayConnection, OnGatewayInit, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import {
+  OnGatewayConnection,
+  OnGatewayInit,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { EventsService } from '../events/events.service';
 
@@ -10,7 +15,9 @@ export class DeskGateway implements OnGatewayInit, OnGatewayConnection {
   constructor(private readonly events: EventsService) {}
 
   afterInit() {
-    this.events.on('chat.completed', (payload) => this.server.emit('chat.completed', payload));
+    this.events.on('chat.completed', (payload) =>
+      this.server.emit('chat.completed', payload),
+    );
     this.events.on('heartbeat', (payload) => this.server.emit('heartbeat', payload));
   }
 

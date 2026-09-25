@@ -58,10 +58,13 @@ export class ModelService {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const text = body.choices?.[0]?.message?.content;
-      if (!text) return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
+      if (!text)
+        return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
       return { text, provider: 'openai', model: config.modelName };
     } catch (error) {
-      this.logger.warn(`Model call failed; using desk rendering (${error instanceof Error ? error.message : 'error'})`);
+      this.logger.warn(
+        `Model call failed; using desk rendering (${error instanceof Error ? error.message : 'error'})`,
+      );
       return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
     } finally {
       clearTimeout(timer);

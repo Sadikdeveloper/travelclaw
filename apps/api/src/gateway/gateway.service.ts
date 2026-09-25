@@ -7,7 +7,7 @@ import { AgentsService } from '../agents/agents.service';
 import { MemoryService } from '../memory/memory.service';
 import { ModelService } from '../models/model.service';
 import { SessionsService } from '../sessions/sessions.service';
-import { SkillsService } from '../skills/skills.service';
+import { ToolsService } from '../tools/tools.service';
 import { TripsService } from '../trips/trips.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 
@@ -20,7 +20,7 @@ export class GatewayService {
     private readonly sessions: SessionsService,
     private readonly memory: MemoryService,
     private readonly trips: TripsService,
-    private readonly skills: SkillsService,
+    private readonly tools: ToolsService,
     private readonly workspace: WorkspaceService,
     private readonly models: ModelService,
     private readonly events: EventsService,
@@ -46,7 +46,7 @@ export class GatewayService {
       const reset = this.sessions.reset(session.id);
       const message = this.sessions.messages(reset.id).at(-1);
       if (!message) throw new Error('Reset did not leave a note');
-      return { session: reset, message, skills: [], provider: 'desk', model: 'command' };
+      return { session: reset, message, tools: [], provider: 'desk', model: 'command' };
     }
 
     this.sessions.append(session.id, 'user', input.content);
@@ -75,7 +75,6 @@ export class GatewayService {
               status: active.status,
             }
           : null,
-        skillDocs: this.skills.docsForTurn(),
       },
       {
         provider: this.models.provider(),
@@ -86,7 +85,9 @@ export class GatewayService {
     if (turn.remembered) this.memory.remember(agent.id, turn.remembered);
 
     let reply = turn.reply;
-    const outline = turn.skillResults.find((result) => result.name === 'trip.outline' && result.ok);
+    const outline = turn.toolResults.find(
+      (result) => result.name === 'trip.outline' && result.ok,
+    );
     if (outline && wantsSavedTrip(input.content)) {
       const hints = extractHints(input.content);
       const saved = this.trips.createFromOutline(agent.id, outline.data as OutlineData, {
@@ -96,28 +97,28 @@ export class GatewayService {
       reply = `${reply}\n\nSaved as a draft trip: ${saved.title}.`;
     }
 
-    for (const skill of turn.skills) {
-      this.skills.record({
+    for (const tool of turn.tools) {
+      this.tools.record({
         sessionId: session.id,
-        skill: skill.name,
-        ok: skill.ok,
-        summary: skill.summary,
+        tool: tool.name,
+        ok: tool.ok,
+        summary: tool.summary,
       });
     }
 
-    const message = this.sessions.append(session.id, 'assistant', reply, turn.skills, {
+    const message = this.sessions.append(session.id, 'assistant', reply, turn.tools, {
       provider: turn.provider,
       model: turn.model,
     });
     const fresh = this.sessions.get(session.id);
     this.events.emit('chat.completed', { sessionId: fresh.id, messageId: message.id });
     this.logger.log(
-      `${fresh.key} skills=${turn.skills.map((skill) => skill.name).join(',') || 'none'} via ${turn.provider}`,
+      `${fresh.key} tools=${turn.tools.map((tool) => tool.name).join(',') || 'none'} via ${turn.provider}`,
     );
     return {
       session: fresh,
       message,
-      skills: turn.skills,
+      tools: turn.tools,
       provider: turn.provider,
       model: turn.model,
     };
