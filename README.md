@@ -1,6 +1,6 @@
 # TravelClaw
 
-A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the tools that outline a trip. The control UI is where you talk to the desk.
+A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the tools that outline a trip. The traveler surface is a chat. The sidebar lists chats on this desk. Sign-in is not built yet, so those chats are not tied to an account.
 
 The layout follows the OpenClaw monorepo idea: a gateway, workspace markdown, tools, channel slots, and a web control surface, managed with pnpm. TravelClaw is not a fork of OpenClaw and is not affiliated with it. The gateway is NestJS. The control UI is React on Vite. Markdown skill files are not part of this version.
 
@@ -45,7 +45,7 @@ New work should follow `docs/roadmap.md`:
 3. Gateway
 4. Control UI
 
-That order is already how this repo is built. Pick the next unchecked roadmap item rather than starting a second framework inside the UI.
+That order is already how this repo is built. The remaining work is the unchecked list in `docs/roadmap.md`. The first open item is accounts.
 
 ## Scripts
 
