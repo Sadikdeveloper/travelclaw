@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Self-hosted travel desk gateway. One process for sessions, tools, and memory.",
+  "author": "Sadikdeveloper (https://github.com/Sadikdeveloper)",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=22.13"

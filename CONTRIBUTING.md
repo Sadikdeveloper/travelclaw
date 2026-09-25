@@ -1,5 +1,7 @@
 # Contributing
 
+Author and only contributor: [Sadikdeveloper](https://github.com/Sadikdeveloper).
+
 TravelClaw is a pnpm workspace. Plain `npm install` at the root will not wire the packages correctly.
 
 ## Setup

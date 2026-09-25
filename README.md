@@ -1,67 +1,105 @@
 # TravelClaw
 
-A self-hosted travel desk. One gateway holds the session, the traveler's memory, and the tools that outline a trip. The traveler surface is a chat. The sidebar lists chats on this desk. Sign-in is not built yet, so those chats are not tied to an account.
+A pluggable monolith. One NestJS process is the gateway. The Vite app is the control UI.
 
-The layout follows the OpenClaw monorepo idea: a gateway, workspace markdown, tools, channel slots, and a web control surface, managed with pnpm. TravelClaw is not a fork of OpenClaw and is not affiliated with it. The gateway is NestJS. The control UI is React on Vite. Markdown skill files are not part of this version.
+[Architecture](docs/architecture.md)
 
-It does not book flights or rooms. Estimates are estimates. Visa notes are a checklist, not a ruling.
+This page restates [docs/architecture.md](docs/architecture.md). If the two disagree, the architecture document wins.
 
-## Workspace
+Shared packages hold the contracts and the tool engine so both can be tested without HTTP.
 
-```text
-apps/api            NestJS gateway
-apps/web            Vite control UI
-packages/shared     Session keys, zod schemas, records
-packages/agent-core Tool engine and turn loop
-workspace/          SOUL, identity, traveler, desk rules, memory
-docs/               Architecture, roadmap, extension guides
+|                                    |                                                                                                                                                                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **One gateway**                    | The gateway owns SQLite, HTTP, WebSocket, and scheduling.                                                                                                                                                                                            |
+| **Control UI**                     | The Vite app talks to the gateway with relative `/api` URLs.                                                                                                                                                                                         |
+| **Tools, then the model**          | An ordinary turn routes to at most three tools. They are TypeScript functions, not markdown. They run before the model so a missing key cannot invent prices, weather, or a booking.                                                                 |
+| **Flight desk and Stay desk**      | A flight or hotel request does not go through that tool list. It wakes one or two desks. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything.                                           |
+| **What the traveler sees**         | A chat and a sidebar of their chats. The control pages are not the product. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them.                                                                 |
+| **Memory you can read**            | `MEMORY.md` is the human-readable copy. SQLite is the index. Kinds are `preference`, `fact`, and `decision`.                                                                                                                                         |
+| **Heartbeat**                      | A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips starting within 14 days. It does not send a chat message. `NO_REPLY` means nothing needed attention.                                                                |
+| **Channels as an explicit slot**   | Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed. |
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  UI["Control UI"] --> GW["Gateway"]
+  EXT["Channel extensions"] --> GW
+  GW --> LOOP["Turn loop"]
+  LOOP --> TOOLS["Tools"]
+  LOOP --> MODEL["Model provider"]
+  TOOLS --> TRIPS["Trips"]
+  TOOLS --> MEM["Memory"]
+  GW --> SES["Sessions"]
+  HB["Heartbeat"] --> TRIPS
 ```
 
-## Quick start
+| Path                  | Role                                                         |
+| --------------------- | ------------------------------------------------------------ |
+| `apps/api`            | Gateway. Owns SQLite, HTTP, WebSocket, scheduling.           |
+| `apps/web`            | Control UI. Talks to the gateway with relative `/api` URLs.  |
+| `packages/shared`     | Wire types and zod schemas. Safe to import from the browser. |
+| `packages/agent-core` | Prompt assembly, routing, tools. No Nest, no database.       |
+| `workspace/`          | Persona files the gateway reads on every turn.               |
+| `extensions/`         | Reserved. Not a workspace glob until a real package exists.  |
 
-```bash
-corepack enable
-pnpm install
-cp .env.example .env
-pnpm dev
-```
+## Turns
 
-Open http://localhost:5173. The UI proxies API calls, so the browser does not talk to a hardcoded port.
+1. Persist the traveler message.
+2. Load persona files, recent memory, and the active trip.
+3. Route to at most three tools from triggers on the tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
+4. Run those tools. They are TypeScript functions, not markdown.
+5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
+6. Persist the assistant message and emit `chat.completed`.
 
-Docker serves both from one process, still without auth:
+A provider hold is a later step, and only after the traveler accepts a real offer.
 
-```bash
-docker compose up --build
-```
+Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
-Set `TRAVELCLAW_MODEL_PROVIDER=openai` and `TRAVELCLAW_MODEL_API_KEY` if you want a live model to narrate tool results. Without a key, the desk still answers from the tools.
+## Sessions
 
-## Build order
+A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer `operator` unless the UI opens a new chat, which gets its own peer id. Group-style channels should use the room id as the peer so histories do not collapse.
 
-New work should follow `docs/roadmap.md`:
+## Channels
 
-1. Shared contracts
-2. Agent core and tools
-3. Gateway
-4. Control UI
+`ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram and Discord stay `not_configured` until an adapter is written. Registration lives in `ChannelsService`.
 
-That order is already how this repo is built. The remaining work is the unchecked list in `docs/roadmap.md`. The first open item is accounts.
+## Memory
 
-## Scripts
+On boot, new bullets in `MEMORY.md` are imported. Remembering from chat appends a bullet and a row.
 
-| Command         | What it does                          |
-| --------------- | ------------------------------------- |
-| `pnpm dev`      | Gateway on 3000, control UI on 5173   |
-| `pnpm test`     | Shared, agent-core, and gateway tests |
-| `pnpm build`    | Compile packages, gateway, and UI     |
-| `pnpm db:reset` | Delete the local SQLite file          |
+## Heartbeat
 
-Production build serves the UI from the gateway when `apps/web/dist` exists.
+The result is stored on the job and shown on the desk. It does not send a chat message.
 
-## Contributing
+## Data
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Tool and channel guides are in `docs/`.
+Node's built-in `node:sqlite` keeps the gateway free of native addons. The API is still marked experimental by Node, so the start script silences that warning. Schema is applied on boot from `apps/api/src/db/schema.ts`. There is no migration framework yet. If you change columns, delete `data/travelclaw.db` or write a small versioned statement.
+
+## Control UI
+
+`pnpm build` emits `apps/web/dist`. The gateway serves it when that folder exists. In development, Vite proxies `/api`, `/health`, `/docs`, and `/socket.io` to port 3000. The browser never calls localhost.
+
+Sign-in (email, then Google) is the next step, so chats can belong to an account.
+
+## Documentation
+
+| Section | What's covered |
+| --- | --- |
+| [Why it is split this way](docs/architecture.md#why-it-is-split-this-way) | Gateway, control UI, shared contracts, tool engine, workspace, extensions |
+| [Session keys](docs/architecture.md#session-keys) | `agent:<agentId>:<channel>:<peerId>` |
+| [Turns](docs/architecture.md#turns) | Persist, route, run tools, narrate, emit `chat.completed` |
+| [What the traveler sees](docs/architecture.md#what-the-traveler-sees) | Chat and sidebar. Tools stay internal. |
+| [Channels](docs/architecture.md#channels) | Webchat built in. Telegram and Discord not configured. |
+| [Memory](docs/architecture.md#memory) | `MEMORY.md` plus the SQLite index |
+| [Heartbeat](docs/architecture.md#heartbeat) | One-minute cron, `departure-watch`, `NO_REPLY` |
+| [Data](docs/architecture.md#data) | `node:sqlite`, schema on boot, no migration framework |
+| [Control UI in production](docs/architecture.md#control-ui-in-production) | Gateway serves `apps/web/dist`. Vite proxies in development. |
+
+## Author
+
+[Sadikdeveloper](https://github.com/Sadikdeveloper) is the author and the only contributor.
 
 ## License
 
-MIT
+[MIT](LICENSE). Copyright (c) 2026 Sadikdeveloper.
