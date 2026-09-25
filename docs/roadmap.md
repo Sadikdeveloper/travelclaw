@@ -28,16 +28,23 @@ This is an independent travel desk inspired by the OpenClaw monorepo idea (one g
 
 ## Next, in this order
 
-1. **Pairing auth.** The gateway has no login. Add a device token for non-loopback clients before any public deploy.
-2. **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.
-3. **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`.
-4. **Model-selected tools.** Tools currently run from a deterministic router, then the model narrates. Let an OpenAI-compatible model request a tool, and keep the router as fallback.
-5. **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
-6. **Discord extension.** Same contract as Telegram.
-7. **iCal export** for a planned trip.
-8. **Map view** of itinerary anchors. Static coordinates first, no tracking.
-9. **Flight and stay search tool** behind an explicit provider key. Never imply a booking succeeded.
-10. **Plugin package autoload** under `extensions/*`, off by default, with a hash allowlist.
+The traveler product is a chat. Tools stay internal. Do these before the old control-plane list.
+
+1. **Accounts.** Email register and sign-in first. Google sign-in second, behind a client id the operator sets. Chats belong to that account.
+2. **Model-called tools.** We keep adding the tools. An OpenAI-compatible model requests one. The router stays as fallback. Users do not add tools in this step.
+3. **User-added connectors.** Only after built-in tools are called by the model. A connector is a key the traveler provides, not a new language.
+4. **Flight and stay search** behind an explicit provider key. The desks already ask yes / no / still working. A provider may return offers. It must not claim a hold until the provider says one exists. No card storage.
+
+Then, still in order:
+
+5. **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
+6. **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.
+7. **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`.
+8. **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
+9. **Discord extension.** Same contract as Telegram.
+10. **iCal export** for a planned trip.
+11. **Map view** of itinerary anchors. Static coordinates first, no tracking.
+12. **Plugin package autoload** under `extensions/*`, off by default, with a hash allowlist.
 
 ## Not in scope
 

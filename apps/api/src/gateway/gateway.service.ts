@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { completeTurn, extractHints, type OutlineData } from '@travelclaw/agent-core';
+import {
+  completeTurn,
+  deskName,
+  extractHints,
+  planAgentDesks,
+  type OutlineData,
+} from '@travelclaw/agent-core';
 import { WEBCHAT_CHANNEL, type ChatResponse } from '@travelclaw/shared';
 import { loadConfig } from '../config';
 import { EventsService } from '../events/events.service';
@@ -7,6 +13,7 @@ import { AgentsService } from '../agents/agents.service';
 import { MemoryService } from '../memory/memory.service';
 import { ModelService } from '../models/model.service';
 import { SessionsService } from '../sessions/sessions.service';
+import { TasksService } from '../tasks/tasks.service';
 import { ToolsService } from '../tools/tools.service';
 import { TripsService } from '../trips/trips.service';
 import { WorkspaceService } from '../workspace/workspace.service';
@@ -21,6 +28,7 @@ export class GatewayService {
     private readonly memory: MemoryService,
     private readonly trips: TripsService,
     private readonly tools: ToolsService,
+    private readonly tasks: TasksService,
     private readonly workspace: WorkspaceService,
     private readonly models: ModelService,
     private readonly events: EventsService,
@@ -50,6 +58,9 @@ export class GatewayService {
     }
 
     this.sessions.append(session.id, 'user', input.content);
+    const desks = planAgentDesks(input.content);
+    if (desks.length) return this.startDesks(session.id, input.content, desks);
+
     const history = this.sessions.recentHistory(session.id).slice(0, -1);
     const files = this.workspace.readFiles();
     const active = this.trips.latestActive(agent.id);
@@ -122,6 +133,38 @@ export class GatewayService {
       provider: turn.provider,
       model: turn.model,
     };
+  }
+
+  private async startDesks(
+    sessionId: string,
+    content: string,
+    desks: Array<'flight' | 'stay'>,
+  ) {
+    const names = desks.map((kind) => deskName(kind));
+    const reply =
+      names.length === 2
+        ? 'Flight desk and Stay desk are on this. I will ask when each one finishes. Nothing is booked.'
+        : `${names[0]} is on this. I will ask when it finishes. Nothing is booked.`;
+    const message = this.sessions.append(sessionId, 'assistant', reply, [], {
+      provider: 'desk',
+      model: 'agents',
+    });
+    const opened = this.tasks.open({
+      sessionId,
+      messageId: message.id,
+      kinds: desks,
+      request: content,
+    });
+    const delay = loadConfig().taskDelayMs;
+    if (delay > 0) {
+      void this.tasks.schedule(opened);
+    } else {
+      await this.tasks.schedule(opened);
+    }
+    const fresh = this.sessions.get(sessionId);
+    this.events.emit('chat.completed', { sessionId: fresh.id, messageId: message.id });
+    this.logger.log(`${fresh.key} desks=${names.join(',')}`);
+    return { session: fresh, message, tools: [], provider: 'desk', model: 'agents' };
   }
 }
 

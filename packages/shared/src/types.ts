@@ -125,6 +125,23 @@ export interface ToolRunRecord {
   createdAt: string;
 }
 
+export type DeskKind = 'flight' | 'stay';
+export type AgentTaskStatus = 'working' | 'awaiting' | 'accepted' | 'rejected';
+export type TaskDecision = 'complete' | 'no' | 'still_working';
+
+export interface AgentTaskRecord {
+  id: string;
+  sessionId: string;
+  messageId: string | null;
+  kind: DeskKind;
+  agentName: string;
+  status: AgentTaskStatus;
+  summary: string;
+  pass: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatResponse {
   session: SessionRecord;
   message: MessageRecord;

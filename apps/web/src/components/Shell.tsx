@@ -1,21 +1,14 @@
-import type { HealthReport } from '@travelclaw/shared';
-import { BookOpen, Compass, Map, MessageSquare, Sparkles, UserRound } from 'lucide-react';
+import type { HealthReport, SessionRecord } from '@travelclaw/shared';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useLiveRevision } from '../App';
 import { api } from '../api';
 
-const links = [
-  { to: '/', label: 'Desk', icon: Compass, end: true },
-  { to: '/chat', label: 'Chat', icon: MessageSquare, end: false },
-  { to: '/trips', label: 'Trips', icon: Map, end: false },
-  { to: '/tools', label: 'Tools', icon: Sparkles, end: false },
-  { to: '/memory', label: 'Memory', icon: BookOpen, end: false },
-  { to: '/agents', label: 'Agents', icon: UserRound, end: false },
-];
-
 export function Shell() {
+  const revision = useLiveRevision();
   const [health, setHealth] = useState<HealthReport | null>(null);
   const [down, setDown] = useState(false);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
 
   useEffect(() => {
     let stop = false;
@@ -38,6 +31,12 @@ export function Shell() {
     };
   }, []);
 
+  useEffect(() => {
+    api<SessionRecord[]>('/api/sessions')
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, [revision]);
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -45,19 +44,17 @@ export function Shell() {
           <img src="/mark.svg" alt="" />
           <div>
             <strong>TravelClaw</strong>
-            <em>Field desk</em>
+            <em>Your chats</em>
           </div>
         </div>
-        <nav className="nav" aria-label="Desk">
-          {links.map((link) => (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              end={link.end}
-              className={({ isActive }) => (isActive ? 'active' : '')}
-            >
-              <link.icon size={16} aria-hidden="true" />
-              {link.label}
+        <NavLink to="/" end className="btn side-new">
+          New chat
+        </NavLink>
+        <nav className="nav chat-scroll" aria-label="Your chats">
+          {sessions.length === 0 ? <p className="side-empty">No chats yet.</p> : null}
+          {sessions.map((session) => (
+            <NavLink key={session.id} to={`/chat/${session.id}`}>
+              {session.title}
             </NavLink>
           ))}
         </nav>
@@ -66,10 +63,10 @@ export function Shell() {
             <span className={down ? 'dot bad' : 'dot ok'} />
             {down ? 'Gateway quiet' : 'Gateway up'}
           </div>
-          <div>{health ? `${health.model.provider} · ${health.version}` : 'checking'}</div>
-          <a href="/docs" target="_blank" rel="noreferrer">
-            API docs
-          </a>
+          <p className="account-note">
+            Sign-in is next. Email first, then Google. Until then, chats stay on this desk.
+          </p>
+          <div>{health ? health.version : 'checking'}</div>
         </div>
       </aside>
       <main className="canvas">

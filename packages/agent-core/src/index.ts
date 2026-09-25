@@ -1,5 +1,7 @@
 export { parseIsoDate, addDays, eachDate, inclusiveDayCount } from './dates';
 export { DESTINATIONS, findDestination, findDestinationByName } from './destinations';
+export { deskName, planAgentDesks } from './desks';
+export type { DeskKind } from './desks';
 export { extractHints } from './extract';
 export {
   BUNDLED_TOOLS,

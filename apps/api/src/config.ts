@@ -13,6 +13,7 @@ export interface AppConfig {
   modelName: string;
   network: boolean;
   seed: boolean;
+  taskDelayMs: number;
   version: string;
 }
 
@@ -58,6 +59,8 @@ export function loadConfig(
       (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
     network: env.TRAVELCLAW_NETWORK !== '0',
     seed: env.TRAVELCLAW_SEED !== '0',
+    taskDelayMs:
+      env.TRAVELCLAW_TASK_DELAY === '0' ? 0 : Number(env.TRAVELCLAW_TASK_DELAY || 1100),
     version: GATEWAY_VERSION,
   };
 }

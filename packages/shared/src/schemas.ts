@@ -31,6 +31,10 @@ export const createSessionSchema = z.object({
   title: z.string().trim().max(80).optional(),
 });
 
+export const taskDecisionSchema = z.object({
+  decision: z.enum(['complete', 'no', 'still_working']),
+});
+
 export const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(8000),
 });

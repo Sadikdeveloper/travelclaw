@@ -18,6 +18,7 @@ describe('gateway', () => {
     process.env.TRAVELCLAW_SEED = '0';
     process.env.TRAVELCLAW_HEARTBEAT = '0';
     process.env.TRAVELCLAW_MODEL_PROVIDER = 'mock';
+    process.env.TRAVELCLAW_TASK_DELAY = '0';
     delete process.env.TRAVELCLAW_MODEL_API_KEY;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -73,7 +74,38 @@ describe('gateway', () => {
     expect(res.status).toBe(201);
     const memory = await request(app.getHttpServer()).get('/api/memory');
     expect(memory.status).toBe(200);
-    expect(memory.body.some((note: { body: string }) => /trains to taxis/i.test(note.body))).toBe(true);
+    expect(
+      memory.body.some((note: { body: string }) => /trains to taxis/i.test(note.body)),
+    ).toBe(true);
+  });
+
+  it('spins flight and stay desks, then accepts a decision', async () => {
+    const res = await request(app.getHttpServer()).post('/api/chat').send({
+      content: 'Book a flight and a hotel in Lisbon from Lagos on 2026-11-02',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.message.content).toMatch(/Nothing is booked/);
+    const tasks = await request(app.getHttpServer()).get(
+      `/api/sessions/${res.body.session.id}/tasks`,
+    );
+    expect(tasks.status).toBe(200);
+    expect(tasks.body).toHaveLength(2);
+    expect(tasks.body.map((task: { agentName: string }) => task.agentName).sort()).toEqual([
+      'Flight desk',
+      'Stay desk',
+    ]);
+    expect(tasks.body.every((task: { status: string }) => task.status === 'awaiting')).toBe(
+      true,
+    );
+    expect(JSON.stringify(tasks.body)).toMatch(/Nothing was purchased/);
+    expect(JSON.stringify(tasks.body)).not.toMatch(/ticket is booked|room is booked/i);
+
+    const decision = await request(app.getHttpServer())
+      .post(`/api/tasks/${tasks.body[0].id}/decision`)
+      .send({ decision: 'complete' });
+    expect(decision.status).toBe(201);
+    expect(decision.body.status).toBe('accepted');
+    expect(decision.body.summary).toMatch(/Nothing was purchased/);
   });
 
   it('rejects an inverted date range', async () => {

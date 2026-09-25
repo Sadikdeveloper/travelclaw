@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { planAgentDesks } from './desks';
 import { inclusiveDayCount } from './dates';
 import {
   buildOutline,
@@ -62,6 +63,16 @@ describe('packing', () => {
     const list = buildPackingList({ destination: 'Reykjavik', days: 3, interests: [] });
     expect(list.climate).toBe('cold');
     expect(list.items.some((item) => /windproof/i.test(item.name))).toBe(true);
+  });
+});
+
+describe('agent desks', () => {
+  it('wakes flight and stay together, and ignores a packing question', () => {
+    expect(planAgentDesks('Book a flight and a hotel in Lisbon from Lagos')).toEqual([
+      'flight',
+      'stay',
+    ]);
+    expect(planAgentDesks('What should I pack for Reykjavik?')).toEqual([]);
   });
 });
 

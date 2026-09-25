@@ -11,6 +11,7 @@ import { HeartbeatModule } from './heartbeat/heartbeat.module';
 import { MemoryModule } from './memory/memory.module';
 import { ModelsModule } from './models/models.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { TasksModule } from './tasks/tasks.module';
 import { ToolsModule } from './tools/tools.module';
 import { TripsModule } from './trips/trips.module';
 import { WorkspaceModule } from './workspace/workspace.module';
@@ -26,6 +27,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
     SessionsModule,
     TripsModule,
     ToolsModule,
+    TasksModule,
     ChannelsModule,
     ModelsModule,
     HeartbeatModule,

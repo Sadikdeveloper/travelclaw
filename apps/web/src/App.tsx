@@ -4,7 +4,6 @@ import { io } from 'socket.io-client';
 import { Shell } from './components/Shell';
 import { AgentsPage } from './pages/AgentsPage';
 import { ChatPage } from './pages/ChatPage';
-import { DeskPage } from './pages/DeskPage';
 import { MemoryPage } from './pages/MemoryPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { TripPage } from './pages/TripPage';
@@ -23,6 +22,7 @@ export function App() {
     const socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] });
     const bump = () => setRevision((value) => value + 1);
     socket.on('chat.completed', bump);
+    socket.on('task.updated', bump);
     socket.on('heartbeat', bump);
     return () => {
       socket.close();
@@ -33,7 +33,7 @@ export function App() {
     <LiveContext.Provider value={revision}>
       <Routes>
         <Route element={<Shell />}>
-          <Route index element={<DeskPage />} />
+          <Route index element={<ChatPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="chat/:sessionId" element={<ChatPage />} />
           <Route path="trips" element={<TripsPage />} />

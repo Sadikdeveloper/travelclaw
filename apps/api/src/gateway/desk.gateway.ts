@@ -18,6 +18,7 @@ export class DeskGateway implements OnGatewayInit, OnGatewayConnection {
     this.events.on('chat.completed', (payload) =>
       this.server.emit('chat.completed', payload),
     );
+    this.events.on('task.updated', (payload) => this.server.emit('task.updated', payload));
     this.events.on('heartbeat', (payload) => this.server.emit('heartbeat', payload));
   }
 
