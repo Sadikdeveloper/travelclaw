@@ -118,24 +118,24 @@ sits in the middle, and a big one is rationed tighter, because that is roughly w
 costs to run. A signed-in account's allowance is several times a guest's on every model, which
 is the honest answer to "what does signing in get me".
 
-The catalog is built from config. `TRAVELCLAW_MODEL_NAME` is the model a turn runs on when the
-request does not name one, and `TRAVELCLAW_MODELS` lists anything else on offer. A live model
-is only usable with a provider key; without one it still appears in `GET /api/models` with
+The catalog is built from config. `TRAVELCLAW_MODEL_NAME` names the first model on this
+deployment and `TRAVELCLAW_MODELS` adds others; the **desk then picks the strongest of them
+that can actually run**, so listing models is enough to be offered them. A live model is only
+usable with a provider key — without one it still appears in `GET /api/models` with
 `available: false`, so the control UI can show what a key would unlock rather than pretending
-the model is not there. The offline desk model is always offered and never needs a key.
+the model is not there. The offline desk model is always available and never needs a key.
 
-A turn may name its model — `POST /api/chat` and `POST /api/sessions/:id/messages` both take an
-optional `model`. An id this desk does not run, or one it cannot run, is a `400`
-(`model_unknown`, `model_unavailable`) rather than a silent substitution: a traveler who asked
-for a specific model is never served by a different one behind their back. The pace check and
-the turn resolve the model the same way, off the request, so the limit that applied is the
-limit of the model that ran.
+**Nobody chooses a model.** A guest cannot, a signed-in account does not have to, and a turn
+cannot: neither `POST /api/chat` nor `POST /api/sessions/:id/messages` accepts a `model` field
+any more, and a request that sends one is refused with `400 model_selection_unsupported`
+rather than quietly answered by a different model. Guests and signed-in accounts are answered
+by the same model; what separates the tiers is the pace on it. Choosing is a decision for
+later, and the catalog plus the per-model pace are the shape it will need when it comes.
 
-Rate limiting itself is one limiter per tier and model, built lazily from the catalog
+Rate limiting is one limiter per tier and model, built lazily from the catalog
 (`ChatController.limiterFor`), plus one address-wide limiter for guests across all models. The
-429 names the model, the allowance, and what would raise it. A model picker in the control UI
-is the next step and needs nothing new here: the catalog, the per-model pace, and the request
-field are already in place.
+429 names the model it ran out on, the allowance on that model, and what would raise it — for
+a guest, signing in; for an account, waiting. It never reads as a sign-in wall.
 
 A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
 `problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —

@@ -43,8 +43,9 @@ export class GatewayService {
       sessionId?: string;
     },
     userId: string,
-    // Resolved by the caller so the pace check and the turn agree on one model.
-    model: ModelRecord = this.models.resolve(),
+    // Resolved by the caller so the pace check and the turn agree on one model. Nobody
+    // picks it: the desk runs the best model it has, for guests and accounts alike.
+    model: ModelRecord = this.models.best(),
   ): Promise<ChatResponse> {
     const agent = this.agents.resolve(input.agentId);
     const session = input.sessionId

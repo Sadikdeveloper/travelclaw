@@ -1,4 +1,12 @@
-import { Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   chatSchema,
@@ -46,7 +54,8 @@ export class ChatController {
     @CurrentUser() user: UserRecord,
     @Body(new ZodValidationPipe(chatSchema)) body: ChatInput,
   ) {
-    const model = this.models.resolve(body.model);
+    this.refuseModelChoice(req);
+    const model = this.models.best();
     this.checkTurnLimit(req, user, model);
     return this.gateway.handleIncoming(body, user.id, model);
   }
@@ -59,13 +68,29 @@ export class ChatController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(sendMessageSchema)) body: SendMessageInput,
   ) {
-    const model = this.models.resolve(body.model);
+    this.refuseModelChoice(req);
+    const model = this.models.best();
     this.checkTurnLimit(req, user, model);
     return this.gateway.handleIncoming(
       { content: body.content, sessionId: id },
       user.id,
       model,
     );
+  }
+
+  /**
+   * The desk picks the model, for guests and for signed-in accounts alike, so a turn that
+   * asks for one is refused rather than quietly answered by a different model. This is
+   * deliberate until a picker exists; the request field is gone from the schemas with it.
+   */
+  private refuseModelChoice(req: Request): void {
+    const picked = (req.body as { model?: unknown } | undefined)?.model;
+    if (picked === undefined || picked === null) return;
+    throw new BadRequestException({
+      code: 'model_selection_unsupported',
+      message:
+        'The desk chooses its own model — the best one it has — for guests and for signed-in accounts alike.',
+    });
   }
 
   private checkTurnLimit(req: Request, user: UserRecord, model: ModelRecord): void {
@@ -84,8 +109,8 @@ export class ChatController {
     // out and what would raise it, rather than reading a generic refusal.
     throw rateLimited(
       tier === 'guest'
-        ? `Guest chats on ${model.label} are paced at ${allowed} turns every 10 minutes. Wait a few minutes, sign in for a higher limit, or switch to another model.`
-        : `Chats on ${model.label} are paced at ${allowed} turns every 10 minutes. Wait a few minutes, or switch to another model.`,
+        ? `Guest chats on ${model.label} are paced at ${allowed} turns every 10 minutes. Wait a few minutes, or sign in for a higher limit.`
+        : `Chats on ${model.label} are paced at ${allowed} turns every 10 minutes. Wait a few minutes.`,
     );
   }
 
