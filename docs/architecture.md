@@ -98,18 +98,24 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 
 1. Persist the traveler message.
 2. Load persona files, recent memory, and the active trip.
-3. Route to at most three tools from triggers on the tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
-4. Run those tools. They are TypeScript functions, not markdown.
+3. Send the tool catalog to the model and let it ask for the tools it wants. The router also reads the message from triggers on each tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
+4. Run at most three tools, counting model calls and router picks together. A tool both picked runs once. They are TypeScript functions, not markdown.
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
-6. Persist the assistant message and emit `chat.completed`.
+6. Persist the assistant message, with each trace marked `model` or `router`, and emit `chat.completed`.
 
-Tools run before the model so a missing key cannot invent prices, weather, or a booking.
+A tool call is validated against the tool's zod argument schema before it runs. A payload
+that does not match is rejected with a short traveler sentence — never coerced, and never
+a 500. The mock provider has no tool support, so it keeps the router-only path: the same
+message that works with a key works without one, and a missing key cannot invent prices,
+weather, availability, or a booking. The router is also the fallback when a live model
+returns no tool call. Either way the tool result is what the model narrates; a runtime
+error inside a tool becomes a failed result with the desk still speaking, not a dead turn.
 
 A flight or hotel request does not go through that tool list. It wakes one or two desks, Flight and Stay, and the traveler sees those working. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything. A provider hold is a later step, and only after the traveler accepts a real offer.
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key, and that is a later step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 

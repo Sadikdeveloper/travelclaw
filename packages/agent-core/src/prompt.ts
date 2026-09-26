@@ -2,7 +2,11 @@ import type { ToolResult, TurnRequest } from './types';
 
 const EMPTY = /^\s*$/;
 
-export function assemblePrompt(input: TurnRequest, tools: ToolResult[]): string {
+export function assemblePrompt(
+  input: TurnRequest,
+  tools: ToolResult[],
+  options: { toolCalling?: boolean } = {},
+): string {
   const files = [
     section('Soul', input.persona.soul),
     section('Identity', input.persona.identity),
@@ -13,14 +17,16 @@ export function assemblePrompt(input: TurnRequest, tools: ToolResult[]): string 
   const trip = input.activeTrip
     ? `Active trip: ${input.activeTrip.title} in ${input.activeTrip.destination}, ${input.activeTrip.startDate} to ${input.activeTrip.endDate}, status ${input.activeTrip.status}.`
     : 'No active trip is open.';
-  const toolBlock = tools.length
-    ? tools
-        .map(
-          (tool) =>
-            `### ${tool.name} (${tool.ok ? 'ok' : 'needs input'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
-        )
-        .join('\n\n')
-    : 'No tool ran.';
+  const toolBlock = options.toolCalling
+    ? 'No tool has run yet. Call the tools that fit this request, then wait for their results. Never invent a price, a weather number, an availability, or an entry ruling.'
+    : tools.length
+      ? tools
+          .map(
+            (tool) =>
+              `### ${tool.name} (${tool.ok ? 'ok' : 'needs input'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
+          )
+          .join('\n\n')
+      : 'No tool ran.';
 
   return [
     `You are ${input.persona.name}, answering inside TravelClaw.`,
@@ -29,7 +35,7 @@ export function assemblePrompt(input: TurnRequest, tools: ToolResult[]): string 
     ...files,
     section('Memory', memory.join('\n')),
     trip,
-    'Tool results for this turn:',
+    options.toolCalling ? 'Tools for this turn:' : 'Tool results for this turn:',
     toolBlock,
   ]
     .filter(Boolean)
