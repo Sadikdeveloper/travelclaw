@@ -133,6 +133,11 @@ export class GatewayService {
       messageId: message.id,
       userId,
     });
+    for (const result of turn.toolResults) {
+      // A rejected or failed tool call is a warning for the operator, never copy
+      // the traveler sees. The traveler gets the summary, or the model's sentence.
+      if (result.warning) this.logger.warn(`${fresh.key} ${result.name}: ${result.warning}`);
+    }
     this.logger.log(
       `${fresh.key} tools=${turn.tools.map((tool) => tool.name).join(',') || 'none'} via ${turn.provider}`,
     );

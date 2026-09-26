@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mockProvider, type HistoryTurn, type ModelProvider } from '@travelclaw/agent-core';
+import { mockProvider, type ModelProvider } from '@travelclaw/agent-core';
 import { loadConfig } from '../config';
+import { openAiRequestBody, parseOpenAiMessage } from './openai';
+
+/** What the desk rendering says when the live model is unavailable. */
+const DESK = { provider: 'mock', model: 'travelclaw-local' } as const;
 
 @Injectable()
 export class ModelService {
@@ -20,6 +24,8 @@ export class ModelService {
       return {
         id: 'openai',
         model: config.modelName,
+        // The live model may ask for tools. The mock cannot, so it keeps the router.
+        usesTools: true,
         complete: (input) => this.completeOpenAi(input, config),
       };
     }
@@ -27,7 +33,7 @@ export class ModelService {
   }
 
   private async completeOpenAi(
-    input: { system: string; history: HistoryTurn[]; user: string; fallback: string },
+    input: Parameters<ModelProvider['complete']>[0],
     config: ReturnType<typeof loadConfig>,
   ) {
     const controller = new AbortController();
@@ -40,32 +46,35 @@ export class ModelService {
           Authorization: `Bearer ${config.modelApiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: config.modelName,
-          temperature: 0.3,
-          messages: [
-            { role: 'system', content: input.system },
-            ...input.history.map((turn) => ({ role: turn.role, content: turn.content })),
-            { role: 'user', content: input.user },
-          ],
-        }),
+        body: JSON.stringify(
+          openAiRequestBody({
+            model: config.modelName,
+            system: input.system,
+            history: input.history,
+            user: input.user,
+            tools: input.tools,
+          }),
+        ),
       });
       if (!response.ok) {
         this.logger.warn(`Model HTTP ${response.status}; using desk rendering`);
-        return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
+        return { text: input.fallback, ...DESK };
       }
-      const body = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+      const { text, toolCalls } = parseOpenAiMessage(await response.json());
+      if (!text && !toolCalls.length) {
+        return { text: input.fallback, ...DESK };
+      }
+      return {
+        text,
+        provider: 'openai',
+        model: config.modelName,
+        ...(toolCalls.length ? { toolCalls } : {}),
       };
-      const text = body.choices?.[0]?.message?.content;
-      if (!text)
-        return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
-      return { text, provider: 'openai', model: config.modelName };
     } catch (error) {
       this.logger.warn(
         `Model call failed; using desk rendering (${error instanceof Error ? error.message : 'error'})`,
       );
-      return { text: input.fallback, provider: 'mock', model: 'travelclaw-local' };
+      return { text: input.fallback, ...DESK };
     } finally {
       clearTimeout(timer);
     }

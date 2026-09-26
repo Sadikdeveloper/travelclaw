@@ -49,6 +49,8 @@ export interface ToolTrace {
   name: string;
   ok: boolean;
   summary: string;
+  /** Who called the tool: the model, or the deterministic router. */
+  source?: 'model' | 'router';
 }
 
 export interface MessageRecord {
