@@ -18,6 +18,8 @@ export interface AppConfig {
   googleClientId: string | null;
   cookieSecure: boolean;
   cookieName: string;
+  /** Extra origins allowed to call the gateway. Empty means same-origin only. */
+  allowedOrigins: string[];
   sessionTtlDays: number;
 }
 
@@ -69,6 +71,10 @@ export function loadConfig(
     googleClientId: env.TRAVELCLAW_GOOGLE_CLIENT_ID?.trim() || null,
     cookieSecure: env.TRAVELCLAW_COOKIE_SECURE === '1',
     cookieName: 'travelclaw_session',
+    allowedOrigins: (env.TRAVELCLAW_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     sessionTtlDays: Number(env.TRAVELCLAW_SESSION_TTL_DAYS || 30),
   };
 }

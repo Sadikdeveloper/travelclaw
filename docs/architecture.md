@@ -90,6 +90,24 @@ guest, stores the new token, and replays the request once. `localStorage` rather
 another. The token is bearer-style, so an XSS could read it — that is the trade-off, weighed
 against a desk that simply does not work in an embedded frame; see `docs/security.md`.
 
+### When the client can keep nothing
+
+A cross-site iframe can hold neither: third-party cookies refused, `localStorage` throwing.
+Every request then arrives anonymous, and since the control UI provisions a guest on load,
+that is one new guest per request until the per-address mint cap trips — a page that
+refreshes a few times can lock its visitor out of a desk they never used.
+
+So the gateway also remembers, in memory, which guest it gave to a browser: the address the
+request came from plus its user agent, for twelve hours, extended on each sighting. A caller
+that presents no credential at all resumes that guest; a caller with a cookie or bearer token
+is resolved by it (the pin is never consulted for a _stale_ token — that is a session that
+ended), and signing out forgets the pin. Reloads stop costing an identity, and a guest's
+chats survive them.
+
+Because identity can now be inferred from the connection itself, the gateway stops reflecting
+arbitrary origins with credentials: same-origin by default, `TRAVELCLAW_ALLOWED_ORIGINS` to
+name others. See `docs/security.md` for the trade-off this makes.
+
 A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
 `problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —
 an account is optional on this desk, so a pace limit on new guest sessions must not read

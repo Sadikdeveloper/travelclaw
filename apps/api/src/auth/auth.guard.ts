@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { UserRecord } from '@travelclaw/shared';
 import type { Request } from 'express';
+import { browserKey } from '../common/rate-limit';
 import { loadConfig } from '../config';
 import { AuthService } from './auth.service';
 import { sessionTokenOf } from './tokens';
@@ -40,5 +41,13 @@ export function readUser(
   request: Request & { user?: UserRecord },
   auth: AuthService,
 ): UserRecord | null {
-  return auth.verifyToken(sessionTokenOf(request.headers, loadConfig().cookieName));
+  const token = sessionTokenOf(request.headers, loadConfig().cookieName);
+  const byToken = auth.verifyToken(token);
+  if (byToken) return byToken;
+  // Nothing presented at all. The frame may be one that keeps neither a cookie nor a stored
+  // token, so fall back to the guest last seen from this address and user agent. A *stale*
+  // token deliberately does not fall back: that is a session that ended, not a lost one.
+  if (token) return null;
+  const pinned = auth.pinnedGuestId(browserKey(request));
+  return pinned ? auth.guestById(pinned) : null;
 }

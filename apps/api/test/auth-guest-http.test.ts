@@ -44,7 +44,11 @@ describe('guest sessions over HTTP', () => {
 
   it('mints a guest with no signup and lets it use chat right away', async () => {
     const agent = request.agent(app.getHttpServer());
-    const guest = await agent.post('/api/auth/guest');
+    // Each test is a different browser: same address, different user agent, so one test's
+    // guest and its turn budget never bleed into the next.
+    const guest = await agent
+      .post('/api/auth/guest')
+      .set('User-Agent', 'test/cookie-agent');
     expect(guest.status).toBe(200);
     expect(guest.body.isGuest).toBe(true);
     expect(guest.body.hasPassword).toBe(false);
@@ -69,7 +73,9 @@ describe('guest sessions over HTTP', () => {
    */
   it('runs a whole session on the bearer token with no cookies at all', async () => {
     const fresh = request(app.getHttpServer());
-    const minted = await fresh.post('/api/auth/guest');
+    const minted = await fresh
+      .post('/api/auth/guest')
+      .set('User-Agent', 'test/bearer-only');
     expect(minted.status).toBe(200);
     expect(minted.body.sessionToken).toMatch(/^[\w-]{20,}$/);
     const auth = { Authorization: `Bearer ${minted.body.sessionToken}` };
@@ -103,7 +109,9 @@ describe('guest sessions over HTTP', () => {
   it('prefers the cookie over a bearer token that disagrees with it', async () => {
     const agent = request.agent(app.getHttpServer());
     const mine = await agent.post('/api/auth/guest');
-    const other = await request(app.getHttpServer()).post('/api/auth/guest');
+    const other = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', 'test/other-browser');
 
     const me = await agent
       .get('/api/auth/me')
@@ -145,6 +153,7 @@ describe('guest sessions over HTTP', () => {
     // No cookie: truly anonymous, which the control UI never lets a visitor be.
     const anonymous = await request(app.getHttpServer())
       .post('/api/chat')
+      .set('User-Agent', 'test/never-seen-before')
       .send({ content: 'hi' });
     expect(anonymous.status).toBe(401);
     expect(anonymous.body.error.code).toBe('unauthenticated');
@@ -163,7 +172,7 @@ describe('guest sessions over HTTP', () => {
 
   it('rate-limits chat turns from a guest tighter than a signed-up account', async () => {
     const agent = request.agent(app.getHttpServer());
-    await agent.post('/api/auth/guest');
+    await agent.post('/api/auth/guest').set('User-Agent', 'test/turn-pacer');
     const session = await agent.post('/api/sessions').send({ channel: 'webchat' });
 
     let last: { status: number; body: { error?: { code?: string; message?: string } } } = {
@@ -182,6 +191,88 @@ describe('guest sessions over HTTP', () => {
   });
 
   /**
+   * The embedded case that has no client-side answer: a cross-site frame with third-party
+   * cookies *and* storage blocked arrives with no cookie and no token on every request. It
+   * must still be one visitor. Without this, each request mints a guest, the per-address
+   * budget is gone in seconds, and the visitor is locked out of a desk they never used.
+   */
+  it('resumes one guest for a browser that can present no credential at all', async () => {
+    const ua = 'test/cannot-keep-anything';
+    const first = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', ua);
+    expect(first.status).toBe(200);
+    const minted = countGuests();
+
+    const me = await request(app.getHttpServer()).get('/api/auth/me').set('User-Agent', ua);
+    expect(me.status).toBe(200);
+    expect(me.body.id).toBe(first.body.id);
+
+    const session = await request(app.getHttpServer())
+      .post('/api/sessions')
+      .set('User-Agent', ua)
+      .send({ channel: 'webchat' });
+    expect(session.status).toBe(201);
+
+    const turn = await request(app.getHttpServer())
+      .post(`/api/sessions/${session.body.id}/messages`)
+      .set('User-Agent', ua)
+      .send({ content: 'hello from a frame that keeps nothing' });
+    expect(turn.status).toBe(201);
+
+    // Reload: /api/auth/me answers with the same guest, and no identity was spent.
+    const reload = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('User-Agent', ua);
+    expect(reload.body.id).toBe(first.body.id);
+    expect(countGuests()).toBe(minted);
+  });
+
+  it('keeps two credential-less browsers apart by user agent', async () => {
+    const mine = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', 'test/browser-a');
+    const other = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', 'test/browser-b');
+    expect(other.status).toBe(200);
+    expect(other.body.id).not.toBe(mine.body.id);
+  });
+
+  it('treats a stale token as an ended session, never as a browser to resume', async () => {
+    const ua = 'test/logged-out-elsewhere';
+    await request(app.getHttpServer()).post('/api/auth/guest').set('User-Agent', ua);
+    const stale = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('User-Agent', ua)
+      .set('Authorization', 'Bearer a-token-that-was-never-issued');
+    expect(stale.status).toBe(401);
+    expect(stale.body.error.message).toMatch(/expired/i);
+  });
+
+  it('ends the remembered guest when the browser signs out', async () => {
+    const ua = 'test/signs-out';
+    const mine = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', ua);
+    const out = await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('User-Agent', ua);
+    expect(out.status).toBe(200);
+    const next = await request(app.getHttpServer())
+      .post('/api/auth/guest')
+      .set('User-Agent', ua);
+    expect(next.body.id).not.toBe(mine.body.id);
+  });
+
+  it('does not reflect an arbitrary origin back to a cross-site caller', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Origin', 'https://evil.example');
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  /**
    * Last in this file on purpose: the guest-minting cap is per IP for an hour, so it
    * would starve every test above once tripped.
    */
@@ -189,14 +280,17 @@ describe('guest sessions over HTTP', () => {
     // This visitor already holds a cookie. The cap below is about minting *new* guests,
     // and must not take the desk away from someone who is already using it.
     const agent = request.agent(app.getHttpServer());
-    const mine = await agent.post('/api/auth/guest');
+    const mine = await agent.post('/api/auth/guest').set('User-Agent', 'test/pace-holder');
     expect(mine.status).toBe(200);
 
     let last = { status: 0, body: { error: { message: '', code: '' } } };
     for (let i = 0; i < GUEST_MINTS_PER_IP_PER_HOUR + 5; i += 1) {
-      // A fresh jar each attempt: once a guest cookie exists, /api/auth/guest is
-      // idempotent and returns the same guest without touching the limiter.
-      last = await request(app.getHttpServer()).post('/api/auth/guest');
+      // A fresh browser each attempt: no cookie, and a user agent nobody has used before.
+      // A jar-less caller that *is* already known by address and user agent is resumed
+      // rather than minted, so distinct user agents are what a mint cap is about.
+      last = await request(app.getHttpServer())
+        .post('/api/auth/guest')
+        .set('User-Agent', `jest-browser/${i}`);
       if (last.status === 429) break;
     }
     expect(last.status).toBe(429);
