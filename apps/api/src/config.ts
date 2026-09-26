@@ -11,6 +11,8 @@ export interface AppConfig {
   modelBaseUrl: string;
   modelApiKey: string;
   modelName: string;
+  /** Other models the desk offers, from TRAVELCLAW_MODELS. The chosen one is always first. */
+  modelNames: string[];
   network: boolean;
   seed: boolean;
   taskDelayMs: number;
@@ -63,6 +65,10 @@ export function loadConfig(
     modelName:
       env.TRAVELCLAW_MODEL_NAME ||
       (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
+    modelNames: (env.TRAVELCLAW_MODELS || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
     network: env.TRAVELCLAW_NETWORK !== '0',
     seed: env.TRAVELCLAW_SEED !== '0',
     taskDelayMs:

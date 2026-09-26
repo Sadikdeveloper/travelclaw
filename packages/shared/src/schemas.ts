@@ -65,6 +65,9 @@ export const taskDecisionSchema = z.object({
 
 export const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(8000),
+  // Optional: a turn may name the model it wants. Unknown or unusable ids are rejected,
+  // never quietly swapped for another model.
+  model: z.string().trim().min(1).max(60).optional(),
 });
 
 export const chatSchema = z.object({
@@ -73,6 +76,7 @@ export const chatSchema = z.object({
   channel: z.string().trim().min(1).max(32).default('webchat'),
   peerId: z.string().trim().min(1).max(80).optional(),
   sessionId: z.string().trim().min(1).optional(),
+  model: z.string().trim().min(1).max(60).optional(),
 });
 
 export const createMemorySchema = z.object({
