@@ -17,9 +17,10 @@ export function useLiveRevision() {
 export function App() {
   const [revision, setRevision] = useState(0);
   const { user } = useAuth();
+  const userId = user?.id;
 
   useEffect(() => {
-    if (!user) return undefined;
+    if (!userId) return undefined;
     const socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] });
     const bump = () => setRevision((value) => value + 1);
     socket.on('chat.completed', bump);
@@ -28,7 +29,7 @@ export function App() {
     return () => {
       socket.close();
     };
-  }, [user]);
+  }, [userId]);
 
   return (
     <LiveContext.Provider value={revision}>

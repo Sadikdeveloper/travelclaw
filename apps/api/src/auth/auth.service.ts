@@ -46,6 +46,16 @@ export interface AuthResult {
  */
 export const GUEST_MINTS_PER_IP_PER_HOUR = 60;
 
+/**
+ * How long a guest is remembered for a browser that cannot keep a cookie or a token — an
+ * embedded frame with third-party cookies and storage both blocked. Short on purpose: this
+ * is a convenience for a caller that can hold nothing, not a session of record, and it is
+ * keyed coarsely (address plus user agent), so it is never consulted unless the caller
+ * presents no credential at all.
+ */
+const GUEST_PIN_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_GUEST_PINS = 5000;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -57,6 +67,9 @@ export class AuthService {
    * the only real brake on someone minting thousands of them to dodge other limits.
    */
   readonly guestLimiter = new RateLimiter(GUEST_MINTS_PER_IP_PER_HOUR, 60 * 60 * 1000);
+
+  /** guestId remembered per browser, for callers that can present nothing. */
+  private readonly guestPins = new Map<string, { guestId: string; expiresAt: number }>();
 
   constructor(private readonly db: DatabaseService) {}
 
@@ -255,6 +268,60 @@ export class AuthService {
       return null;
     }
     return mapUser(user);
+  }
+
+  /**
+   * Remembers which guest a browser was last given. A request that arrives with no cookie
+   * and no bearer token can then be resumed as that guest instead of minting another one —
+   * which is what keeps a frame that can hold nothing from spending the guest budget a
+   * request at a time. Cookies and tokens always win; this is the last resort.
+   */
+  rememberGuestPin(key: string, guestId: string): void {
+    if (this.guestPins.size >= MAX_GUEST_PINS) {
+      this.sweepGuestPins();
+      // Still full: drop the oldest, or a long-lived process would grow without bound.
+      while (this.guestPins.size >= MAX_GUEST_PINS) {
+        const oldest = this.guestPins.keys().next();
+        if (oldest.done) break;
+        this.guestPins.delete(oldest.value);
+      }
+    }
+    this.guestPins.set(key, { guestId, expiresAt: Date.now() + GUEST_PIN_TTL_MS });
+  }
+
+  /** The guest remembered for this browser, if the row is still a live guest. Sliding window. */
+  pinnedGuestId(key: string): string | null {
+    const pin = this.guestPins.get(key);
+    if (!pin) return null;
+    if (pin.expiresAt <= Date.now() || !this.findGuest(pin.guestId)) {
+      this.guestPins.delete(key);
+      return null;
+    }
+    pin.expiresAt = Date.now() + GUEST_PIN_TTL_MS;
+    return pin.guestId;
+  }
+
+  forgetGuestPin(key: string): void {
+    this.guestPins.delete(key);
+  }
+
+  /** A session for a guest that is coming back without a usable credential. */
+  resumeGuest(guestId: string): AuthResult | null {
+    const row = this.findGuest(guestId);
+    return row ? this.issueSession(row) : null;
+  }
+
+  /** The guest row for an id, or null when it is gone or is no longer a guest. */
+  guestById(id: string): UserRecord | null {
+    const row = this.findGuest(id);
+    return row ? mapUser(row) : null;
+  }
+
+  private sweepGuestPins(): void {
+    const now = Date.now();
+    for (const [key, pin] of this.guestPins) {
+      if (pin.expiresAt <= now) this.guestPins.delete(key);
+    }
   }
 
   private issueSession(row: UserRow): AuthResult {

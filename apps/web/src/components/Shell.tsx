@@ -10,6 +10,10 @@ import { mirrorGuestSessions } from '../guestChatCache';
 export function Shell() {
   const revision = useLiveRevision();
   const { user, logout } = useAuth();
+  // Keyed by id, not by the account object: a refreshed session must not tear down the
+  // live socket or refetch the chat list, or a failing request can feed itself.
+  const userId = user?.id;
+  const userIsGuest = user?.isGuest === true;
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthReport | null>(null);
   const [down, setDown] = useState(false);
@@ -40,18 +44,18 @@ export function Shell() {
   }, []);
 
   useEffect(() => {
-    if (user?.isGuest) {
+    if (userId && userIsGuest) {
       // Instant paint from this device's own cache while the network round trip is
       // still in flight — a guest's chats otherwise have nowhere else to come from.
-      setSessions(mirrorGuestSessions(user.id));
+      setSessions(mirrorGuestSessions(userId));
     }
     api<SessionRecord[]>('/api/sessions')
       .then((fetched) => {
         setSessions(fetched);
-        if (user?.isGuest) mirrorGuestSessions(user.id, fetched);
+        if (userId && userIsGuest) mirrorGuestSessions(userId, fetched);
       })
       .catch(() => setSessions([]));
-  }, [revision, user]);
+  }, [revision, userId, userIsGuest]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -168,7 +172,11 @@ export function Shell() {
                 <Link className="btn-ghost" to="/login" onClick={() => setMenuOpen(false)}>
                   Sign in
                 </Link>
-                <Link className="btn copper" to="/register" onClick={() => setMenuOpen(false)}>
+                <Link
+                  className="btn copper"
+                  to="/register"
+                  onClick={() => setMenuOpen(false)}
+                >
                   Sign up
                 </Link>
               </div>

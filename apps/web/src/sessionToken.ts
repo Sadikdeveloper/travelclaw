@@ -15,7 +15,16 @@ import type { AuthSessionResponse, UserRecord } from '@travelclaw/shared';
  */
 const KEY = 'travelclaw.sessionToken';
 
+/**
+ * The token for this page load, held in memory first. `localStorage` is the durable copy,
+ * but a cross-site frame can refuse it outright — and a token that only ever lived there
+ * would be missing from every request that follows, which reads to the gateway as a fresh
+ * anonymous caller each time.
+ */
+let memoryToken: string | null = null;
+
 export function readSessionToken(): string | null {
+  if (memoryToken) return memoryToken;
   try {
     return window.localStorage.getItem(KEY);
   } catch {
@@ -26,14 +35,16 @@ export function readSessionToken(): string | null {
 
 export function storeSessionToken(token: string | undefined): void {
   if (!token) return;
+  memoryToken = token;
   try {
     window.localStorage.setItem(KEY, token);
   } catch {
-    // Nothing to do: the cookie may still work.
+    // The cookie, or the gateway's own memory of this browser, still covers us.
   }
 }
 
 export function clearSessionToken(): void {
+  memoryToken = null;
   try {
     window.localStorage.removeItem(KEY);
   } catch {

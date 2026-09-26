@@ -6,10 +6,19 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
 import { HttpExceptionFilter } from './common/http-exception.filter';
+import { loadConfig } from './config';
 
 export function configureApp(app: INestApplication) {
   app.useWebSocketAdapter(new IoAdapter(app));
-  app.enableCors({ origin: true, credentials: true });
+  // Same-origin by default: the desk ships its own web client on the same host, and a
+  // caller that presents no credential is recognised by address and user agent, so
+  // reflecting arbitrary origins with credentials would let another site read a guest's
+  // chats. Name extra origins in TRAVELCLAW_ALLOWED_ORIGINS if something else must call in.
+  const { allowedOrigins } = loadConfig();
+  app.enableCors({
+    origin: allowedOrigins.length ? allowedOrigins : false,
+    credentials: true,
+  });
   app.useGlobalFilters(new HttpExceptionFilter());
   const swagger = new DocumentBuilder()
     .setTitle('TravelClaw Gateway')

@@ -24,13 +24,19 @@ export function setSessionRecovery(fn: SessionRecovery | null): void {
   recoverSession = fn;
 }
 
+/** A recovery that is already running, so several 401s at once spend one guest, not one each. */
+let recoveryInFlight: Promise<boolean> | null = null;
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await send(path, init);
   if (response.status === 401 && recoverSession && !path.startsWith('/api/auth/')) {
     // A guest whose cookie went stale is not a signed-out traveler. Restore the
     // session and replay the request once rather than showing a sign-in demand.
     // A 401 means the guard rejected before the handler ran, so the replay is safe.
-    if (await recoverSession()) return parse<T>(await send(path, init));
+    recoveryInFlight ??= recoverSession().finally(() => {
+      recoveryInFlight = null;
+    });
+    if (await recoveryInFlight) return parse<T>(await send(path, init));
   }
   return parse<T>(response);
 }
