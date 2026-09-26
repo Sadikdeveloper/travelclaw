@@ -9,6 +9,22 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * The raw session token for a request: the cookie first, then `Authorization: Bearer`.
+ * The header exists for clients whose cookies do not survive — the control UI runs in an
+ * embedded preview and inside cross-site iframes, where a `SameSite=Lax` cookie is set but
+ * never sent back. Cookies stay the primary path; the header never overrides one.
+ */
+export function sessionTokenOf(
+  headers: { cookie?: string; authorization?: string },
+  cookieName: string,
+): string | undefined {
+  const fromCookie = parseCookies(headers.cookie)[cookieName];
+  if (fromCookie) return fromCookie;
+  const match = /^Bearer\s+(\S+)$/i.exec((headers.authorization || '').trim());
+  return match?.[1];
+}
+
 /** No `cookie-parser` dependency for a one-line header split. */
 export function parseCookies(header: string | undefined): Record<string, string> {
   const jar: Record<string, string> = {};

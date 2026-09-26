@@ -18,12 +18,12 @@ Checked on 2026-09-25, after `5b4e911`.
 - [x] A flight request, a hotel request, or both wakes one or two desks in parallel
 - [x] When a desk finishes, the traveler can answer yes complete, no, or still working
 - [x] **Accounts.** Email register and sign-in, cookie session, and Google sign-in behind `TRAVELCLAW_GOOGLE_CLIENT_ID`. Chats belong to the signed-in account.
+- [x] **Model-called tools.** The tool catalog goes to the provider as callable tools. A malformed call is rejected, not coerced. The router stays the fallback when the provider is `mock`, has no key, or asks for nothing, and a tool both picked runs once.
 
 Those desks write a brief. They do not search a provider, hold a seat, or take payment.
 
 ## Next, in this order
 
-- [ ] **Model-called tools.** We keep adding the tools. An OpenAI-compatible model requests one. The router stays as fallback. Users do not add tools in this step.
 - [ ] **User-added connectors.** Only after built-in tools are called by the model. A connector is a key the traveler provides, not a new language.
 - [ ] **Flight and stay search** behind an explicit provider key. The desks already ask yes / no / still working. A provider may return offers. It must not claim a hold until the provider says one exists. No card storage.
 - [ ] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.

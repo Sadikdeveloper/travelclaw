@@ -22,10 +22,14 @@ export interface DestinationProfile {
   themes: ThemeCard[];
 }
 
+/** Who asked for a tool: the model, or the deterministic router standing in for it. */
+export type ToolSource = 'model' | 'router';
+
 export interface ToolTrace {
   name: string;
   ok: boolean;
   summary: string;
+  source?: ToolSource;
 }
 
 export interface ToolResult<T = unknown> {
@@ -33,7 +37,9 @@ export interface ToolResult<T = unknown> {
   ok: boolean;
   summary: string;
   data: T;
+  /** Developer-facing reason, when a call was rejected. Never shown to the traveler. */
   warning?: string;
+  source?: ToolSource;
 }
 
 export interface OutlineDay {
@@ -182,20 +188,46 @@ export interface TurnResult {
   command?: 'tools' | 'remember' | 'new';
 }
 
+/**
+ * A tool as the provider sees it. `parameters` is JSON Schema, derived from the
+ * tool's zod argument schema so the two cannot drift.
+ */
+export interface ModelToolSpec {
+  name: string;
+  description: string;
+  parameters: JsonSchemaObject;
+}
+
+/** A call the model asked for. `arguments` is the raw JSON string it sent. */
+export interface ModelToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
 export interface ModelCompletion {
   text: string;
   provider: string;
   model: string;
+  /** Present only when the provider was given tools and the model asked for some. */
+  toolCalls?: ModelToolCall[];
 }
 
 export interface ModelProvider {
   id: string;
   model: string;
+  /**
+   * True when `complete` accepts `tools` and may return `toolCalls`. The mock
+   * provider leaves this off; the turn then keeps the router-only path so a
+   * missing key still answers offline.
+   */
+  usesTools?: boolean;
   complete(input: {
     system: string;
     history: HistoryTurn[];
     user: string;
     fallback: string;
+    tools?: ModelToolSpec[];
   }): Promise<ModelCompletion>;
 }
 
@@ -203,4 +235,21 @@ export interface ToolContext {
   now: Date;
   network: boolean;
   fetchImpl?: typeof fetch;
+}
+
+export interface JsonSchemaObject {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties: boolean;
+}
+
+/**
+ * What a tool runner receives. Router calls derive `hints` from the traveler's
+ * text; model calls validate the model's arguments into the same shape, so a
+ * tool body never has to care which path called it.
+ */
+export interface ToolInput {
+  text: string;
+  hints: TripHints;
 }

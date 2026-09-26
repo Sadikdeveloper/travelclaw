@@ -6,7 +6,7 @@ import {
   planAgentDesks,
   type OutlineData,
 } from '@travelclaw/agent-core';
-import { WEBCHAT_CHANNEL, type ChatResponse } from '@travelclaw/shared';
+import { WEBCHAT_CHANNEL, type ChatResponse, type ModelRecord } from '@travelclaw/shared';
 import { loadConfig } from '../config';
 import { EventsService } from '../events/events.service';
 import { AgentsService } from '../agents/agents.service';
@@ -43,6 +43,9 @@ export class GatewayService {
       sessionId?: string;
     },
     userId: string,
+    // Resolved by the caller so the pace check and the turn agree on one model. Nobody
+    // picks it: the desk runs the best model it has, for guests and accounts alike.
+    model: ModelRecord = this.models.best(),
   ): Promise<ChatResponse> {
     const agent = this.agents.resolve(input.agentId);
     const session = input.sessionId
@@ -94,7 +97,7 @@ export class GatewayService {
           : null,
       },
       {
-        provider: this.models.provider(),
+        provider: this.models.providerFor(model),
         ctx: { now: new Date(), network: config.network, fetchImpl: fetch },
       },
     );
@@ -133,6 +136,12 @@ export class GatewayService {
       messageId: message.id,
       userId,
     });
+    for (const result of turn.toolResults) {
+      // A rejected or failed tool call is a warning for the operator, never copy
+      // the traveler sees. The traveler gets the summary, or the model's sentence.
+      if (result.warning)
+        this.logger.warn(`${fresh.key} ${result.name}: ${result.warning}`);
+    }
     this.logger.log(
       `${fresh.key} tools=${turn.tools.map((tool) => tool.name).join(',') || 'none'} via ${turn.provider}`,
     );

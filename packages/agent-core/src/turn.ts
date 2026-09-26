@@ -1,10 +1,12 @@
 import { assemblePrompt } from './prompt';
 import { renderFallback } from './reply';
-import { BUNDLED_TOOLS, routeTools, runTools } from './tools';
+import { planToolCalls, runToolPlan, type ToolPlan } from './tool-calls';
+import { BUNDLED_TOOLS, routeTools, runTools, toolSpecs } from './tools';
 import type {
   ModelProvider,
   RememberData,
   ToolContext,
+  ToolResult,
   TurnRequest,
   TurnResult,
 } from './types';
@@ -51,27 +53,62 @@ export async function completeTurn(
   }
 
   const text = command?.name === 'remember' ? `/remember ${command.rest}` : input.text;
-  const names =
+  const routerNames =
     command?.name === 'remember' ? ['memory.remember'] : routeTools(text).slice(0, 3);
-  const toolResults = await runTools(text, names, deps.ctx);
+  const history = input.history.slice(-8);
+
+  let toolResults: ToolResult[];
+  if (command?.name === 'remember' || deps.provider.usesTools !== true) {
+    // Offline, mock, or an explicit command: the router is the only caller.
+    toolResults = await runTools(text, routerNames, deps.ctx);
+  } else {
+    // The model gets the catalog first. If it asks for nothing, the router
+    // still runs, so a model that ignores tools cannot leave the turn ungrounded.
+    const first = await deps.provider.complete({
+      system: assemblePrompt(input, [], { toolCalling: true }),
+      history,
+      user: input.text,
+      fallback: renderFallback(text, [], input.persona.name),
+      tools: toolSpecs(),
+    });
+    const plan: ToolPlan = planToolCalls({
+      text,
+      routerNames,
+      modelCalls: first.toolCalls ?? [],
+    });
+    toolResults = await runToolPlan(plan, text, deps.ctx);
+    if (!toolResults.length) {
+      // Nothing to ground: the model's own answer stands, or the desk speaks.
+      return {
+        reply: first.text.trim() || renderFallback(text, [], input.persona.name),
+        tools: [],
+        toolResults: [],
+        provider: first.provider,
+        model: first.model,
+        command: command?.name,
+      };
+    }
+  }
+
   const remembered = toolResults.find(
     (result) => result.name === 'memory.remember' && result.ok,
   );
   const fallback = renderFallback(text, toolResults, input.persona.name);
-  const system = assemblePrompt(input, toolResults);
   const completion = await deps.provider.complete({
-    system,
-    history: input.history.slice(-8),
+    system: assemblePrompt(input, toolResults),
+    history,
     user: input.text,
     fallback,
   });
+  const traces = toolResults.map((result) => ({
+    name: result.name,
+    ok: result.ok,
+    summary: result.summary,
+    source: result.source,
+  }));
   return {
     reply: completion.text.trim() || fallback,
-    tools: toolResults.map((result) => ({
-      name: result.name,
-      ok: result.ok,
-      summary: result.summary,
-    })),
+    tools: traces,
     toolResults,
     provider: completion.provider,
     model: completion.model,

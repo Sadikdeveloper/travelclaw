@@ -33,6 +33,44 @@ export interface AuthConfig {
   googleClientId: string | null;
 }
 
+/**
+ * Turns allowed per ten-minute window, by caller tier. A guest gets a taste of a model; a
+ * signed-in account gets several times more. Limits are per model, so a bigger model can be
+ * rationed tighter than a small one without touching the other's allowance.
+ */
+export interface ModelLimits {
+  guest: number;
+  account: number;
+}
+
+/** One model this desk can run, with the pace it runs at. */
+export interface ModelRecord {
+  id: string;
+  label: string;
+  provider: 'mock' | 'openai';
+  limits: ModelLimits;
+  /** True for the desk's own renderer: no provider call, no key, no per-turn cost. */
+  offline: boolean;
+  /** False for a configured model that cannot run yet, e.g. missing provider key. */
+  available: boolean;
+}
+
+/** What the control UI needs to show a picker and describe the limits. */
+export interface ModelCatalogRecord {
+  models: ModelRecord[];
+  /** The model a turn runs on when it does not name one. */
+  current: string;
+}
+
+/**
+ * What sign-in and guest routes return. `sessionToken` is the same opaque token the
+ * session cookie carries, for clients that cannot keep cookies — an embedded preview,
+ * or a browser blocking third-party cookies. See `docs/security.md`.
+ */
+export interface AuthSessionResponse extends UserRecord {
+  sessionToken: string;
+}
+
 export interface SessionRecord {
   id: string;
   key: string;
@@ -49,6 +87,8 @@ export interface ToolTrace {
   name: string;
   ok: boolean;
   summary: string;
+  /** Who called the tool: the model, or the deterministic router. */
+  source?: 'model' | 'router';
 }
 
 export interface MessageRecord {

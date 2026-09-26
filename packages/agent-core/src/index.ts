@@ -9,13 +9,21 @@ export {
   buildPackingList,
   convertCurrency,
   estimateBudget,
+  findTool,
+  MAX_TOOLS_PER_TURN,
   rememberFromText,
   routeTools,
+  runTool,
   runTools,
   suggestPlaces,
+  toolSpecs,
   visaNotes,
   weatherOutlook,
 } from './tools';
+export type { ToolDefinition } from './tools';
+export { mergeHints, planToolCalls, runToolPlan } from './tool-calls';
+export type { PlannedToolCall, ToolPlan } from './tool-calls';
+export { parseToolArgs, rejectionSummary, zodToJsonSchema } from './tool-args';
 export { assemblePrompt } from './prompt';
 export { renderFallback } from './reply';
 export { completeTurn, formatToolList, mockProvider, parseCommand } from './turn';
@@ -25,7 +33,11 @@ export type {
   CurrencyData,
   DestinationProfile,
   HistoryTurn,
+  JsonSchemaObject,
+  ModelCompletion,
   ModelProvider,
+  ModelToolCall,
+  ModelToolSpec,
   OutlineData,
   OutlineDay,
   PackingData,
@@ -33,7 +45,9 @@ export type {
   PlacesData,
   RememberData,
   ToolContext,
+  ToolInput,
   ToolResult,
+  ToolSource,
   ToolTrace,
   TripHints,
   TurnRequest,

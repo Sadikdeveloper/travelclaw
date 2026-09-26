@@ -73,6 +73,79 @@ guest's chat list and transcripts into `localStorage` (`apps/web/src/guestChatCa
 purely so the UI paints instantly on reload — the server copy under that guest id
 remains the source of truth.
 
+### Sessions that do not depend on a cookie
+
+`SameSite=Lax` HttpOnly cookies are the primary credential, and the reason a browser that
+cannot keep them is a real case: in a cross-site iframe or with third-party cookies blocked,
+the browser accepts the `Set-Cookie` and never sends it back. Every request then arrives
+anonymous, and because the control UI provisions a guest on load, that turns into one new
+guest per page load until the mint cap trips.
+
+So sign-in and guest routes also return `sessionToken` in the body, the same opaque token
+the cookie carries, and `AuthGuard` accepts it as `Authorization: Bearer`. The cookie wins
+when both are present. The web client keeps the token in `localStorage`
+(`apps/web/src/sessionToken.ts`) and sends it on every request; on a 401 it re-provisions the
+guest, stores the new token, and replays the request once. `localStorage` rather than
+`sessionStorage` so a preview that reloads the frame reuses one session instead of minting
+another. The token is bearer-style, so an XSS could read it — that is the trade-off, weighed
+against a desk that simply does not work in an embedded frame; see `docs/security.md`.
+
+### When the client can keep nothing
+
+A cross-site iframe can hold neither: third-party cookies refused, `localStorage` throwing.
+Every request then arrives anonymous, and since the control UI provisions a guest on load,
+that is one new guest per request until the per-address mint cap trips — a page that
+refreshes a few times can lock its visitor out of a desk they never used.
+
+So the gateway also remembers, in memory, which guest it gave to a browser: the address the
+request came from plus its user agent, for twelve hours, extended on each sighting. A caller
+that presents no credential at all resumes that guest; a caller with a cookie or bearer token
+is resolved by it (the pin is never consulted for a _stale_ token — that is a session that
+ended), and signing out forgets the pin. Reloads stop costing an identity, and a guest's
+chats survive them.
+
+Because identity can now be inferred from the connection itself, the gateway stops reflecting
+arbitrary origins with credentials: same-origin by default, `TRAVELCLAW_ALLOWED_ORIGINS` to
+name others. See `docs/security.md` for the trade-off this makes.
+
+### Models and the pace on each
+
+`apps/api/src/models/model-catalog.ts` is the one place that says which models this desk can
+run and what each one costs a traveler to use. An entry carries a label, the provider behind
+it, and a **turns-per-ten-minutes allowance for each tier** — guest and account. The numbers
+are a policy, not a coincidence: the offline desk model is the roomiest, a small live model
+sits in the middle, and a big one is rationed tighter, because that is roughly what each
+costs to run. A signed-in account's allowance is several times a guest's on every model, which
+is the honest answer to "what does signing in get me".
+
+The catalog is built from config. `TRAVELCLAW_MODEL_NAME` names the first model on this
+deployment and `TRAVELCLAW_MODELS` adds others; the **desk then picks the strongest of them
+that can actually run**, so listing models is enough to be offered them. A live model is only
+usable with a provider key — without one it still appears in `GET /api/models` with
+`available: false`, so the control UI can show what a key would unlock rather than pretending
+the model is not there. The offline desk model is always available and never needs a key.
+
+**Nobody chooses a model.** A guest cannot, a signed-in account does not have to, and a turn
+cannot: neither `POST /api/chat` nor `POST /api/sessions/:id/messages` accepts a `model` field
+any more, and a request that sends one is refused with `400 model_selection_unsupported`
+rather than quietly answered by a different model. Guests and signed-in accounts are answered
+by the same model; what separates the tiers is the pace on it. Choosing is a decision for
+later, and the catalog plus the per-model pace are the shape it will need when it comes.
+
+Rate limiting is one limiter per tier and model, built lazily from the catalog
+(`ChatController.limiterFor`), plus one address-wide limiter for guests across all models. The
+429 names the model it ran out on, the allowance on that model, and what would raise it — for
+a guest, signing in; for an account, waiting. It never reads as a sign-in wall.
+
+A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
+`problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —
+an account is optional on this desk, so a pace limit on new guest sessions must not read
+as a login wall. A 401 on any non-`/api/auth` route re-provisions the guest session and
+replays the request once (`apps/web/src/api.ts`), so a stale cookie is invisible to the
+traveler; a real account is never silently downgraded to a guest, and it sees
+`That session has expired. Sign in again.` from `AuthGuard`. `Sign in to use this.` is
+reserved for a caller that never had a session at all.
+
 When a guest registers, signs in, or completes Google sign-in, its chats are not lost.
 `register()`/`loginWithGoogle()` promote the guest's own `users` row into the real
 account in place (same id, so its `sessions` rows already point at the right owner —
@@ -98,18 +171,24 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 
 1. Persist the traveler message.
 2. Load persona files, recent memory, and the active trip.
-3. Route to at most three tools from triggers on the tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
-4. Run those tools. They are TypeScript functions, not markdown.
+3. Send the tool catalog to the model and let it ask for the tools it wants. The router also reads the message from triggers on each tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
+4. Run at most three tools, counting model calls and router picks together. A tool both picked runs once. They are TypeScript functions, not markdown.
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
-6. Persist the assistant message and emit `chat.completed`.
+6. Persist the assistant message, with each trace marked `model` or `router`, and emit `chat.completed`.
 
-Tools run before the model so a missing key cannot invent prices, weather, or a booking.
+A tool call is validated against the tool's zod argument schema before it runs. A payload
+that does not match is rejected with a short traveler sentence — never coerced, and never
+a 500. The mock provider has no tool support, so it keeps the router-only path: the same
+message that works with a key works without one, and a missing key cannot invent prices,
+weather, availability, or a booking. The router is also the fallback when a live model
+returns no tool call. Either way the tool result is what the model narrates; a runtime
+error inside a tool becomes a failed result with the desk still speaking, not a dead turn.
 
 A flight or hotel request does not go through that tool list. It wakes one or two desks, Flight and Stay, and the traveler sees those working. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything. A provider hold is a later step, and only after the traveler accepts a real offer.
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key, and that is a later step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
