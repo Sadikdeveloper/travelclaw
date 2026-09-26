@@ -108,6 +108,35 @@ Because identity can now be inferred from the connection itself, the gateway sto
 arbitrary origins with credentials: same-origin by default, `TRAVELCLAW_ALLOWED_ORIGINS` to
 name others. See `docs/security.md` for the trade-off this makes.
 
+### Models and the pace on each
+
+`apps/api/src/models/model-catalog.ts` is the one place that says which models this desk can
+run and what each one costs a traveler to use. An entry carries a label, the provider behind
+it, and a **turns-per-ten-minutes allowance for each tier** — guest and account. The numbers
+are a policy, not a coincidence: the offline desk model is the roomiest, a small live model
+sits in the middle, and a big one is rationed tighter, because that is roughly what each
+costs to run. A signed-in account's allowance is several times a guest's on every model, which
+is the honest answer to "what does signing in get me".
+
+The catalog is built from config. `TRAVELCLAW_MODEL_NAME` is the model a turn runs on when the
+request does not name one, and `TRAVELCLAW_MODELS` lists anything else on offer. A live model
+is only usable with a provider key; without one it still appears in `GET /api/models` with
+`available: false`, so the control UI can show what a key would unlock rather than pretending
+the model is not there. The offline desk model is always offered and never needs a key.
+
+A turn may name its model — `POST /api/chat` and `POST /api/sessions/:id/messages` both take an
+optional `model`. An id this desk does not run, or one it cannot run, is a `400`
+(`model_unknown`, `model_unavailable`) rather than a silent substitution: a traveler who asked
+for a specific model is never served by a different one behind their back. The pace check and
+the turn resolve the model the same way, off the request, so the limit that applied is the
+limit of the model that ran.
+
+Rate limiting itself is one limiter per tier and model, built lazily from the catalog
+(`ChatController.limiterFor`), plus one address-wide limiter for guests across all models. The
+429 names the model, the allowance, and what would raise it. A model picker in the control UI
+is the next step and needs nothing new here: the catalog, the per-model pace, and the request
+field are already in place.
+
 A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
 `problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —
 an account is optional on this desk, so a pace limit on new guest sessions must not read
