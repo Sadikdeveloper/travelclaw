@@ -4,14 +4,9 @@ import { io } from 'socket.io-client';
 import { useAuth } from './auth';
 import { RequireAuth } from './components/RequireAuth';
 import { Shell } from './components/Shell';
-import { AgentsPage } from './pages/AgentsPage';
 import { ChatPage } from './pages/ChatPage';
 import { LoginPage } from './pages/LoginPage';
-import { MemoryPage } from './pages/MemoryPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { ToolsPage } from './pages/ToolsPage';
-import { TripPage } from './pages/TripPage';
-import { TripsPage } from './pages/TripsPage';
 
 const LiveContext = createContext(0);
 
@@ -45,11 +40,6 @@ export function App() {
             <Route index element={<ChatPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="chat/:sessionId" element={<ChatPage />} />
-            <Route path="trips" element={<TripsPage />} />
-            <Route path="trips/:tripId" element={<TripPage />} />
-            <Route path="tools" element={<ToolsPage />} />
-            <Route path="memory" element={<MemoryPage />} />
-            <Route path="agents" element={<AgentsPage />} />
             <Route path="*" element={<Missing />} />
           </Route>
         </Route>
@@ -63,9 +53,7 @@ function Missing() {
     <section>
       <p className="kicker">404</p>
       <h1>That page is not on the desk.</h1>
-      <p className="lede">
-        The gateway still has trips, chat, and memory. Head back to the desk.
-      </p>
+      <p className="lede">The desk only does chat right now. Head back and start one.</p>
     </section>
   );
 }

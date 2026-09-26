@@ -75,6 +75,79 @@ a {
   height: 100vh;
 }
 
+.mobile-topbar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--ink);
+  color: #f6f1e7;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.mobile-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--serif);
+  font-weight: 560;
+  font-size: 1.02rem;
+}
+.mobile-topbar-brand img {
+  width: 22px;
+  height: 22px;
+}
+.mobile-menu-btn,
+.mobile-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(255, 250, 243, 0.08);
+  color: #f6f1e7;
+  border: none;
+  text-decoration: none;
+}
+.mobile-menu-btn:hover,
+.mobile-new:hover {
+  background: rgba(255, 250, 243, 0.18);
+}
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 12, 9, 0.5);
+  border: none;
+  padding: 0;
+  margin: 0;
+  z-index: 40;
+  cursor: default;
+}
+
+.sidebar-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(255, 250, 243, 0.1);
+  color: #f6f1e7;
+  border: none;
+}
+.sidebar-close:hover {
+  background: rgba(255, 250, 243, 0.2);
+}
+
 .brand {
   display: flex;
   gap: 12px;
@@ -127,10 +200,6 @@ a {
   flex-shrink: 0;
   opacity: 0.85;
 }
-.primary-nav {
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 250, 243, 0.08);
-}
 
 .side-section {
   display: flex;
@@ -175,43 +244,6 @@ a {
 }
 .side-search input::placeholder {
   color: #a99a89;
-}
-
-.tip-card {
-  position: relative;
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 10px 26px 10px 12px;
-  border-radius: 12px;
-  background: rgba(196, 98, 45, 0.14);
-  border: 1px solid rgba(196, 98, 45, 0.3);
-  color: #f0dcc7;
-}
-.tip-card svg {
-  flex-shrink: 0;
-  color: var(--copper);
-  margin-top: 1px;
-}
-.tip-card p {
-  margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.35;
-}
-.tip-dismiss {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: transparent;
-  border: none;
-  color: #cbbba8;
-  padding: 3px;
-  display: inline-flex;
-  border-radius: 999px;
-}
-.tip-dismiss:hover {
-  color: #f6f1e7;
-  background: rgba(255, 250, 243, 0.14);
 }
 
 .side-foot {
@@ -636,6 +668,30 @@ h3 {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
+.thread-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.agentic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(196, 98, 45, 0.12);
+  border: 1px solid rgba(196, 98, 45, 0.35);
+  color: var(--copper);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.agentic-badge-inline {
+  font-size: 0.68rem;
+  padding: 3px 9px;
+}
 .composer {
   border-bottom: 0;
   border-top: 1px solid var(--line);
@@ -863,20 +919,42 @@ h3 {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
   }
+
+  .mobile-topbar {
+    display: flex;
+  }
+
   .sidebar {
-    position: static;
-    height: auto;
-    flex-direction: column;
-    overflow: visible;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(300px, 86vw);
+    height: 100dvh;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
   }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-close {
+    display: inline-flex;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+  }
+
   .chats-section {
-    flex: none;
-    max-height: 260px;
+    flex: 1;
+    max-height: none;
   }
+
   .grid-stats,
   .grid-2,
   .chat-layout,
@@ -888,11 +966,15 @@ h3 {
     height: auto;
   }
   .canvas {
-    padding: 20px 16px 40px;
+    padding: 18px 14px 36px;
   }
   .transcript {
     box-shadow: none;
     padding-left: 16px;
+  }
+  .thread-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
   }
 }
 

@@ -140,6 +140,10 @@ export function ChatPage() {
         <section className="hero">
           <div className="hero-inner">
             <img src="/mark.svg" alt="" className="hero-mark" />
+            <span className="agentic-badge">
+              <Sparkles size={13} aria-hidden="true" />
+              Agentic chat
+            </span>
             <h1>Your next trip, one message away.</h1>
             <p className="hero-sub">
               Ask for a flight, a hotel, or both. A desk spins up for each one — nothing
@@ -198,6 +202,10 @@ export function ChatPage() {
       <section className="thread">
         <header className="thread-head">
           <strong>{title}</strong>
+          <span className="agentic-badge agentic-badge-inline">
+            <Sparkles size={12} aria-hidden="true" />
+            Agentic
+          </span>
         </header>
         <div className="transcript" aria-live="polite">
           {error ? <Banner message={error} tone="bad" /> : null}

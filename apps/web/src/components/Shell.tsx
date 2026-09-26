@@ -1,31 +1,11 @@
 import type { HealthReport, SessionRecord } from '@travelclaw/shared';
-import {
-  Brain,
-  Luggage,
-  MessageCircle,
-  Plus,
-  Search,
-  Sparkles,
-  Users,
-  Wrench,
-  X,
-} from 'lucide-react';
+import { Menu, Plus, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useLiveRevision } from '../App';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { mirrorGuestSessions } from '../guestChatCache';
-
-const TIP_DISMISSED_KEY = 'travelclaw:tipDismissed';
-
-const primaryNav = [
-  { to: '/', end: true, label: 'Chat', icon: MessageCircle },
-  { to: '/trips', end: false, label: 'Trips', icon: Luggage },
-  { to: '/tools', end: false, label: 'Tools', icon: Wrench },
-  { to: '/memory', end: false, label: 'Memory', icon: Brain },
-  { to: '/agents', end: false, label: 'Agents', icon: Users },
-];
 
 export function Shell() {
   const revision = useLiveRevision();
@@ -36,9 +16,7 @@ export function Shell() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [signingOut, setSigningOut] = useState(false);
   const [query, setQuery] = useState('');
-  const [tipDismissed, setTipDismissed] = useState(
-    () => window.localStorage.getItem(TIP_DISMISSED_KEY) === '1',
-  );
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -81,11 +59,6 @@ export function Shell() {
     return sessions.filter((session) => session.title.toLowerCase().includes(q));
   }, [sessions, query]);
 
-  function dismissTip() {
-    setTipDismissed(true);
-    window.localStorage.setItem(TIP_DISMISSED_KEY, '1');
-  }
-
   async function signOut() {
     setSigningOut(true);
     try {
@@ -93,6 +66,7 @@ export function Shell() {
       navigate('/login', { replace: true });
     } finally {
       setSigningOut(false);
+      setMenuOpen(false);
     }
   }
 
@@ -100,28 +74,46 @@ export function Shell() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <header className="mobile-topbar">
+        <button
+          type="button"
+          className="mobile-menu-btn"
+          aria-label="Open menu"
+          onClick={() => setMenuOpen(true)}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <div className="mobile-topbar-brand">
+          <img src="/mark.svg" alt="" />
+          <strong>TravelClaw</strong>
+        </div>
+        <NavLink to="/" end className="mobile-new" aria-label="New chat">
+          <Plus size={18} aria-hidden="true" />
+        </NavLink>
+      </header>
+
+      {menuOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Close menu"
+          onClick={() => setMenuOpen(false)}
+        />
+      ) : null}
+
+      <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
           <img src="/mark.svg" alt="" />
           <div>
             <strong>TravelClaw</strong>
-            <em>Travel desk</em>
+            <em>Agentic Chat</em>
           </div>
         </div>
 
-        <NavLink to="/" end className="btn side-new">
+        <NavLink to="/" end className="btn side-new" onClick={() => setMenuOpen(false)}>
           <Plus size={16} aria-hidden="true" />
           New chat
         </NavLink>
-
-        <nav className="nav primary-nav" aria-label="Desk">
-          {primaryNav.map(({ to, end, label, icon: Icon }) => (
-            <NavLink key={to} to={to} end={end}>
-              <Icon size={16} aria-hidden="true" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
 
         <div className="side-section chats-section">
           <div className="side-section-head">
@@ -145,27 +137,16 @@ export function Shell() {
               </p>
             ) : null}
             {filtered.map((session) => (
-              <NavLink key={session.id} to={`/chat/${session.id}`}>
+              <NavLink
+                key={session.id}
+                to={`/chat/${session.id}`}
+                onClick={() => setMenuOpen(false)}
+              >
                 {session.title}
               </NavLink>
             ))}
           </nav>
         </div>
-
-        {tipDismissed ? null : (
-          <div className="tip-card">
-            <Sparkles size={16} aria-hidden="true" />
-            <p>Ask for a flight, a hotel, or both. Nothing books until you say so.</p>
-            <button
-              type="button"
-              className="tip-dismiss"
-              aria-label="Dismiss tip"
-              onClick={dismissTip}
-            >
-              <X size={14} aria-hidden="true" />
-            </button>
-          </div>
-        )}
 
         <div className="side-foot">
           <div className="gateway-status">
@@ -184,10 +165,10 @@ export function Shell() {
                 Chats stay on this device. Sign in to keep them anywhere.
               </p>
               <div className="row account-guest-actions">
-                <Link className="btn-ghost" to="/login">
+                <Link className="btn-ghost" to="/login" onClick={() => setMenuOpen(false)}>
                   Sign in
                 </Link>
-                <Link className="btn copper" to="/register">
+                <Link className="btn copper" to="/register" onClick={() => setMenuOpen(false)}>
                   Sign up
                 </Link>
               </div>
@@ -214,6 +195,15 @@ export function Shell() {
           ) : null}
           <div className="side-version">{health ? health.version : 'checking'}</div>
         </div>
+
+        <button
+          type="button"
+          className="sidebar-close"
+          aria-label="Close menu"
+          onClick={() => setMenuOpen(false)}
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
       </aside>
       <main className="canvas">
         <Outlet />
