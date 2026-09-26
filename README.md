@@ -8,16 +8,16 @@ This page restates [docs/architecture.md](docs/architecture.md). If the two disa
 
 Shared packages hold the contracts and the tool engine so both can be tested without HTTP.
 
-|                                    |                                                                                                                                                                                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **One gateway**                    | The gateway owns SQLite, HTTP, WebSocket, and scheduling.                                                                                                                                                                                            |
-| **Control UI**                     | The Vite app talks to the gateway with relative `/api` URLs.                                                                                                                                                                                         |
-| **Tools, then the model**          | An ordinary turn routes to at most three tools. They are TypeScript functions, not markdown. They run before the model so a missing key cannot invent prices, weather, or a booking.                                                                 |
-| **Flight desk and Stay desk**      | A flight or hotel request does not go through that tool list. It wakes one or two desks. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything.                                           |
-| **What the traveler sees**         | A chat and a sidebar of their chats. The control pages are not the product. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them.                                                                 |
-| **Memory you can read**            | `MEMORY.md` is the human-readable copy. SQLite is the index. Kinds are `preference`, `fact`, and `decision`.                                                                                                                                         |
-| **Heartbeat**                      | A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips starting within 14 days. It does not send a chat message. `NO_REPLY` means nothing needed attention.                                                                |
-| **Channels as an explicit slot**   | Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed. |
+|                                  |                                                                                                                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **One gateway**                  | The gateway owns SQLite, HTTP, WebSocket, and scheduling.                                                                                                                                                                                                     |
+| **Control UI**                   | The Vite app talks to the gateway with relative `/api` URLs.                                                                                                                                                                                                  |
+| **Tools, then the model**        | An ordinary turn routes to at most three tools. They are TypeScript functions, not markdown. They run before the model so a missing key cannot invent prices, weather, or a booking.                                                                          |
+| **Flight desk and Stay desk**    | A flight or hotel request does not go through that tool list. It wakes one or two desks. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything.                                                     |
+| **What the traveler sees**       | A chat and a sidebar of their chats. The control pages are not the product. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them.                                                                          |
+| **Memory you can read**          | `MEMORY.md` is the human-readable copy. SQLite is the index. Kinds are `preference`, `fact`, and `decision`.                                                                                                                                                  |
+| **Heartbeat**                    | A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips starting within 14 days. It does not send a chat message. `NO_REPLY` means nothing needed attention.                                                                         |
+| **Channels as an explicit slot** | Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed. |
 
 ## How it fits together
 
@@ -80,21 +80,27 @@ Node's built-in `node:sqlite` keeps the gateway free of native addons. The API i
 
 `pnpm build` emits `apps/web/dist`. The gateway serves it when that folder exists. In development, Vite proxies `/api`, `/health`, `/docs`, and `/socket.io` to port 3000. The browser never calls localhost.
 
-Sign-in (email, then Google) is the next step, so chats can belong to an account.
+## Accounts
+
+Sign in with an email and password, or with Google once an operator sets
+`TRAVELCLAW_GOOGLE_CLIENT_ID`. A chat belongs to the account that opened it — see
+[Accounts](docs/architecture.md#accounts) and [Security](docs/security.md) for how the
+cookie session, password hashing, and Google linking work.
 
 ## Documentation
 
-| Section | What's covered |
-| --- | --- |
-| [Why it is split this way](docs/architecture.md#why-it-is-split-this-way) | Gateway, control UI, shared contracts, tool engine, workspace, extensions |
-| [Session keys](docs/architecture.md#session-keys) | `agent:<agentId>:<channel>:<peerId>` |
-| [Turns](docs/architecture.md#turns) | Persist, route, run tools, narrate, emit `chat.completed` |
-| [What the traveler sees](docs/architecture.md#what-the-traveler-sees) | Chat and sidebar. Tools stay internal. |
-| [Channels](docs/architecture.md#channels) | Webchat built in. Telegram and Discord not configured. |
-| [Memory](docs/architecture.md#memory) | `MEMORY.md` plus the SQLite index |
-| [Heartbeat](docs/architecture.md#heartbeat) | One-minute cron, `departure-watch`, `NO_REPLY` |
-| [Data](docs/architecture.md#data) | `node:sqlite`, schema on boot, no migration framework |
-| [Control UI in production](docs/architecture.md#control-ui-in-production) | Gateway serves `apps/web/dist`. Vite proxies in development. |
+| Section                                                                   | What's covered                                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [Why it is split this way](docs/architecture.md#why-it-is-split-this-way) | Gateway, control UI, shared contracts, tool engine, workspace, extensions   |
+| [Accounts](docs/architecture.md#accounts)                                 | Email/password, Google sign-in, cookie session, chats scoped to the account |
+| [Session keys](docs/architecture.md#session-keys)                         | `agent:<agentId>:<channel>:<peerId>`                                        |
+| [Turns](docs/architecture.md#turns)                                       | Persist, route, run tools, narrate, emit `chat.completed`                   |
+| [What the traveler sees](docs/architecture.md#what-the-traveler-sees)     | Chat and sidebar. Tools stay internal.                                      |
+| [Channels](docs/architecture.md#channels)                                 | Webchat built in. Telegram and Discord not configured.                      |
+| [Memory](docs/architecture.md#memory)                                     | `MEMORY.md` plus the SQLite index                                           |
+| [Heartbeat](docs/architecture.md#heartbeat)                               | One-minute cron, `departure-watch`, `NO_REPLY`                              |
+| [Data](docs/architecture.md#data)                                         | `node:sqlite`, schema on boot, no migration framework                       |
+| [Control UI in production](docs/architecture.md#control-ui-in-production) | Gateway serves `apps/web/dist`. Vite proxies in development.                |
 
 ## Author
 

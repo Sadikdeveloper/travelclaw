@@ -26,6 +26,33 @@ flowchart LR
 | `workspace/`          | Persona files the gateway reads on every turn.               |
 | `extensions/`         | Reserved. Not a workspace glob until a real package exists.  |
 
+## Accounts
+
+`apps/api/src/auth` owns sign-in. `users` holds email (unique, lowercase), an optional
+scrypt password hash (`hashPassword`/`verifyPassword` in `auth/password.ts`, no
+dependency — Node's built-in `crypto.scrypt`), an optional `google_id`, and a display
+name. Signing in issues an opaque random token; only its SHA-256 hash is written to
+`auth_sessions`, and the raw token goes to the browser as an `HttpOnly`, `SameSite=Lax`
+cookie (`travelclaw_session`). `AuthGuard` reads that cookie, looks up the hash, and
+attaches the account to the request; routes without the guard stay anonymous, routes
+with it 401 a signed-out caller.
+
+Chats (`sessions`) carry a `user_id` and every read is filtered by it — a mismatched or
+guessed id 404s rather than 403s, so it does not confirm another traveler's chat exists.
+Trips, memory, and tools stay desk-wide for now; only chat history is account-scoped.
+
+Google sign-in is `POST /api/auth/google` with the Identity Services `credential` (a
+JWT). The gateway verifies it against Google's `tokeninfo` endpoint, checks the
+audience against `TRAVELCLAW_GOOGLE_CLIENT_ID`, and requires a verified email. A first
+sign-in links to an existing password account with the same email, or creates one.
+`GET /api/auth/config` reports whether a client id is set; the control UI only renders
+the Google button when it is.
+
+Login and registration are rate-limited per caller (in-memory, resets on restart) to
+slow down brute force. A login failure reports the same message whether the email is
+unknown, the password is wrong, or the account has no password at all (Google-only) —
+anything more specific tells an attacker whether an email is registered.
+
 ## Session keys
 
 A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer `operator` unless the UI opens a new chat, which gets its own peer id. Group-style channels should use the room id as the peer so histories do not collapse.
@@ -45,7 +72,7 @@ A flight or hotel request does not go through that tool list. It wakes one or tw
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. Sign-in (email, then Google) is the next step, so chats can belong to an account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 

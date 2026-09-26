@@ -12,6 +12,34 @@ export const tripStatusSchema = z.enum([
 export const memoryKindSchema = z.enum(['preference', 'fact', 'decision']);
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
+export const emailSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(254)
+  .email('Enter a valid email address')
+  .transform((value) => value.toLowerCase());
+
+export const passwordSchema = z
+  .string()
+  .min(8, 'Use at least 8 characters')
+  .max(200, 'That password is too long');
+
+export const registerSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema,
+  displayName: z.string().trim().min(1).max(60).optional(),
+});
+
+export const loginSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1, 'Password is required').max(200),
+});
+
+export const googleAuthSchema = z.object({
+  credential: z.string().trim().min(1, 'Missing Google credential'),
+});
+
 export const createAgentSchema = z.object({
   id: z
     .string()
@@ -120,6 +148,9 @@ export const planTripSchema = z.object({
   interests: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
 });
 
+export type RegisterInput = z.infer<typeof registerSchema>;
+export type LoginInput = z.infer<typeof loginSchema>;
+export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;

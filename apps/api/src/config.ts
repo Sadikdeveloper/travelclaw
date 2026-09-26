@@ -15,6 +15,10 @@ export interface AppConfig {
   seed: boolean;
   taskDelayMs: number;
   version: string;
+  googleClientId: string | null;
+  cookieSecure: boolean;
+  cookieName: string;
+  sessionTtlDays: number;
 }
 
 export function loadEnvFiles(cwd = process.cwd()): void {
@@ -62,5 +66,9 @@ export function loadConfig(
     taskDelayMs:
       env.TRAVELCLAW_TASK_DELAY === '0' ? 0 : Number(env.TRAVELCLAW_TASK_DELAY || 1100),
     version: GATEWAY_VERSION,
+    googleClientId: env.TRAVELCLAW_GOOGLE_CLIENT_ID?.trim() || null,
+    cookieSecure: env.TRAVELCLAW_COOKIE_SECURE === '1',
+    cookieName: 'travelclaw_session',
+    sessionTtlDays: Number(env.TRAVELCLAW_SESSION_TTL_DAYS || 30),
   };
 }

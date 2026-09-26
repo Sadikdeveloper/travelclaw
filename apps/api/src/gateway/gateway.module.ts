@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgentsModule } from '../agents/agents.module';
+import { AuthModule } from '../auth/auth.module';
 import { MemoryModule } from '../memory/memory.module';
 import { ModelsModule } from '../models/models.module';
 import { SessionsModule } from '../sessions/sessions.module';
@@ -14,6 +15,7 @@ import { GatewayService } from './gateway.service';
 @Module({
   imports: [
     AgentsModule,
+    AuthModule,
     SessionsModule,
     MemoryModule,
     TripsModule,

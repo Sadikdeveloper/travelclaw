@@ -21,6 +21,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA foreign_keys = ON');
     this.migrateLegacyNames();
+    this.migrateToAccounts();
     this.db.exec(SCHEMA);
   }
 
@@ -52,6 +53,26 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         this.db.exec(`ALTER TABLE ${runTable} RENAME COLUMN skill TO tool`);
       }
     }
+  }
+
+  /**
+   * Sessions now belong to an account (`user_id`, NOT NULL). Pre-account installs have
+   * no owner to assign, so those chats and their child rows are dropped on upgrade —
+   * there is no migration framework yet, per docs/architecture.md. Trips and memory are
+   * desk-wide and are left alone.
+   */
+  private migrateToAccounts() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('sessions')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(sessions)');
+    if (columns.some((column) => column.name === 'user_id')) return;
+    this.db.exec('DROP TABLE IF EXISTS agent_tasks');
+    this.db.exec('DROP TABLE IF EXISTS messages');
+    this.db.exec('DROP TABLE IF EXISTS sessions');
   }
 
   onModuleDestroy() {
