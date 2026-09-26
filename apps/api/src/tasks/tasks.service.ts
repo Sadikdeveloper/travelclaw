@@ -5,6 +5,7 @@ import { newId, nowIso } from '../common/util';
 import { loadConfig } from '../config';
 import { DatabaseService } from '../db/database.service';
 import { EventsService } from '../events/events.service';
+import { SessionsService } from '../sessions/sessions.service';
 
 interface TaskRow {
   id: string;
@@ -28,7 +29,13 @@ export class TasksService {
   constructor(
     private readonly db: DatabaseService,
     private readonly events: EventsService,
+    private readonly sessions: SessionsService,
   ) {}
+
+  /** Used by the controller to check chat ownership before a decision touches a task. */
+  sessionIdFor(taskId: string): string {
+    return this.get(taskId).session_id;
+  }
 
   forSession(sessionId: string): AgentTaskRecord[] {
     return this.db
@@ -148,7 +155,11 @@ export class TasksService {
       id,
     );
     const task = mapTask(this.get(id));
-    this.events.emit('task.updated', { sessionId: task.sessionId, taskId: task.id });
+    this.events.emit('task.updated', {
+      sessionId: task.sessionId,
+      taskId: task.id,
+      userId: this.sessions.ownerOf(task.sessionId),
+    });
     return task;
   }
 }

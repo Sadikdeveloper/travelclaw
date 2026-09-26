@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AgentsModule } from './agents/agents.module';
+import { AuthModule } from './auth/auth.module';
 import { ChannelsModule } from './channels/channels.module';
 import { DatabaseModule } from './db/database.module';
 import { DeskModule } from './desk/desk.module';
@@ -20,6 +21,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
   imports: [
     ScheduleModule.forRoot(),
     DatabaseModule,
+    AuthModule,
     EventsModule,
     WorkspaceModule,
     AgentsModule,

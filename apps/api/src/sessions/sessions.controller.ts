@@ -1,29 +1,42 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { createSessionSchema, type CreateSessionInput } from '@travelclaw/shared';
+import {
+  createSessionSchema,
+  type CreateSessionInput,
+  type UserRecord,
+} from '@travelclaw/shared';
+import { AuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-pipe';
 import { SessionsService } from './sessions.service';
 
 @ApiTags('sessions')
 @Controller('api/sessions')
+@UseGuards(AuthGuard)
 export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Recent sessions' })
-  list() {
-    return this.sessions.list();
+  @ApiOperation({ summary: "This account's recent chats" })
+  list(@CurrentUser() user: UserRecord) {
+    return this.sessions.list(user.id);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Open a session. A new peer id keeps histories apart.' })
-  open(@Body(new ZodValidationPipe(createSessionSchema)) body: CreateSessionInput) {
-    return this.sessions.open(body);
+  @ApiOperation({ summary: 'Open a chat. A new peer id keeps histories apart.' })
+  open(
+    @CurrentUser() user: UserRecord,
+    @Body(new ZodValidationPipe(createSessionSchema)) body: CreateSessionInput,
+  ) {
+    return this.sessions.open(body, user.id);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Session plus transcript' })
-  get(@Param('id') id: string) {
-    return { session: this.sessions.get(id), messages: this.sessions.messages(id) };
+  @ApiOperation({ summary: 'Chat plus transcript' })
+  get(@CurrentUser() user: UserRecord, @Param('id') id: string) {
+    return {
+      session: this.sessions.get(id, user.id),
+      messages: this.sessions.messages(id, user.id),
+    };
   }
 }

@@ -26,6 +26,70 @@ flowchart LR
 | `workspace/`          | Persona files the gateway reads on every turn.               |
 | `extensions/`         | Reserved. Not a workspace glob until a real package exists.  |
 
+## Accounts
+
+`apps/api/src/auth` owns sign-in. `users` holds email (unique, lowercase), an optional
+password hash (`hashPassword`/`verifyPassword` in `auth/password.ts`), an optional
+`google_id`, and a display name. Passwords are hashed with Argon2id (OWASP's current
+top recommendation) via `hash-wasm` — WebAssembly, zero runtime dependencies, no native
+compilation, consistent with this repo's preference for `node:sqlite` over
+`better-sqlite3`. A password hashed by an earlier build of this branch with scrypt
+still verifies (`isLegacyScryptHash`/legacy path in `password.ts`) and is silently
+re-hashed to Argon2id the next time that account signs in successfully — no action
+needed from the traveler, and no new scrypt hash is ever minted. Signing in issues an
+opaque random token; only its SHA-256 hash is written to `auth_sessions`, and the raw
+token goes to the browser as an `HttpOnly`, `SameSite=Lax` cookie
+(`travelclaw_session`). `AuthGuard` reads that cookie, looks up the hash, and attaches
+the account to the request; routes without the guard stay anonymous, routes with it
+401 a signed-out caller.
+
+Chats (`sessions`) carry a `user_id` and every read is filtered by it — a mismatched or
+guessed id 404s rather than 403s, so it does not confirm another traveler's chat exists.
+Trips, memory, and tools stay desk-wide for now; only chat history is account-scoped.
+
+Google sign-in is `POST /api/auth/google` with the Identity Services `credential` (a
+JWT). The gateway verifies its RS256 signature locally against Google's published JWKS
+(`https://www.googleapis.com/oauth2/v3/certs`, cached in memory for an hour and
+re-fetched on a `kid` miss — see `auth/google-verify.ts`), then checks issuer,
+expiry, the audience against `TRAVELCLAW_GOOGLE_CLIENT_ID`, and that the email is
+verified. Google's own guidance discourages calling the `tokeninfo` endpoint per login
+in production (it is rate-limited and adds a network hop to every sign-in), so this
+avoids that endpoint entirely. A first sign-in links to an existing password account
+with the same email, or creates one. `GET /api/auth/config` reports whether a client
+id is set; the control UI only renders the Google button when it is.
+
+### Guests
+
+Nobody has to sign up to use the desk. On first load the control UI calls
+`POST /api/auth/guest`, which — unless the caller already has a valid session, in which
+case it just returns that account unchanged — creates a lightweight `users` row with
+`is_guest = 1`, no password, and no Google id, and issues it a normal session cookie.
+From there a guest is a completely ordinary account to every other route: `sessions`,
+`messages`, and `agent_tasks` all key off its `user_id` exactly like a signed-up
+traveler's, so chat, tasks, and history all work unmodified. Two differences: turns
+from a guest are rate-limited tighter than a real account (`ChatController`, both
+per-guest and per-IP, since a guest costs nothing to mint), and the browser mirrors a
+guest's chat list and transcripts into `localStorage` (`apps/web/src/guestChatCache.ts`)
+purely so the UI paints instantly on reload — the server copy under that guest id
+remains the source of truth.
+
+When a guest registers, signs in, or completes Google sign-in, its chats are not lost.
+`register()`/`loginWithGoogle()` promote the guest's own `users` row into the real
+account in place (same id, so its `sessions` rows already point at the right owner —
+nothing to move) when there is no separate pre-existing account to reconcile with.
+`login()` (and `loginWithGoogle()` linking into an existing account) instead
+reassigns the guest's `sessions` rows onto that account's id and deletes the now-empty
+guest row (`AuthService.absorbGuest`). Either way, a wrong password never touches the
+guest — only a successful sign-in folds it in. The sidebar shows "Sign in" / "Sign up"
+for a guest instead of an account name; those pages read `user.isGuest` so a guest
+visiting them is not immediately bounced back by the same redirect that would otherwise
+skip a signed-in account past the form.
+
+Login and registration are rate-limited per caller (in-memory, resets on restart) to
+slow down brute force. A login failure reports the same message whether the email is
+unknown, the password is wrong, or the account has no password at all (Google-only) —
+anything more specific tells an attacker whether an email is registered.
+
 ## Session keys
 
 A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer `operator` unless the UI opens a new chat, which gets its own peer id. Group-style channels should use the room id as the peer so histories do not collapse.
@@ -45,7 +109,7 @@ A flight or hotel request does not go through that tool list. It wakes one or tw
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. Sign-in (email, then Google) is the next step, so chats can belong to an account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register. The model, or the router until model tool-calling is wired, calls them. The traveler does not add tools in this step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 

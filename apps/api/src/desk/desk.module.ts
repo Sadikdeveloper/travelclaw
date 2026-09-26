@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgentsModule } from '../agents/agents.module';
+import { AuthModule } from '../auth/auth.module';
 import { ChannelsModule } from '../channels/channels.module';
 import { HealthModule } from '../health/health.module';
 import { HeartbeatModule } from '../heartbeat/heartbeat.module';
@@ -13,6 +14,7 @@ import { DeskController } from './desk.controller';
   imports: [
     HealthModule,
     AgentsModule,
+    AuthModule,
     TripsModule,
     SessionsModule,
     HeartbeatModule,

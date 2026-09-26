@@ -17,9 +17,26 @@ export interface AgentRecord {
   updatedAt: string;
 }
 
+export interface UserRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  hasPassword: boolean;
+  hasGoogle: boolean;
+  /** True for an auto-provisioned, no-signup visitor. Their chats live only on this device. */
+  isGuest: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuthConfig {
+  googleClientId: string | null;
+}
+
 export interface SessionRecord {
   id: string;
   key: string;
+  userId: string;
   agentId: string;
   channel: string;
   peerId: string;

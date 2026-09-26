@@ -20,6 +20,7 @@ describe('gateway', () => {
     process.env.TRAVELCLAW_MODEL_PROVIDER = 'mock';
     process.env.TRAVELCLAW_TASK_DELAY = '0';
     delete process.env.TRAVELCLAW_MODEL_API_KEY;
+    delete process.env.TRAVELCLAW_GOOGLE_CLIENT_ID;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
@@ -30,6 +31,20 @@ describe('gateway', () => {
   afterAll(async () => {
     await app.close();
   });
+
+  /** A fresh signed-in agent (its own cookie jar) so chat routes accept it. */
+  async function signedInAgent(
+    email = `traveler-${Math.random().toString(36).slice(2)}@example.com`,
+  ) {
+    const agent = request.agent(app.getHttpServer());
+    const res = await agent.post('/api/auth/register').send({
+      email,
+      password: 'correct horse battery staple',
+      displayName: 'Test Traveler',
+    });
+    expect(res.status).toBe(201);
+    return agent;
+  }
 
   it('reports health', async () => {
     const res = await request(app.getHttpServer()).get('/health');
@@ -57,8 +72,17 @@ describe('gateway', () => {
     expect(planned.body.status).toBe('planning');
   });
 
-  it('answers a packing question from tools', async () => {
+  it('rejects chat from a signed-out caller', async () => {
     const res = await request(app.getHttpServer()).post('/api/chat').send({
+      content: 'Hello?',
+    });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('unauthenticated');
+  });
+
+  it('answers a packing question from tools', async () => {
+    const agent = await signedInAgent();
+    const res = await agent.post('/api/chat').send({
       content: 'What should I pack for Reykjavik for 4 days?',
     });
     expect(res.status).toBe(201);
@@ -68,7 +92,8 @@ describe('gateway', () => {
   });
 
   it('stores a remembered preference', async () => {
-    const res = await request(app.getHttpServer()).post('/api/chat').send({
+    const agent = await signedInAgent();
+    const res = await agent.post('/api/chat').send({
       content: '/remember I prefer trains to taxis',
     });
     expect(res.status).toBe(201);
@@ -80,14 +105,13 @@ describe('gateway', () => {
   });
 
   it('spins flight and stay desks, then accepts a decision', async () => {
-    const res = await request(app.getHttpServer()).post('/api/chat').send({
+    const agent = await signedInAgent();
+    const res = await agent.post('/api/chat').send({
       content: 'Book a flight and a hotel in Lisbon from Lagos on 2026-11-02',
     });
     expect(res.status).toBe(201);
     expect(res.body.message.content).toMatch(/Nothing is booked/);
-    const tasks = await request(app.getHttpServer()).get(
-      `/api/sessions/${res.body.session.id}/tasks`,
-    );
+    const tasks = await agent.get(`/api/sessions/${res.body.session.id}/tasks`);
     expect(tasks.status).toBe(200);
     expect(tasks.body).toHaveLength(2);
     expect(tasks.body.map((task: { agentName: string }) => task.agentName).sort()).toEqual([
@@ -100,12 +124,36 @@ describe('gateway', () => {
     expect(JSON.stringify(tasks.body)).toMatch(/Nothing was purchased/);
     expect(JSON.stringify(tasks.body)).not.toMatch(/ticket is booked|room is booked/i);
 
-    const decision = await request(app.getHttpServer())
+    const decision = await agent
       .post(`/api/tasks/${tasks.body[0].id}/decision`)
       .send({ decision: 'complete' });
     expect(decision.status).toBe(201);
     expect(decision.body.status).toBe('accepted');
     expect(decision.body.summary).toMatch(/Nothing was purchased/);
+  });
+
+  it('keeps chats scoped to the account that opened them', async () => {
+    const alice = await signedInAgent();
+    const bob = await signedInAgent();
+
+    const opened = await alice.post('/api/chat').send({ content: 'Hi from Alice' });
+    expect(opened.status).toBe(201);
+    const sessionId = opened.body.session.id;
+
+    const aliceList = await alice.get('/api/sessions');
+    expect(aliceList.body.some((s: { id: string }) => s.id === sessionId)).toBe(true);
+
+    const bobList = await bob.get('/api/sessions');
+    expect(bobList.body.some((s: { id: string }) => s.id === sessionId)).toBe(false);
+
+    // Bob guessing Alice's session id gets a 404, not a peek at her transcript.
+    const bobRead = await bob.get(`/api/sessions/${sessionId}`);
+    expect(bobRead.status).toBe(404);
+
+    const bobMessage = await bob.post(`/api/sessions/${sessionId}/messages`).send({
+      content: 'Trying to butt in',
+    });
+    expect(bobMessage.status).toBe(404);
   });
 
   it('rejects an inverted date range', async () => {

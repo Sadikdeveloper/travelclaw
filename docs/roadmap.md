@@ -17,12 +17,12 @@ Checked on 2026-09-25, after `5b4e911`.
 - [x] Traveler surface is a chat plus a sidebar of chats
 - [x] A flight request, a hotel request, or both wakes one or two desks in parallel
 - [x] When a desk finishes, the traveler can answer yes complete, no, or still working
+- [x] **Accounts.** Email register and sign-in, cookie session, and Google sign-in behind `TRAVELCLAW_GOOGLE_CLIENT_ID`. Chats belong to the signed-in account.
 
 Those desks write a brief. They do not search a provider, hold a seat, or take payment.
 
 ## Next, in this order
 
-- [ ] **Accounts.** Email register and sign-in first. Google sign-in second, behind a client id the operator sets. Chats belong to that account. Today every chat sits on the one local desk.
 - [ ] **Model-called tools.** We keep adding the tools. An OpenAI-compatible model requests one. The router stays as fallback. Users do not add tools in this step.
 - [ ] **User-added connectors.** Only after built-in tools are called by the model. A connector is a key the traveler provides, not a new language.
 - [ ] **Flight and stay search** behind an explicit provider key. The desks already ask yes / no / still working. A provider may return offers. It must not claim a hold until the provider says one exists. No card storage.

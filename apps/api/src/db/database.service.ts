@@ -21,6 +21,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA foreign_keys = ON');
     this.migrateLegacyNames();
+    this.migrateToAccounts();
+    this.migrateToGuests();
     this.db.exec(SCHEMA);
   }
 
@@ -52,6 +54,43 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         this.db.exec(`ALTER TABLE ${runTable} RENAME COLUMN skill TO tool`);
       }
     }
+  }
+
+  /**
+   * Sessions now belong to an account (`user_id`, NOT NULL). Pre-account installs have
+   * no owner to assign, so those chats and their child rows are dropped on upgrade —
+   * there is no migration framework yet, per docs/architecture.md. Trips and memory are
+   * desk-wide and are left alone.
+   */
+  private migrateToAccounts() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('sessions')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(sessions)');
+    if (columns.some((column) => column.name === 'user_id')) return;
+    this.db.exec('DROP TABLE IF EXISTS agent_tasks');
+    this.db.exec('DROP TABLE IF EXISTS messages');
+    this.db.exec('DROP TABLE IF EXISTS sessions');
+  }
+
+  /**
+   * Guest (no-signup) accounts need a flag to tell them apart from real ones. Real
+   * accounts on an existing install predate this column, so it is added in place —
+   * everyone already there defaults to `is_guest = 0`, which is correct for them.
+   */
+  private migrateToGuests() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('users')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(users)');
+    if (columns.some((column) => column.name === 'is_guest')) return;
+    this.db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0');
   }
 
   onModuleDestroy() {

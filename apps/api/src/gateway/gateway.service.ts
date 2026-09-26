@@ -34,32 +34,38 @@ export class GatewayService {
     private readonly events: EventsService,
   ) {}
 
-  async handleIncoming(input: {
-    content: string;
-    agentId?: string;
-    channel?: string;
-    peerId?: string;
-    sessionId?: string;
-  }): Promise<ChatResponse> {
+  async handleIncoming(
+    input: {
+      content: string;
+      agentId?: string;
+      channel?: string;
+      peerId?: string;
+      sessionId?: string;
+    },
+    userId: string,
+  ): Promise<ChatResponse> {
     const agent = this.agents.resolve(input.agentId);
     const session = input.sessionId
-      ? this.sessions.get(input.sessionId)
-      : this.sessions.open({
-          agentId: agent.id,
-          channel: input.channel || WEBCHAT_CHANNEL,
-          peerId: input.peerId,
-        });
+      ? this.sessions.get(input.sessionId, userId)
+      : this.sessions.open(
+          {
+            agentId: agent.id,
+            channel: input.channel || WEBCHAT_CHANNEL,
+            peerId: input.peerId,
+          },
+          userId,
+        );
 
     if (input.content.trim().toLowerCase() === '/new') {
       const reset = this.sessions.reset(session.id);
-      const message = this.sessions.messages(reset.id).at(-1);
+      const message = this.sessions.messages(reset.id, userId).at(-1);
       if (!message) throw new Error('Reset did not leave a note');
       return { session: reset, message, tools: [], provider: 'desk', model: 'command' };
     }
 
     this.sessions.append(session.id, 'user', input.content);
     const desks = planAgentDesks(input.content);
-    if (desks.length) return this.startDesks(session.id, input.content, desks);
+    if (desks.length) return this.startDesks(session.id, input.content, desks, userId);
 
     const history = this.sessions.recentHistory(session.id).slice(0, -1);
     const files = this.workspace.readFiles();
@@ -121,8 +127,12 @@ export class GatewayService {
       provider: turn.provider,
       model: turn.model,
     });
-    const fresh = this.sessions.get(session.id);
-    this.events.emit('chat.completed', { sessionId: fresh.id, messageId: message.id });
+    const fresh = this.sessions.get(session.id, userId);
+    this.events.emit('chat.completed', {
+      sessionId: fresh.id,
+      messageId: message.id,
+      userId,
+    });
     this.logger.log(
       `${fresh.key} tools=${turn.tools.map((tool) => tool.name).join(',') || 'none'} via ${turn.provider}`,
     );
@@ -139,6 +149,7 @@ export class GatewayService {
     sessionId: string,
     content: string,
     desks: Array<'flight' | 'stay'>,
+    userId: string,
   ) {
     const names = desks.map((kind) => deskName(kind));
     const reply =
@@ -161,8 +172,12 @@ export class GatewayService {
     } else {
       await this.tasks.schedule(opened);
     }
-    const fresh = this.sessions.get(sessionId);
-    this.events.emit('chat.completed', { sessionId: fresh.id, messageId: message.id });
+    const fresh = this.sessions.get(sessionId, userId);
+    this.events.emit('chat.completed', {
+      sessionId: fresh.id,
+      messageId: message.id,
+      userId,
+    });
     this.logger.log(`${fresh.key} desks=${names.join(',')}`);
     return { session: fresh, message, tools: [], provider: 'desk', model: 'agents' };
   }

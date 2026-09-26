@@ -1,13 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { useAuth } from './auth';
+import { RequireAuth } from './components/RequireAuth';
 import { Shell } from './components/Shell';
-import { AgentsPage } from './pages/AgentsPage';
 import { ChatPage } from './pages/ChatPage';
-import { MemoryPage } from './pages/MemoryPage';
-import { ToolsPage } from './pages/ToolsPage';
-import { TripPage } from './pages/TripPage';
-import { TripsPage } from './pages/TripsPage';
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 
 const LiveContext = createContext(0);
 
@@ -17,8 +16,10 @@ export function useLiveRevision() {
 
 export function App() {
   const [revision, setRevision] = useState(0);
+  const { user } = useAuth();
 
   useEffect(() => {
+    if (!user) return undefined;
     const socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] });
     const bump = () => setRevision((value) => value + 1);
     socket.on('chat.completed', bump);
@@ -27,21 +28,20 @@ export function App() {
     return () => {
       socket.close();
     };
-  }, []);
+  }, [user]);
 
   return (
     <LiveContext.Provider value={revision}>
       <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<ChatPage />} />
-          <Route path="chat" element={<ChatPage />} />
-          <Route path="chat/:sessionId" element={<ChatPage />} />
-          <Route path="trips" element={<TripsPage />} />
-          <Route path="trips/:tripId" element={<TripPage />} />
-          <Route path="tools" element={<ToolsPage />} />
-          <Route path="memory" element={<MemoryPage />} />
-          <Route path="agents" element={<AgentsPage />} />
-          <Route path="*" element={<Missing />} />
+        <Route path="login" element={<LoginPage />} />
+        <Route path="register" element={<RegisterPage />} />
+        <Route element={<RequireAuth />}>
+          <Route element={<Shell />}>
+            <Route index element={<ChatPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="chat/:sessionId" element={<ChatPage />} />
+            <Route path="*" element={<Missing />} />
+          </Route>
         </Route>
       </Routes>
     </LiveContext.Provider>
@@ -53,9 +53,7 @@ function Missing() {
     <section>
       <p className="kicker">404</p>
       <h1>That page is not on the desk.</h1>
-      <p className="lede">
-        The gateway still has trips, chat, and memory. Head back to the desk.
-      </p>
+      <p className="lede">The desk only does chat right now. Head back and start one.</p>
     </section>
   );
 }

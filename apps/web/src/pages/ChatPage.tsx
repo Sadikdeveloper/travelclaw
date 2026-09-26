@@ -4,18 +4,21 @@ import type {
   SessionRecord,
   TaskDecision,
 } from '@travelclaw/shared';
-import { useEffect, useRef, useState } from 'react';
+import { Hotel, Plane, Send, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useLiveRevision } from '../App';
 import { api, ApiError } from '../api';
 import { AgentCard } from '../components/AgentCard';
 import { RichText } from '../components/RichText';
 import { Banner } from '../components/Status';
+import { useAuth } from '../auth';
+import { mirrorGuestMessages } from '../guestChatCache';
 
-const prompts = [
-  'Find a flight from Lagos to Lisbon on 2026-11-02',
-  'Book a hotel in Lisbon for 2 from 2026-11-02 to 2026-11-06',
-  'Flight and a hotel in Kyoto from 2026-11-02 to 2026-11-06',
+const prompts: Array<{ text: string; icon: ComponentType<{ size?: number }> }> = [
+  { text: 'Find a flight from Lagos to Lisbon on 2026-11-02', icon: Plane },
+  { text: 'Book a hotel in Lisbon for 2 from 2026-11-02 to 2026-11-06', icon: Hotel },
+  { text: 'Flight and a hotel in Kyoto from 2026-11-02 to 2026-11-06', icon: Sparkles },
 ];
 
 export function ChatPage() {
@@ -23,6 +26,7 @@ export function ChatPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const revision = useLiveRevision();
+  const { user } = useAuth();
   const generation = useRef(0);
   const [title, setTitle] = useState('New chat');
   const [messages, setMessages] = useState<MessageRecord[]>([]);
@@ -32,12 +36,22 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState('');
 
+  // The hero landing view only applies to a brand-new, not-yet-opened chat — once a
+  // specific chat id is in the URL, it always gets the normal thread, even mid-send.
+  const isLanding = !sessionId;
+
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
       setTasks([]);
       setTitle('New chat');
       return;
+    }
+    if (user?.isGuest) {
+      // Instant paint from this device's own cache while the network request is
+      // still in flight — nothing else backs a guest's chat on first render.
+      const cached = mirrorGuestMessages(user.id, sessionId);
+      if (cached.length) setMessages(cached);
     }
     const seq = ++generation.current;
     Promise.all([
@@ -51,11 +65,12 @@ export function ChatPage() {
         setTitle(opened.session.title);
         setMessages(opened.messages);
         setTasks(desks);
+        if (user?.isGuest) mirrorGuestMessages(user.id, sessionId, opened.messages);
       })
       .catch((err: unknown) =>
         setError(err instanceof ApiError ? err.message : 'Could not open that chat'),
       );
-  }, [sessionId, revision]);
+  }, [sessionId, revision, user]);
 
   async function decide(taskId: string, decision: TaskDecision) {
     setDeciding(taskId);
@@ -101,6 +116,7 @@ export function ChatPage() {
         setTitle(opened.session.title);
         setMessages(opened.messages);
         setTasks(desks);
+        if (user?.isGuest) mirrorGuestMessages(user.id, id, opened.messages);
       }
       if (!sessionId) navigate(`/chat/${id}`);
     } catch (err) {
@@ -111,29 +127,88 @@ export function ChatPage() {
     }
   }
 
+  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void send(draft);
+    }
+  }
+
+  if (isLanding) {
+    return (
+      <div className="chat-layout chat-landing">
+        <section className="hero">
+          <div className="hero-inner">
+            <img src="/mark.svg" alt="" className="hero-mark" />
+            <span className="agentic-badge">
+              <Sparkles size={13} aria-hidden="true" />
+              Agentic chat
+            </span>
+            <h1>Your next trip, one message away.</h1>
+            <p className="hero-sub">
+              Ask for a flight, a hotel, or both. A desk spins up for each one — nothing
+              books until you say so.
+            </p>
+            {error ? <Banner message={error} tone="bad" /> : null}
+            <form
+              className="hero-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void send(draft);
+              }}
+            >
+              <label className="sr-only" htmlFor="hero-draft">
+                Message
+              </label>
+              <textarea
+                id="hero-draft"
+                rows={1}
+                value={draft}
+                placeholder="A flight, a hotel, or both"
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={onComposerKeyDown}
+              />
+              <button
+                className="hero-send"
+                type="submit"
+                disabled={sending || !draft.trim()}
+                aria-label="Send"
+              >
+                <Send size={18} aria-hidden="true" />
+              </button>
+            </form>
+            <div className="hero-chips">
+              {prompts.map(({ text, icon: Icon }) => (
+                <button
+                  key={text}
+                  type="button"
+                  disabled={sending}
+                  onClick={() => void send(text)}
+                >
+                  <Icon size={14} />
+                  {text}
+                </button>
+              ))}
+            </div>
+            {sending ? <p className="muted hero-sending">Sending…</p> : null}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-layout">
       <section className="thread">
         <header className="thread-head">
           <strong>{title}</strong>
+          <span className="agentic-badge agentic-badge-inline">
+            <Sparkles size={12} aria-hidden="true" />
+            Agentic
+          </span>
         </header>
         <div className="transcript" aria-live="polite">
           {error ? <Banner message={error} tone="bad" /> : null}
-          {messages.length === 0 ? (
-            <div className="empty">
-              <p>
-                Ask for a flight, a hotel, or both. A desk spins up for each one. Nothing is
-                booked until you say so.
-              </p>
-              <div className="chips">
-                {prompts.map((prompt) => (
-                  <button key={prompt} type="button" onClick={() => send(prompt)}>
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {messages.map((message) => (
             <div key={message.id} className="turn">
               <article className={message.role === 'user' ? 'bubble user' : 'bubble'}>
@@ -170,12 +245,7 @@ export function ChatPage() {
               value={draft}
               placeholder="A flight, a hotel, or both"
               onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void send(draft);
-                }
-              }}
+              onKeyDown={onComposerKeyDown}
             />
           </label>
           <div className="row">
