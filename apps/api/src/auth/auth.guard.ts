@@ -19,9 +19,15 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request & { user?: UserRecord }>();
     const user = readUser(request, this.auth);
     if (!user) {
+      // A caller that sent a cookie has a stale session, not a reason to sign in — the
+      // control UI recovers a lapsed guest silently and replays the request. "Sign in to
+      // use this." is reserved for a caller that never had a session at all.
+      const token = parseCookies(request.headers.cookie)[loadConfig().cookieName];
       throw new UnauthorizedException({
         code: 'unauthenticated',
-        message: 'Sign in to use this.',
+        message: token
+          ? 'That session has expired. Sign in again.'
+          : 'Sign in to use this.',
       });
     }
     request.user = user;

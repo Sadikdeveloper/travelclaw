@@ -53,8 +53,15 @@ export class ChatController {
 
   private checkTurnLimit(req: Request, user: UserRecord): void {
     if (user.isGuest) {
-      if (!this.guestIpLimiter.consume(clientKey(req)) || !this.guestLimiter.consume(user.id)) {
-        throw rateLimited();
+      if (
+        !this.guestIpLimiter.consume(clientKey(req)) ||
+        !this.guestLimiter.consume(user.id)
+      ) {
+        // Same reasoning as the guest-minting cap in AuthController: a guest hitting a
+        // pace limit is not being asked to sign in, and the copy should not imply it.
+        throw rateLimited(
+          'Guest chats are paced at 15 turns every 10 minutes. Wait a few minutes, or sign in for a higher limit.',
+        );
       }
       return;
     }
