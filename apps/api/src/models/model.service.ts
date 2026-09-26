@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { mockProvider, type ModelProvider } from '@travelclaw/agent-core';
 import type { ModelCatalogRecord, ModelRecord } from '@travelclaw/shared';
 import { loadConfig } from '../config';
@@ -25,27 +25,13 @@ export class ModelService {
   }
 
   /**
-   * The model a turn should run on: the one the request named, or the desk's default.
-   * A named model that does not exist, or exists but cannot run, is an error — a traveler
-   * who asked for a specific model must never be served by a different one silently.
+   * The model a turn runs on: the best available one this deployment has. Nobody chooses,
+   * so there is no id to resolve and nothing to substitute — guests and signed-in accounts
+   * are answered by the same model, and only the pace on it differs.
    */
-  resolve(id?: string): ModelRecord {
+  best(): ModelRecord {
     const { models, current } = this.catalog();
-    if (!id) return models.find((entry) => entry.id === current) ?? models[0];
-    const model = models.find((entry) => entry.id === id);
-    if (!model) {
-      throw new BadRequestException({
-        code: 'model_unknown',
-        message: `This desk does not run "${id}".`,
-      });
-    }
-    if (!model.available) {
-      throw new BadRequestException({
-        code: 'model_unavailable',
-        message: `${model.label} is not available yet — it needs a provider key. The desk model works without one.`,
-      });
-    }
-    return model;
+    return models.find((entry) => entry.id === current) ?? models[0];
   }
 
   providerFor(model: ModelRecord): ModelProvider {
