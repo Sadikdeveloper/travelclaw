@@ -73,6 +73,23 @@ guest's chat list and transcripts into `localStorage` (`apps/web/src/guestChatCa
 purely so the UI paints instantly on reload — the server copy under that guest id
 remains the source of truth.
 
+### Sessions that do not depend on a cookie
+
+`SameSite=Lax` HttpOnly cookies are the primary credential, and the reason a browser that
+cannot keep them is a real case: in a cross-site iframe or with third-party cookies blocked,
+the browser accepts the `Set-Cookie` and never sends it back. Every request then arrives
+anonymous, and because the control UI provisions a guest on load, that turns into one new
+guest per page load until the mint cap trips.
+
+So sign-in and guest routes also return `sessionToken` in the body, the same opaque token
+the cookie carries, and `AuthGuard` accepts it as `Authorization: Bearer`. The cookie wins
+when both are present. The web client keeps the token in `localStorage`
+(`apps/web/src/sessionToken.ts`) and sends it on every request; on a 401 it re-provisions the
+guest, stores the new token, and replays the request once. `localStorage` rather than
+`sessionStorage` so a preview that reloads the frame reuses one session instead of minting
+another. The token is bearer-style, so an XSS could read it — that is the trade-off, weighed
+against a desk that simply does not work in an embedded frame; see `docs/security.md`.
+
 A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
 `problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —
 an account is optional on this desk, so a pace limit on new guest sessions must not read

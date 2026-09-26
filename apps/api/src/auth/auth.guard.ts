@@ -8,7 +8,7 @@ import type { UserRecord } from '@travelclaw/shared';
 import type { Request } from 'express';
 import { loadConfig } from '../config';
 import { AuthService } from './auth.service';
-import { parseCookies } from './tokens';
+import { sessionTokenOf } from './tokens';
 
 /** Rejects anonymous callers on account-owned routes. Attaches `request.user`. */
 @Injectable()
@@ -19,10 +19,10 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request & { user?: UserRecord }>();
     const user = readUser(request, this.auth);
     if (!user) {
-      // A caller that sent a cookie has a stale session, not a reason to sign in — the
-      // control UI recovers a lapsed guest silently and replays the request. "Sign in to
-      // use this." is reserved for a caller that never had a session at all.
-      const token = parseCookies(request.headers.cookie)[loadConfig().cookieName];
+      // A caller that presented a token has a stale session, not a reason to sign in —
+      // the control UI recovers a lapsed guest silently and replays the request. "Sign in
+      // to use this." is reserved for a caller that never had a session at all.
+      const token = sessionTokenOf(request.headers, loadConfig().cookieName);
       throw new UnauthorizedException({
         code: 'unauthenticated',
         message: token
@@ -40,8 +40,5 @@ export function readUser(
   request: Request & { user?: UserRecord },
   auth: AuthService,
 ): UserRecord | null {
-  const config = loadConfig();
-  const cookies = parseCookies(request.headers.cookie);
-  const token = cookies[config.cookieName];
-  return auth.verifyToken(token);
+  return auth.verifyToken(sessionTokenOf(request.headers, loadConfig().cookieName));
 }

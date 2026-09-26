@@ -38,6 +38,14 @@ export interface AuthResult {
   expiresAt: Date;
 }
 
+/**
+ * New guest sessions allowed from one address per hour. Deliberately loose: the control UI
+ * mints a guest per browser profile, a household shares one address, and a desktop behind a
+ * reverse proxy can look like a single caller. What actually bounds cost is the per-guest
+ * and per-IP turn limits in `ChatController`, so this only has to stop a mint flood.
+ */
+export const GUEST_MINTS_PER_IP_PER_HOUR = 60;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -48,7 +56,7 @@ export class AuthService {
    * Guest accounts need no password and no email confirmation, so per-IP creation is
    * the only real brake on someone minting thousands of them to dodge other limits.
    */
-  readonly guestLimiter = new RateLimiter(20, 60 * 60 * 1000);
+  readonly guestLimiter = new RateLimiter(GUEST_MINTS_PER_IP_PER_HOUR, 60 * 60 * 1000);
 
   constructor(private readonly db: DatabaseService) {}
 
@@ -170,7 +178,10 @@ export class AuthService {
       });
     }
     const email = claims.email.trim().toLowerCase();
-    const bySub = this.db.get<UserRow>('SELECT * FROM users WHERE google_id = ?', claims.sub);
+    const bySub = this.db.get<UserRow>(
+      'SELECT * FROM users WHERE google_id = ?',
+      claims.sub,
+    );
     if (bySub) {
       this.absorbGuest(guestId, bySub.id);
       return this.issueSession(this.getRowById(bySub.id));
@@ -270,7 +281,10 @@ export class AuthService {
 
   private findGuest(guestId: string | undefined): UserRow | undefined {
     if (!guestId) return undefined;
-    return this.db.get<UserRow>('SELECT * FROM users WHERE id = ? AND is_guest = 1', guestId);
+    return this.db.get<UserRow>(
+      'SELECT * FROM users WHERE id = ? AND is_guest = 1',
+      guestId,
+    );
   }
 
   /**
@@ -285,7 +299,11 @@ export class AuthService {
     const guest = this.findGuest(guestId);
     if (!guest) return;
     try {
-      this.db.run('UPDATE sessions SET user_id = ? WHERE user_id = ?', targetUserId, guestId);
+      this.db.run(
+        'UPDATE sessions SET user_id = ? WHERE user_id = ?',
+        targetUserId,
+        guestId,
+      );
     } catch (error) {
       this.logger.warn(`Could not fold guest ${guestId} chats into ${targetUserId}`, error);
       return;

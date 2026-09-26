@@ -1,4 +1,4 @@
-import type { AuthConfig, UserRecord } from '@travelclaw/shared';
+import type { AuthConfig, AuthSessionResponse, UserRecord } from '@travelclaw/shared';
 import {
   createContext,
   useCallback,
@@ -9,6 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 import { api, ApiError, setSessionRecovery } from './api';
+import { clearSessionToken, storeTokenFrom } from './sessionToken';
+
+/**
+ * How long to wait before another attempt at restoring a session. A page reloading in a
+ * loop (an embedded preview, a flaky socket) would otherwise mint a guest per request.
+ */
+const RECOVERY_COOLDOWN_MS = 5000;
+let lastRecoveryFailure = 0;
 
 /** Why the desk could not stand up a session. Shown as-is, with a retry — never a login wall. */
 export interface AuthProblem {
@@ -64,7 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A signed-out visitor is the normal case here, not an error to surface.
     }
     try {
-      setUser(await api<UserRecord>('/api/auth/guest', { method: 'POST' }));
+      const guest = await api<AuthSessionResponse>('/api/auth/guest', { method: 'POST' });
+      storeTokenFrom(guest);
+      setUser(guest);
       setProblem(null);
     } catch (error) {
       setUser(null);
@@ -78,8 +88,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, [start]);
 
-  /** Any caller that lands an account (sign-in, register, Google) also clears a failure. */
+  /**
+   * Any caller that lands an account (sign-in, register, Google) also clears a failure and
+   * keeps the token that came with it. A null account is a sign-out: drop the token too.
+   */
   const applyUser = useCallback((account: UserRecord | null) => {
+    storeTokenFrom(account);
+    if (!account) clearSessionToken();
     setUser(account);
     if (account) setProblem(null);
   }, []);
@@ -104,11 +119,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSessionRecovery(async () => {
       if (user && !user.isGuest) return false;
+      // A page that reloads in a tight loop must not spend the guest budget one mint per
+      // request: after a failed recovery, wait out a short window before trying again.
+      if (Date.now() - lastRecoveryFailure < RECOVERY_COOLDOWN_MS) return false;
       try {
-        setUser(await api<UserRecord>('/api/auth/guest', { method: 'POST' }));
+        const guest = await api<AuthSessionResponse>('/api/auth/guest', { method: 'POST' });
+        storeTokenFrom(guest);
+        setUser(guest);
         setProblem(null);
         return true;
       } catch (error) {
+        lastRecoveryFailure = Date.now();
         // The old guest is spent. Drop it, so the UI shows the reason and a retry
         // instead of a chat page whose every request will fail.
         setUser(null);
@@ -126,14 +147,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Land back on a guest instead of a dead end — signing out should not force a
       // real sign-in just to keep using the desk.
       try {
-        setUser(await api<UserRecord>('/api/auth/guest', { method: 'POST' }));
+        const guest = await api<AuthSessionResponse>('/api/auth/guest', { method: 'POST' });
+        storeTokenFrom(guest);
+        setUser(guest);
         setProblem(null);
       } catch (error) {
-        setUser(null);
+        applyUser(null);
         setProblem(describeProblem(error));
       }
     }
-  }, []);
+  }, [applyUser]);
 
   const value = useMemo(
     () => ({ user, loading, problem, googleClientId, setUser: applyUser, refresh, logout }),

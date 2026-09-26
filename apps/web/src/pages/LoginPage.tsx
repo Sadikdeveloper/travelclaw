@@ -5,7 +5,7 @@ import { useAuth } from '../auth';
 import { Banner } from '../components/Status';
 import { GoogleButton } from '../components/GoogleButton';
 import { clearGuestCache } from '../guestChatCache';
-import type { UserRecord } from '@travelclaw/shared';
+import type { AuthSessionResponse, UserRecord } from '@travelclaw/shared';
 
 export function LoginPage() {
   const { setUser, googleClientId, user } = useAuth();
@@ -39,7 +39,7 @@ export function LoginPage() {
     setBusy(true);
     setError('');
     try {
-      const account = await api<UserRecord>('/api/auth/login', {
+      const account = await api<AuthSessionResponse>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
