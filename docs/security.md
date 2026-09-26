@@ -13,12 +13,12 @@ Pairing below before you expose this past your own machine.
 
 ## Accounts
 
-- Passwords are hashed with scrypt (`apps/api/src/auth/password.ts`), salted per user. The plaintext password is never written to disk or logged.
+- Passwords are hashed with Argon2id (`apps/api/src/auth/password.ts`, via `hash-wasm`), OWASP's current first-choice algorithm, salted per user with parameters from OWASP's Password Storage Cheat Sheet (m=19 MiB, t=2, p=1). The plaintext password is never written to disk or logged. A hash minted by an earlier build of this branch with scrypt still verifies and is transparently upgraded to Argon2id the next time that account logs in.
 - A session is a random 256-bit token. Only its SHA-256 hash is stored (`auth_sessions`); the browser holds the raw token in an `HttpOnly`, `SameSite=Lax` cookie so client-side JavaScript cannot read it and a plain cross-site form post cannot ride along.
 - Set `TRAVELCLAW_COOKIE_SECURE=1` once you are behind HTTPS so that cookie is also marked `Secure`. It defaults to off for local http development.
 - Login and registration are rate-limited per caller. Login failures return the same generic error whether the email does not exist, the password is wrong, or the account only has a Google sign-in — that keeps a failed attempt from confirming whether an email is registered.
 - A chat (`sessions` row) belongs to exactly one account. A request for another account's chat id gets a 404, the same response as a chat that does not exist.
-- Google sign-in is opt-in per deploy: it only activates when the operator sets `TRAVELCLAW_GOOGLE_CLIENT_ID`, and the gateway checks the credential's audience and verified-email claim before trusting it.
+- Google sign-in is opt-in per deploy: it only activates when the operator sets `TRAVELCLAW_GOOGLE_CLIENT_ID`. The credential's RS256 signature is verified locally against Google's published JWKS (`apps/api/src/auth/google-verify.ts`), not by calling Google's `tokeninfo` endpoint per login, and the gateway checks issuer, expiry, audience, and the verified-email claim before trusting it.
 - There is no password reset flow yet and no email is ever sent. A traveler who forgets a password needs a new account or a direct database fix.
 
 ## Pairing (still open)

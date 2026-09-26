@@ -43,15 +43,15 @@ export class AuthController {
 
   @Post('register')
   @ApiOperation({ summary: 'Create an account with an email and password' })
-  register(
+  async register(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
-  ): UserRecord {
+  ): Promise<UserRecord> {
     if (!this.auth.registerLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
-    const result = this.auth.register(body.email, body.password, body.displayName);
+    const result = await this.auth.register(body.email, body.password, body.displayName);
     setSessionCookie(res, result.token, result.expiresAt);
     return result.user;
   }
@@ -59,15 +59,15 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @ApiOperation({ summary: 'Sign in with an email and password' })
-  login(
+  async login(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
-  ): UserRecord {
+  ): Promise<UserRecord> {
     if (!this.auth.loginLimiter.consume(`${clientKey(req)}:${body.email}`)) {
       throw rateLimited();
     }
-    const result = this.auth.login(body.email, body.password);
+    const result = await this.auth.login(body.email, body.password);
     setSessionCookie(res, result.token, result.expiresAt);
     return result.user;
   }

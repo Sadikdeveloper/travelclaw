@@ -29,24 +29,34 @@ flowchart LR
 ## Accounts
 
 `apps/api/src/auth` owns sign-in. `users` holds email (unique, lowercase), an optional
-scrypt password hash (`hashPassword`/`verifyPassword` in `auth/password.ts`, no
-dependency — Node's built-in `crypto.scrypt`), an optional `google_id`, and a display
-name. Signing in issues an opaque random token; only its SHA-256 hash is written to
-`auth_sessions`, and the raw token goes to the browser as an `HttpOnly`, `SameSite=Lax`
-cookie (`travelclaw_session`). `AuthGuard` reads that cookie, looks up the hash, and
-attaches the account to the request; routes without the guard stay anonymous, routes
-with it 401 a signed-out caller.
+password hash (`hashPassword`/`verifyPassword` in `auth/password.ts`), an optional
+`google_id`, and a display name. Passwords are hashed with Argon2id (OWASP's current
+top recommendation) via `hash-wasm` — WebAssembly, zero runtime dependencies, no native
+compilation, consistent with this repo's preference for `node:sqlite` over
+`better-sqlite3`. A password hashed by an earlier build of this branch with scrypt
+still verifies (`isLegacyScryptHash`/legacy path in `password.ts`) and is silently
+re-hashed to Argon2id the next time that account signs in successfully — no action
+needed from the traveler, and no new scrypt hash is ever minted. Signing in issues an
+opaque random token; only its SHA-256 hash is written to `auth_sessions`, and the raw
+token goes to the browser as an `HttpOnly`, `SameSite=Lax` cookie
+(`travelclaw_session`). `AuthGuard` reads that cookie, looks up the hash, and attaches
+the account to the request; routes without the guard stay anonymous, routes with it
+401 a signed-out caller.
 
 Chats (`sessions`) carry a `user_id` and every read is filtered by it — a mismatched or
 guessed id 404s rather than 403s, so it does not confirm another traveler's chat exists.
 Trips, memory, and tools stay desk-wide for now; only chat history is account-scoped.
 
 Google sign-in is `POST /api/auth/google` with the Identity Services `credential` (a
-JWT). The gateway verifies it against Google's `tokeninfo` endpoint, checks the
-audience against `TRAVELCLAW_GOOGLE_CLIENT_ID`, and requires a verified email. A first
-sign-in links to an existing password account with the same email, or creates one.
-`GET /api/auth/config` reports whether a client id is set; the control UI only renders
-the Google button when it is.
+JWT). The gateway verifies its RS256 signature locally against Google's published JWKS
+(`https://www.googleapis.com/oauth2/v3/certs`, cached in memory for an hour and
+re-fetched on a `kid` miss — see `auth/google-verify.ts`), then checks issuer,
+expiry, the audience against `TRAVELCLAW_GOOGLE_CLIENT_ID`, and that the email is
+verified. Google's own guidance discourages calling the `tokeninfo` endpoint per login
+in production (it is rate-limited and adds a network hop to every sign-in), so this
+avoids that endpoint entirely. A first sign-in links to an existing password account
+with the same email, or creates one. `GET /api/auth/config` reports whether a client
+id is set; the control UI only renders the Google button when it is.
 
 Login and registration are rate-limited per caller (in-memory, resets on restart) to
 slow down brute force. A login failure reports the same message whether the email is

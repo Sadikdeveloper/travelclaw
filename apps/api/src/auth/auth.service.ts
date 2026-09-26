@@ -1,7 +1,6 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -9,7 +8,8 @@ import type { UserRecord } from '@travelclaw/shared';
 import { newId, nowIso } from '../common/util';
 import { loadConfig } from '../config';
 import { DatabaseService } from '../db/database.service';
-import { hashPassword, verifyPassword } from './password';
+import { GoogleTokenError, verifyGoogleIdToken } from './google-verify';
+import { hashPassword, isLegacyScryptHash, verifyPassword } from './password';
 import { RateLimiter } from './rate-limiter';
 import { hashToken, newSessionToken } from './tokens';
 
@@ -36,24 +36,15 @@ export interface AuthResult {
   expiresAt: Date;
 }
 
-interface GoogleTokenInfo {
-  aud?: string;
-  email?: string;
-  email_verified?: string | boolean;
-  name?: string;
-  sub?: string;
-}
-
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
   /** 10 attempts per 10 minutes per key is generous for a real traveler, punishing for a script. */
   readonly loginLimiter = new RateLimiter(10, 10 * 60 * 1000);
   readonly registerLimiter = new RateLimiter(10, 60 * 60 * 1000);
 
   constructor(private readonly db: DatabaseService) {}
 
-  register(email: string, password: string, displayName?: string): AuthResult {
+  async register(email: string, password: string, displayName?: string): Promise<AuthResult> {
     const existing = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
     if (existing) {
       throw new ConflictException({
@@ -64,12 +55,13 @@ export class AuthService {
     const now = nowIso();
     const id = newId();
     const name = (displayName || '').trim() || email.split('@')[0];
+    const passwordHash = await hashPassword(password);
     this.db.run(
       `INSERT INTO users (id, email, password_hash, display_name, google_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, NULL, ?, ?)`,
       id,
       email,
-      hashPassword(password),
+      passwordHash,
       name,
       now,
       now,
@@ -78,15 +70,28 @@ export class AuthService {
     return this.issueSession(row);
   }
 
-  login(email: string, password: string): AuthResult {
+  async login(email: string, password: string): Promise<AuthResult> {
     const row = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
     // Same generic failure whether the email is unknown, the password is wrong, or the
     // account has no password (Google-only) — anything else tells an attacker the email exists.
-    if (!row || !verifyPassword(password, row.password_hash)) {
+    const valid = await verifyPassword(password, row?.password_hash ?? null);
+    if (!row || !valid) {
       throw new UnauthorizedException({
         code: 'invalid_credentials',
         message: 'That email and password do not match.',
       });
+    }
+    // Quiet algorithm migration: a hash written before Argon2id was wired up upgrades
+    // to it the next time its owner successfully signs in, with no action from them.
+    if (isLegacyScryptHash(row.password_hash)) {
+      const upgraded = await hashPassword(password);
+      this.db.run(
+        'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
+        upgraded,
+        nowIso(),
+        row.id,
+      );
+      return this.issueSession(this.getRowById(row.id));
     }
     return this.issueSession(row);
   }
@@ -105,27 +110,21 @@ export class AuthService {
         message: 'Google sign-in needs network access, which is off right now.',
       });
     }
-    const info = await this.verifyGoogleCredential(credential);
-    if (info.aud !== config.googleClientId) {
+    const claims = await this.verifyGoogleCredential(credential);
+    if (claims.aud !== config.googleClientId) {
       throw new UnauthorizedException({
         code: 'google_audience_mismatch',
         message: 'That Google credential was not issued for this desk.',
       });
     }
-    if (info.email_verified !== true && info.email_verified !== 'true') {
+    if (!claims.emailVerified) {
       throw new UnauthorizedException({
         code: 'google_email_unverified',
         message: 'That Google account has no verified email.',
       });
     }
-    if (!info.sub || !info.email) {
-      throw new UnauthorizedException({
-        code: 'google_invalid_token',
-        message: 'That Google credential is missing required claims.',
-      });
-    }
-    const email = info.email.trim().toLowerCase();
-    const bySub = this.db.get<UserRow>('SELECT * FROM users WHERE google_id = ?', info.sub);
+    const email = claims.email.trim().toLowerCase();
+    const bySub = this.db.get<UserRow>('SELECT * FROM users WHERE google_id = ?', claims.sub);
     if (bySub) return this.issueSession(bySub);
 
     const byEmail = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
@@ -135,7 +134,7 @@ export class AuthService {
       // the accounts instead of creating a second row a traveler would not recognize.
       this.db.run(
         'UPDATE users SET google_id = ?, updated_at = ? WHERE id = ?',
-        info.sub,
+        claims.sub,
         now,
         byEmail.id,
       );
@@ -148,8 +147,8 @@ export class AuthService {
        VALUES (?, ?, NULL, ?, ?, ?, ?)`,
       id,
       email,
-      (info.name || '').trim() || email.split('@')[0],
-      info.sub,
+      (claims.name || '').trim() || email.split('@')[0],
+      claims.sub,
       now,
       now,
     );
@@ -203,25 +202,24 @@ export class AuthService {
     return row;
   }
 
-  private async verifyGoogleCredential(credential: string): Promise<GoogleTokenInfo> {
-    const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
-    let response: Response;
+  private async verifyGoogleCredential(credential: string) {
     try {
-      response = await fetch(url);
+      return await verifyGoogleIdToken(credential);
     } catch (error) {
-      this.logger.error('Google tokeninfo request failed', error);
-      throw new ServiceUnavailableException({
-        code: 'google_unreachable',
-        message: 'Could not reach Google to verify that credential.',
-      });
+      if (error instanceof GoogleTokenError) {
+        if (error.code === 'jwks_unreachable') {
+          throw new ServiceUnavailableException({
+            code: 'google_unreachable',
+            message: 'Could not reach Google to verify that credential.',
+          });
+        }
+        throw new UnauthorizedException({
+          code: 'google_invalid_token',
+          message: 'Google rejected that credential.',
+        });
+      }
+      throw error;
     }
-    if (!response.ok) {
-      throw new UnauthorizedException({
-        code: 'google_invalid_token',
-        message: 'Google rejected that credential.',
-      });
-    }
-    return (await response.json()) as GoogleTokenInfo;
   }
 }
 
