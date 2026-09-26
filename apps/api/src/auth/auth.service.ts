@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ interface UserRow {
   password_hash: string | null;
   display_name: string;
   google_id: string | null;
+  is_guest: number;
   created_at: string;
   updated_at: string;
 }
@@ -38,13 +40,42 @@ export interface AuthResult {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   /** 10 attempts per 10 minutes per key is generous for a real traveler, punishing for a script. */
   readonly loginLimiter = new RateLimiter(10, 10 * 60 * 1000);
   readonly registerLimiter = new RateLimiter(10, 60 * 60 * 1000);
+  /**
+   * Guest accounts need no password and no email confirmation, so per-IP creation is
+   * the only real brake on someone minting thousands of them to dodge other limits.
+   */
+  readonly guestLimiter = new RateLimiter(20, 60 * 60 * 1000);
 
   constructor(private readonly db: DatabaseService) {}
 
-  async register(email: string, password: string, displayName?: string): Promise<AuthResult> {
+  /** A no-signup, device-local identity: real enough to own chats, nothing to leak if abandoned. */
+  async createGuest(): Promise<AuthResult> {
+    const now = nowIso();
+    const id = newId();
+    // Never shown in the UI and never a login target — just a unique key for the UNIQUE(email) column.
+    const email = `guest-${id}@guest.travelclaw.local`;
+    this.db.run(
+      `INSERT INTO users (id, email, password_hash, display_name, google_id, is_guest, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, NULL, 1, ?, ?)`,
+      id,
+      email,
+      'Guest',
+      now,
+      now,
+    );
+    return this.issueSession(this.getRowById(id));
+  }
+
+  async register(
+    email: string,
+    password: string,
+    displayName?: string,
+    guestId?: string,
+  ): Promise<AuthResult> {
     const existing = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
     if (existing) {
       throw new ConflictException({
@@ -53,9 +84,23 @@ export class AuthService {
       });
     }
     const now = nowIso();
-    const id = newId();
     const name = (displayName || '').trim() || email.split('@')[0];
     const passwordHash = await hashPassword(password);
+    const guest = this.findGuest(guestId);
+    if (guest) {
+      // Turn the guest's own row into the real account instead of creating a second one —
+      // its chats already carry this id, so they come along for free, no data to move.
+      this.db.run(
+        'UPDATE users SET email = ?, password_hash = ?, display_name = ?, is_guest = 0, updated_at = ? WHERE id = ?',
+        email,
+        passwordHash,
+        name,
+        now,
+        guest.id,
+      );
+      return this.issueSession(this.getRowById(guest.id));
+    }
+    const id = newId();
     this.db.run(
       `INSERT INTO users (id, email, password_hash, display_name, google_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, NULL, ?, ?)`,
@@ -70,7 +115,7 @@ export class AuthService {
     return this.issueSession(row);
   }
 
-  async login(email: string, password: string): Promise<AuthResult> {
+  async login(email: string, password: string, guestId?: string): Promise<AuthResult> {
     const row = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
     // Same generic failure whether the email is unknown, the password is wrong, or the
     // account has no password (Google-only) — anything else tells an attacker the email exists.
@@ -81,6 +126,7 @@ export class AuthService {
         message: 'That email and password do not match.',
       });
     }
+    this.absorbGuest(guestId, row.id);
     // Quiet algorithm migration: a hash written before Argon2id was wired up upgrades
     // to it the next time its owner successfully signs in, with no action from them.
     if (isLegacyScryptHash(row.password_hash)) {
@@ -93,10 +139,10 @@ export class AuthService {
       );
       return this.issueSession(this.getRowById(row.id));
     }
-    return this.issueSession(row);
+    return this.issueSession(this.getRowById(row.id));
   }
 
-  async loginWithGoogle(credential: string): Promise<AuthResult> {
+  async loginWithGoogle(credential: string, guestId?: string): Promise<AuthResult> {
     const config = loadConfig();
     if (!config.googleClientId) {
       throw new ServiceUnavailableException({
@@ -125,7 +171,10 @@ export class AuthService {
     }
     const email = claims.email.trim().toLowerCase();
     const bySub = this.db.get<UserRow>('SELECT * FROM users WHERE google_id = ?', claims.sub);
-    if (bySub) return this.issueSession(bySub);
+    if (bySub) {
+      this.absorbGuest(guestId, bySub.id);
+      return this.issueSession(this.getRowById(bySub.id));
+    }
 
     const byEmail = this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', email);
     const now = nowIso();
@@ -138,7 +187,24 @@ export class AuthService {
         now,
         byEmail.id,
       );
+      this.absorbGuest(guestId, byEmail.id);
       return this.issueSession(this.getRowById(byEmail.id));
+    }
+
+    const name = (claims.name || '').trim() || email.split('@')[0];
+    const guest = this.findGuest(guestId);
+    if (guest) {
+      // Same trick as register(): keep the guest's own row (and its chats) and just
+      // promote it, instead of inserting a second row and moving everything over.
+      this.db.run(
+        'UPDATE users SET email = ?, display_name = ?, google_id = ?, is_guest = 0, updated_at = ? WHERE id = ?',
+        email,
+        name,
+        claims.sub,
+        now,
+        guest.id,
+      );
+      return this.issueSession(this.getRowById(guest.id));
     }
 
     const id = newId();
@@ -147,7 +213,7 @@ export class AuthService {
        VALUES (?, ?, NULL, ?, ?, ?, ?)`,
       id,
       email,
-      (claims.name || '').trim() || email.split('@')[0],
+      name,
       claims.sub,
       now,
       now,
@@ -202,6 +268,31 @@ export class AuthService {
     return row;
   }
 
+  private findGuest(guestId: string | undefined): UserRow | undefined {
+    if (!guestId) return undefined;
+    return this.db.get<UserRow>('SELECT * FROM users WHERE id = ? AND is_guest = 1', guestId);
+  }
+
+  /**
+   * Folds a guest's chats into the account they just signed into (register()/loginWithGoogle()
+   * handle the "guest becomes a brand-new account" case themselves by promoting the guest row
+   * in place — this only fires when the caller lands on a *different*, already-existing row).
+   * Never touches the guest row on a failed sign-in attempt, so a mistyped password cannot
+   * lose someone's guest chats.
+   */
+  private absorbGuest(guestId: string | undefined, targetUserId: string): void {
+    if (!guestId || guestId === targetUserId) return;
+    const guest = this.findGuest(guestId);
+    if (!guest) return;
+    try {
+      this.db.run('UPDATE sessions SET user_id = ? WHERE user_id = ?', targetUserId, guestId);
+    } catch (error) {
+      this.logger.warn(`Could not fold guest ${guestId} chats into ${targetUserId}`, error);
+      return;
+    }
+    this.db.run('DELETE FROM users WHERE id = ? AND is_guest = 1', guestId);
+  }
+
   private async verifyGoogleCredential(credential: string) {
     try {
       return await verifyGoogleIdToken(credential);
@@ -230,6 +321,7 @@ export function mapUser(row: UserRow): UserRecord {
     displayName: row.display_name,
     hasPassword: Boolean(row.password_hash),
     hasGoogle: Boolean(row.google_id),
+    isGuest: Boolean(row.is_guest),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

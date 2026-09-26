@@ -62,4 +62,52 @@ describe('accounts migration', () => {
       else process.env.DATABASE_PATH = previous.DATABASE_PATH;
     }
   });
+
+  it('adds is_guest to a pre-existing users table without touching real accounts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-guest-'));
+    const dbPath = join(dir, 'legacy.db');
+
+    // Simulate an install from before guest accounts existed: a users table with no
+    // is_guest column at all.
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        display_name TEXT NOT NULL,
+        google_id TEXT UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    legacy.exec(
+      `INSERT INTO users VALUES ('u1', 'ada@example.com', 'scrypt$1$aa$bb', 'Ada', NULL, '2025-01-01', '2025-01-01')`,
+    );
+    legacy.close();
+
+    const previous = { DATABASE_PATH: process.env.DATABASE_PATH };
+    process.env.DATABASE_PATH = dbPath;
+    try {
+      const service = new DatabaseService();
+      service.onModuleInit();
+      try {
+        const columns = service
+          .all<{ name: string }>('PRAGMA table_info(users)')
+          .map((c) => c.name);
+        expect(columns).toContain('is_guest');
+        const user = service.get<{ id: string; is_guest: number; email: string }>(
+          'SELECT * FROM users WHERE id = ?',
+          'u1',
+        );
+        expect(user?.email).toBe('ada@example.com');
+        expect(user?.is_guest).toBe(0);
+      } finally {
+        service.onModuleDestroy();
+      }
+    } finally {
+      if (previous.DATABASE_PATH === undefined) delete process.env.DATABASE_PATH;
+      else process.env.DATABASE_PATH = previous.DATABASE_PATH;
+    }
+  });
 });

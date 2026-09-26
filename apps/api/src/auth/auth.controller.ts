@@ -1,15 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpException,
-  HttpStatus,
-  Post,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   googleAuthSchema,
@@ -22,6 +11,7 @@ import {
   type UserRecord,
 } from '@travelclaw/shared';
 import type { Request, Response } from 'express';
+import { clientKey, rateLimited } from '../common/rate-limit';
 import { ZodValidationPipe } from '../common/zod-pipe';
 import { loadConfig } from '../config';
 import { AuthService } from './auth.service';
@@ -41,6 +31,25 @@ export class AuthController {
     return { googleClientId: loadConfig().googleClientId };
   }
 
+  @Post('guest')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Start (or resume) a no-signup guest session' })
+  async guest(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<UserRecord> {
+    const existing = this.auth.verifyToken(currentToken(req));
+    // Already signed in — guest or real, does not matter — so this is idempotent and
+    // never mints a second identity for a visitor who merely reloaded the page.
+    if (existing) return existing;
+    if (!this.auth.guestLimiter.consume(clientKey(req))) {
+      throw rateLimited();
+    }
+    const result = await this.auth.createGuest();
+    setSessionCookie(res, result.token, result.expiresAt);
+    return result.user;
+  }
+
   @Post('register')
   @ApiOperation({ summary: 'Create an account with an email and password' })
   async register(
@@ -51,7 +60,12 @@ export class AuthController {
     if (!this.auth.registerLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
-    const result = await this.auth.register(body.email, body.password, body.displayName);
+    const result = await this.auth.register(
+      body.email,
+      body.password,
+      body.displayName,
+      currentGuestId(req, this.auth),
+    );
     setSessionCookie(res, result.token, result.expiresAt);
     return result.user;
   }
@@ -67,7 +81,11 @@ export class AuthController {
     if (!this.auth.loginLimiter.consume(`${clientKey(req)}:${body.email}`)) {
       throw rateLimited();
     }
-    const result = await this.auth.login(body.email, body.password);
+    const result = await this.auth.login(
+      body.email,
+      body.password,
+      currentGuestId(req, this.auth),
+    );
     setSessionCookie(res, result.token, result.expiresAt);
     return result.user;
   }
@@ -83,7 +101,10 @@ export class AuthController {
     if (!this.auth.loginLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
-    const result = await this.auth.loginWithGoogle(body.credential);
+    const result = await this.auth.loginWithGoogle(
+      body.credential,
+      currentGuestId(req, this.auth),
+    );
     setSessionCookie(res, result.token, result.expiresAt);
     return result.user;
   }
@@ -92,7 +113,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({ summary: 'End the current session' })
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): { ok: true } {
-    const token = parseCookies(req.headers.cookie)[loadConfig().cookieName];
+    const token = currentToken(req);
     if (token) this.auth.logout(token);
     clearSessionCookie(res);
     return { ok: true };
@@ -100,19 +121,18 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(AuthGuard)
-  @ApiOperation({ summary: 'The signed-in account' })
+  @ApiOperation({ summary: 'The signed-in account (guest or real)' })
   me(@CurrentUser() user: UserRecord): UserRecord {
     return user;
   }
 }
 
-function clientKey(req: Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+function currentToken(req: Request): string | undefined {
+  return parseCookies(req.headers.cookie)[loadConfig().cookieName];
 }
 
-function rateLimited(): HttpException {
-  return new HttpException(
-    { code: 'rate_limited', message: 'Too many attempts. Wait a bit and try again.' },
-    HttpStatus.TOO_MANY_REQUESTS,
-  );
+/** The caller's guest id, if their current cookie belongs to a guest — else undefined. */
+function currentGuestId(req: Request, auth: AuthService): string | undefined {
+  const user = auth.verifyToken(currentToken(req));
+  return user?.isGuest ? user.id : undefined;
 }

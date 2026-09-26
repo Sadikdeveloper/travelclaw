@@ -712,6 +712,27 @@ h3 {
   border-color: #f0c7ad;
 }
 
+.account-box-guest {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.account-guest-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.account-guest-actions {
+  gap: 8px;
+}
+.account-guest-actions .btn-ghost,
+.account-guest-actions .btn {
+  flex: 1;
+  text-align: center;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
 .auth-page {
   min-height: 100vh;
   display: flex;

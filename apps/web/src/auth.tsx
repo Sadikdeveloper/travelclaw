@@ -31,8 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await api<UserRecord>('/api/auth/me');
       setUser(me);
     } catch {
-      // A signed-out visitor (401) is the normal case here, not an error to surface.
-      setUser(null);
+      // A signed-out visitor is the normal case here, not an error to surface — fall
+      // back to a guest so the desk stays usable without forcing a login.
+      try {
+        setUser(await api<UserRecord>('/api/auth/guest', { method: 'POST' }));
+      } catch {
+        setUser(null);
+      }
     }
   }, []);
 
@@ -40,7 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let stop = false;
     Promise.all([
       api<AuthConfig>('/api/auth/config').catch(() => ({ googleClientId: null })),
-      api<UserRecord>('/api/auth/me').catch(() => null),
+      // No account required to use the desk: a signed-out visitor is bootstrapped into
+      // a guest session automatically. Signing in later folds that guest's chats in.
+      api<UserRecord>('/api/auth/me').catch(() =>
+        api<UserRecord>('/api/auth/guest', { method: 'POST' }).catch(() => null),
+      ),
     ]).then(([config, me]) => {
       if (stop) return;
       setGoogleClientId(config.googleClientId);
@@ -56,7 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api('/api/auth/logout', { method: 'POST' });
     } finally {
-      setUser(null);
+      // Land back on a guest instead of a dead end — signing out should not force a
+      // real sign-in just to keep using the desk.
+      try {
+        setUser(await api<UserRecord>('/api/auth/guest', { method: 'POST' }));
+      } catch {
+        setUser(null);
+      }
     }
   }, []);
 

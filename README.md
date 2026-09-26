@@ -82,10 +82,12 @@ Node's built-in `node:sqlite` keeps the gateway free of native addons. The API i
 
 ## Accounts
 
-Sign in with an email and password, or with Google once an operator sets
-`TRAVELCLAW_GOOGLE_CLIENT_ID`. A chat belongs to the account that opened it — see
+No sign-up required: opening the desk starts a guest session automatically, and a
+guest's chats live on that device. Sign in with an email and password, or with Google
+once an operator sets `TRAVELCLAW_GOOGLE_CLIENT_ID`, to keep those chats anywhere —
+signing in from a guest session folds them into the account. See
 [Accounts](docs/architecture.md#accounts) and [Security](docs/security.md) for how the
-cookie session, password hashing, and Google linking work.
+cookie session, password hashing, guest promotion, and Google linking work.
 
 ## Documentation
 

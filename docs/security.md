@@ -1,8 +1,8 @@
 # Security
 
 TravelClaw 0.1 authenticates the control UI with an email/password (and optional
-Google) account, but it still does not authenticate arbitrary API clients — see
-Pairing below before you expose this past your own machine.
+Google) account, or a no-signup guest identity, but it still does not authenticate
+arbitrary API clients — see Pairing below before you expose this past your own machine.
 
 - Bind to `127.0.0.1` if you do not trust the network. The default `0.0.0.0` is for the dev preview and Docker.
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
@@ -20,6 +20,14 @@ Pairing below before you expose this past your own machine.
 - A chat (`sessions` row) belongs to exactly one account. A request for another account's chat id gets a 404, the same response as a chat that does not exist.
 - Google sign-in is opt-in per deploy: it only activates when the operator sets `TRAVELCLAW_GOOGLE_CLIENT_ID`. The credential's RS256 signature is verified locally against Google's published JWKS (`apps/api/src/auth/google-verify.ts`), not by calling Google's `tokeninfo` endpoint per login, and the gateway checks issuer, expiry, audience, and the verified-email claim before trusting it.
 - There is no password reset flow yet and no email is ever sent. A traveler who forgets a password needs a new account or a direct database fix.
+
+## Guests
+
+- A visitor who has not signed in is auto-provisioned a guest account (`POST /api/auth/guest`) rather than being forced through registration. It is a real `users` row (so chat, tasks, and history all work normally) but with no password, no Google id, and `is_guest = 1` — there is nothing in it worth stealing, and nothing in it identifies a person.
+- Guest account creation is rate-limited per IP (20/hour) since, unlike a real registration, it costs an attacker nothing to repeat.
+- Chat turns from a guest are rate-limited tighter than a signed-up account, both per guest id and per IP — a guest that hits its limit and mints a fresh guest to dodge it still hits the IP-wide cap.
+- A guest's chats are mirrored into that browser's `localStorage` purely for a fast reload; the server-side row under its guest id is still what actually runs each turn and is the source of truth. Clearing that browser's storage or cookies does not delete anything server-side, but nothing else can read it back either — sign in to keep it.
+- Registering, signing in, or completing Google sign-in from a guest session folds that guest's chats into the resulting account (in place when it is a brand-new account, by reassigning `sessions` rows when it is an existing one) — see `AuthService.absorbGuest` in `apps/api/src/auth/auth.service.ts`. A failed sign-in attempt never touches the guest or its chats.
 
 ## Pairing (still open)
 

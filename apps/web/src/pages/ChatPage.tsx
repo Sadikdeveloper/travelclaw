@@ -11,6 +11,8 @@ import { api, ApiError } from '../api';
 import { AgentCard } from '../components/AgentCard';
 import { RichText } from '../components/RichText';
 import { Banner } from '../components/Status';
+import { useAuth } from '../auth';
+import { mirrorGuestMessages } from '../guestChatCache';
 
 const prompts = [
   'Find a flight from Lagos to Lisbon on 2026-11-02',
@@ -23,6 +25,7 @@ export function ChatPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const revision = useLiveRevision();
+  const { user } = useAuth();
   const generation = useRef(0);
   const [title, setTitle] = useState('New chat');
   const [messages, setMessages] = useState<MessageRecord[]>([]);
@@ -39,6 +42,12 @@ export function ChatPage() {
       setTitle('New chat');
       return;
     }
+    if (user?.isGuest) {
+      // Instant paint from this device's own cache while the network request is
+      // still in flight — nothing else backs a guest's chat on first render.
+      const cached = mirrorGuestMessages(user.id, sessionId);
+      if (cached.length) setMessages(cached);
+    }
     const seq = ++generation.current;
     Promise.all([
       api<{ session: SessionRecord; messages: MessageRecord[] }>(
@@ -51,11 +60,12 @@ export function ChatPage() {
         setTitle(opened.session.title);
         setMessages(opened.messages);
         setTasks(desks);
+        if (user?.isGuest) mirrorGuestMessages(user.id, sessionId, opened.messages);
       })
       .catch((err: unknown) =>
         setError(err instanceof ApiError ? err.message : 'Could not open that chat'),
       );
-  }, [sessionId, revision]);
+  }, [sessionId, revision, user]);
 
   async function decide(taskId: string, decision: TaskDecision) {
     setDeciding(taskId);
@@ -101,6 +111,7 @@ export function ChatPage() {
         setTitle(opened.session.title);
         setMessages(opened.messages);
         setTasks(desks);
+        if (user?.isGuest) mirrorGuestMessages(user.id, id, opened.messages);
       }
       if (!sessionId) navigate(`/chat/${id}`);
     } catch (err) {

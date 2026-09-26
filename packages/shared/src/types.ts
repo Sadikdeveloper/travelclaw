@@ -23,6 +23,8 @@ export interface UserRecord {
   displayName: string;
   hasPassword: boolean;
   hasGoogle: boolean;
+  /** True for an auto-provisioned, no-signup visitor. Their chats live only on this device. */
+  isGuest: boolean;
   createdAt: string;
   updatedAt: string;
 }

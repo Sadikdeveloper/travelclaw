@@ -4,6 +4,7 @@ import { api, ApiError } from '../api';
 import { useAuth } from '../auth';
 import { Banner } from '../components/Status';
 import { GoogleButton } from '../components/GoogleButton';
+import { clearGuestCache } from '../guestChatCache';
 import type { UserRecord } from '@travelclaw/shared';
 
 export function RegisterPage() {
@@ -20,11 +21,17 @@ export function RegisterPage() {
   const next = new URLSearchParams(location.search).get('next') || '/';
 
   useEffect(() => {
-    if (user) navigate(next, { replace: true });
+    // A guest is not "signed in" for this purpose — it must still be able to reach this
+    // form. Only bounce away once a real account is present.
+    if (user && !user.isGuest) navigate(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   function onSignedIn(account: UserRecord) {
+    // This browser's cached guest chats have either moved server-side onto `account`
+    // already, or belonged to a different guest that just got left behind — either
+    // way, the local mirror for that old guest id is no longer useful.
+    if (user?.isGuest) clearGuestCache(user.id);
     setUser(account);
     navigate(next, { replace: true });
   }
@@ -60,7 +67,8 @@ export function RegisterPage() {
         <p className="kicker">TravelClaw</p>
         <h1>Create an account</h1>
         <p className="lede">
-          Email and a password. Chats you start belong to this account.
+          Email and a password. Chats you start belong to this account
+          {user?.isGuest ? ' — including any chat you already started as a guest' : ''}.
         </p>
         {error ? <Banner message={error} tone="bad" /> : null}
         <form className="form" onSubmit={submit}>

@@ -58,6 +58,33 @@ avoids that endpoint entirely. A first sign-in links to an existing password acc
 with the same email, or creates one. `GET /api/auth/config` reports whether a client
 id is set; the control UI only renders the Google button when it is.
 
+### Guests
+
+Nobody has to sign up to use the desk. On first load the control UI calls
+`POST /api/auth/guest`, which — unless the caller already has a valid session, in which
+case it just returns that account unchanged — creates a lightweight `users` row with
+`is_guest = 1`, no password, and no Google id, and issues it a normal session cookie.
+From there a guest is a completely ordinary account to every other route: `sessions`,
+`messages`, and `agent_tasks` all key off its `user_id` exactly like a signed-up
+traveler's, so chat, tasks, and history all work unmodified. Two differences: turns
+from a guest are rate-limited tighter than a real account (`ChatController`, both
+per-guest and per-IP, since a guest costs nothing to mint), and the browser mirrors a
+guest's chat list and transcripts into `localStorage` (`apps/web/src/guestChatCache.ts`)
+purely so the UI paints instantly on reload — the server copy under that guest id
+remains the source of truth.
+
+When a guest registers, signs in, or completes Google sign-in, its chats are not lost.
+`register()`/`loginWithGoogle()` promote the guest's own `users` row into the real
+account in place (same id, so its `sessions` rows already point at the right owner —
+nothing to move) when there is no separate pre-existing account to reconcile with.
+`login()` (and `loginWithGoogle()` linking into an existing account) instead
+reassigns the guest's `sessions` rows onto that account's id and deletes the now-empty
+guest row (`AuthService.absorbGuest`). Either way, a wrong password never touches the
+guest — only a successful sign-in folds it in. The sidebar shows "Sign in" / "Sign up"
+for a guest instead of an account name; those pages read `user.isGuest` so a guest
+visiting them is not immediately bounced back by the same redirect that would otherwise
+skip a signed-in account past the form.
+
 Login and registration are rate-limited per caller (in-memory, resets on restart) to
 slow down brute force. A login failure reports the same message whether the email is
 unknown, the password is wrong, or the account has no password at all (Google-only) —

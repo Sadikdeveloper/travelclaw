@@ -1,9 +1,10 @@
 import type { HealthReport, SessionRecord } from '@travelclaw/shared';
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useLiveRevision } from '../App';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { mirrorGuestSessions } from '../guestChatCache';
 
 export function Shell() {
   const revision = useLiveRevision();
@@ -36,10 +37,18 @@ export function Shell() {
   }, []);
 
   useEffect(() => {
+    if (user?.isGuest) {
+      // Instant paint from this device's own cache while the network round trip is
+      // still in flight — a guest's chats otherwise have nowhere else to come from.
+      setSessions(mirrorGuestSessions(user.id));
+    }
     api<SessionRecord[]>('/api/sessions')
-      .then(setSessions)
+      .then((fetched) => {
+        setSessions(fetched);
+        if (user?.isGuest) mirrorGuestSessions(user.id, fetched);
+      })
       .catch(() => setSessions([]));
-  }, [revision]);
+  }, [revision, user]);
 
   async function signOut() {
     setSigningOut(true);
@@ -77,7 +86,22 @@ export function Shell() {
             <span className={down ? 'dot bad' : 'dot ok'} />
             {down ? 'Gateway quiet' : 'Gateway up'}
           </div>
-          {user ? (
+          {user?.isGuest ? (
+            <div className="account-box account-box-guest">
+              <div className="account-name">Browsing as a guest</div>
+              <p className="muted account-guest-note">
+                Chats stay on this device. Sign in to keep them anywhere.
+              </p>
+              <div className="row account-guest-actions">
+                <Link className="btn-ghost" to="/login">
+                  Sign in
+                </Link>
+                <Link className="btn copper" to="/register">
+                  Sign up
+                </Link>
+              </div>
+            </div>
+          ) : user ? (
             <div className="account-box">
               <div className="account-name" title={user.email}>
                 {user.displayName}
