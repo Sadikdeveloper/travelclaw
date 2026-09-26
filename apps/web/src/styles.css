@@ -1080,6 +1080,9 @@ h3 {
 .auth-card .form {
   margin-top: 18px;
 }
+.session-notice-actions {
+  margin-top: 18px;
+}
 .auth-divider {
   display: flex;
   align-items: center;

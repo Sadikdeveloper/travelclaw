@@ -73,6 +73,15 @@ guest's chat list and transcripts into `localStorage` (`apps/web/src/guestChatCa
 purely so the UI paints instantly on reload — the server copy under that guest id
 remains the source of truth.
 
+A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
+`problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —
+an account is optional on this desk, so a pace limit on new guest sessions must not read
+as a login wall. A 401 on any non-`/api/auth` route re-provisions the guest session and
+replays the request once (`apps/web/src/api.ts`), so a stale cookie is invisible to the
+traveler; a real account is never silently downgraded to a guest, and it sees
+`That session has expired. Sign in again.` from `AuthGuard`. `Sign in to use this.` is
+reserved for a caller that never had a session at all.
+
 When a guest registers, signs in, or completes Google sign-in, its chats are not lost.
 `register()`/`loginWithGoogle()` promote the guest's own `users` row into the real
 account in place (same id, so its `sessions` rows already point at the right owner —

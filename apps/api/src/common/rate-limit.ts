@@ -6,9 +6,9 @@ export function clientKey(req: Request): string {
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-export function rateLimited(): HttpException {
-  return new HttpException(
-    { code: 'rate_limited', message: 'Too many attempts. Wait a bit and try again.' },
-    HttpStatus.TOO_MANY_REQUESTS,
-  );
+/** A 429 the client can recognise by code. Callers may replace the copy. */
+export function rateLimited(
+  message = 'Too many attempts. Wait a bit and try again.',
+): HttpException {
+  return new HttpException({ code: 'rate_limited', message }, HttpStatus.TOO_MANY_REQUESTS);
 }

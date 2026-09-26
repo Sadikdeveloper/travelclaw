@@ -25,6 +25,14 @@ import { parseCookies } from './tokens';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  /**
+   * A visitor who ran into the guest-minting cap has not done anything wrong and does
+   * not need an account. Say what the limit is and that signing in is optional, so this
+   * never reads as a sign-in wall.
+   */
+  private static readonly GUEST_PACE =
+    'Too many new guest sessions have started from this address. This is a short cooldown, not a sign-in wall — try again in a few minutes, or sign in if you already have an account.';
+
   @Get('config')
   @ApiOperation({ summary: 'Whether Google sign-in is enabled' })
   config(): AuthConfig {
@@ -43,7 +51,7 @@ export class AuthController {
     // never mints a second identity for a visitor who merely reloaded the page.
     if (existing) return existing;
     if (!this.auth.guestLimiter.consume(clientKey(req))) {
-      throw rateLimited();
+      throw rateLimited(AuthController.GUEST_PACE);
     }
     const result = await this.auth.createGuest();
     setSessionCookie(res, result.token, result.expiresAt);
