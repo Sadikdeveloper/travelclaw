@@ -1,3 +1,5 @@
+import { readSessionToken } from './sessionToken';
+
 export class ApiError extends Error {
   status: number;
   /** The gateway's error code, when it sent one (e.g. `rate_limited`). */
@@ -34,12 +36,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function send(path: string, init?: RequestInit): Promise<Response> {
+  // The cookie is the primary credential. The bearer token covers the embedded case where
+  // the browser stores the cookie and never sends it back.
+  const token = readSessionToken();
   return fetch(path, {
     ...init,
     credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });

@@ -6,6 +6,8 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { GUEST_MINTS_PER_IP_PER_HOUR } from '../src/auth/auth.service';
+import { DatabaseService } from '../src/db/database.service';
 
 describe('guest sessions over HTTP', () => {
   let app: INestApplication;
@@ -27,6 +29,14 @@ describe('guest sessions over HTTP', () => {
     configureApp(app);
     await app.init();
   });
+
+  /** Guest rows, to prove a resume did not mint a new identity. */
+  function countGuests(): number {
+    const db = app.get(DatabaseService);
+    return (
+      db.get<{ c: number }>('SELECT COUNT(*) c FROM users WHERE is_guest = 1')?.c ?? -1
+    );
+  }
 
   afterAll(async () => {
     await app.close();
@@ -50,6 +60,65 @@ describe('guest sessions over HTTP', () => {
       .post(`/api/sessions/${session.body.id}/messages`)
       .send({ content: 'hello from a guest' });
     expect(turn.status).toBe(201);
+  });
+
+  /**
+   * The embedded case: the browser accepts Set-Cookie and never sends it back (a cross-site
+   * iframe, or third-party cookies blocked). The token in the body is what keeps that client
+   * from being re-provisioned on every request.
+   */
+  it('runs a whole session on the bearer token with no cookies at all', async () => {
+    const fresh = request(app.getHttpServer());
+    const minted = await fresh.post('/api/auth/guest');
+    expect(minted.status).toBe(200);
+    expect(minted.body.sessionToken).toMatch(/^[\w-]{20,}$/);
+    const auth = { Authorization: `Bearer ${minted.body.sessionToken}` };
+
+    // No cookie jar in sight: every call carries only the header.
+    const me = await request(app.getHttpServer()).get('/api/auth/me').set(auth);
+    expect(me.status).toBe(200);
+    expect(me.body.id).toBe(minted.body.id);
+
+    const session = await request(app.getHttpServer())
+      .post('/api/sessions')
+      .set(auth)
+      .send({ channel: 'webchat' });
+    expect(session.status).toBe(201);
+
+    const turn = await request(app.getHttpServer())
+      .post(`/api/sessions/${session.body.id}/messages`)
+      .set(auth)
+      .send({ content: 'hello from a cookie-less browser' });
+    expect(turn.status).toBe(201);
+    expect(turn.body.message.role).toBe('assistant');
+
+    // The reload path: the token resumes the same guest instead of minting another one.
+    const before = countGuests();
+    const again = await request(app.getHttpServer()).post('/api/auth/guest').set(auth);
+    expect(again.status).toBe(200);
+    expect(again.body.id).toBe(minted.body.id);
+    expect(countGuests()).toBe(before);
+  });
+
+  it('prefers the cookie over a bearer token that disagrees with it', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const mine = await agent.post('/api/auth/guest');
+    const other = await request(app.getHttpServer()).post('/api/auth/guest');
+
+    const me = await agent
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${other.body.sessionToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.id).toBe(mine.body.id);
+  });
+
+  it('treats a stale bearer token as an expired session, not as a stranger', async () => {
+    const stale = await request(app.getHttpServer())
+      .post('/api/chat')
+      .set('Authorization', 'Bearer a-token-that-was-never-issued')
+      .send({ content: 'hi' });
+    expect(stale.status).toBe(401);
+    expect(stale.body.error.message).toMatch(/expired/i);
   });
 
   it('is idempotent: a second call with the same cookie returns the same guest', async () => {
@@ -124,7 +193,7 @@ describe('guest sessions over HTTP', () => {
     expect(mine.status).toBe(200);
 
     let last = { status: 0, body: { error: { message: '', code: '' } } };
-    for (let i = 0; i < 25; i += 1) {
+    for (let i = 0; i < GUEST_MINTS_PER_IP_PER_HOUR + 5; i += 1) {
       // A fresh jar each attempt: once a guest cookie exists, /api/auth/guest is
       // idempotent and returns the same guest without touching the limiter.
       last = await request(app.getHttpServer()).post('/api/auth/guest');

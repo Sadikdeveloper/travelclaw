@@ -1,4 +1,4 @@
-import type { UserRecord } from '@travelclaw/shared';
+import type { AuthSessionResponse, UserRecord } from '@travelclaw/shared';
 import { useEffect, useId, useRef } from 'react';
 import { api, ApiError } from '../api';
 
@@ -41,7 +41,7 @@ export function GoogleButton({
 
     async function handleCredential(response: GoogleCredentialResponse) {
       try {
-        const user = await api<UserRecord>('/api/auth/google', {
+        const user = await api<AuthSessionResponse>('/api/auth/google', {
           method: 'POST',
           body: JSON.stringify({ credential: response.credential }),
         });

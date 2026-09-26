@@ -33,6 +33,15 @@ export interface AuthConfig {
   googleClientId: string | null;
 }
 
+/**
+ * What sign-in and guest routes return. `sessionToken` is the same opaque token the
+ * session cookie carries, for clients that cannot keep cookies — an embedded preview,
+ * or a browser blocking third-party cookies. See `docs/security.md`.
+ */
+export interface AuthSessionResponse extends UserRecord {
+  sessionToken: string;
+}
+
 export interface SessionRecord {
   id: string;
   key: string;

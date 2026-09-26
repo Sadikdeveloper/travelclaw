@@ -5,6 +5,7 @@ import {
   loginSchema,
   registerSchema,
   type AuthConfig,
+  type AuthSessionResponse,
   type GoogleAuthInput,
   type LoginInput,
   type RegisterInput,
@@ -16,9 +17,10 @@ import { ZodValidationPipe } from '../common/zod-pipe';
 import { loadConfig } from '../config';
 import { AuthService } from './auth.service';
 import { clearSessionCookie, setSessionCookie } from './cookies';
+import type { AuthResult } from './auth.service';
 import { AuthGuard } from './auth.guard';
 import { CurrentUser } from './current-user.decorator';
-import { parseCookies } from './tokens';
+import { sessionTokenOf } from './tokens';
 
 @ApiTags('auth')
 @Controller('api/auth')
@@ -45,17 +47,27 @@ export class AuthController {
   async guest(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<UserRecord> {
+  ): Promise<UserRecord | AuthSessionResponse> {
     const existing = this.auth.verifyToken(currentToken(req));
     // Already signed in — guest or real, does not matter — so this is idempotent and
-    // never mints a second identity for a visitor who merely reloaded the page.
+    // never mints a second identity for a visitor who merely reloaded the page. A client
+    // that could not keep the cookie proves who it is with the token from its first call.
     if (existing) return existing;
     if (!this.auth.guestLimiter.consume(clientKey(req))) {
       throw rateLimited(AuthController.GUEST_PACE);
     }
     const result = await this.auth.createGuest();
+    return this.issue(res, result);
+  }
+
+  /**
+   * Sets the session cookie and hands back the raw token. The token is the fallback for a
+   * client whose browser will not keep a cross-site cookie (an embedded preview): it sends
+   * it back as `Authorization: Bearer`. Same secret either way — see `docs/security.md`.
+   */
+  private issue(res: Response, result: AuthResult): AuthSessionResponse {
     setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    return { ...result.user, sessionToken: result.token };
   }
 
   @Post('register')
@@ -64,7 +76,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.registerLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
@@ -74,8 +86,7 @@ export class AuthController {
       body.displayName,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    return this.issue(res, result);
   }
 
   @Post('login')
@@ -85,7 +96,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.loginLimiter.consume(`${clientKey(req)}:${body.email}`)) {
       throw rateLimited();
     }
@@ -94,8 +105,7 @@ export class AuthController {
       body.password,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    return this.issue(res, result);
   }
 
   @Post('google')
@@ -105,7 +115,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(googleAuthSchema)) body: GoogleAuthInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.loginLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
@@ -113,8 +123,7 @@ export class AuthController {
       body.credential,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    return this.issue(res, result);
   }
 
   @Post('logout')
@@ -136,7 +145,7 @@ export class AuthController {
 }
 
 function currentToken(req: Request): string | undefined {
-  return parseCookies(req.headers.cookie)[loadConfig().cookieName];
+  return sessionTokenOf(req.headers, loadConfig().cookieName);
 }
 
 /** The caller's guest id, if their current cookie belongs to a guest — else undefined. */
