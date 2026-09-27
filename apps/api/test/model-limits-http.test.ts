@@ -26,7 +26,7 @@ describe('auto-selected model and its pace, over HTTP', () => {
 
   /** The best model this test's config can run: the big one, since a key is configured. */
   const chosen = 'gpt-4o';
-  const limits = limitsFor(chosen);
+  const limits = limitsFor(chosen)!;
 
   beforeAll(async () => {
     process.env.DATABASE_PATH = join(dir, 'test.db');
@@ -165,18 +165,26 @@ describe('auto-selected model and its pace, over HTTP', () => {
     expect(res.status).toBe(200);
     expect(res.body.current).toBe(chosen);
     const byId = Object.fromEntries(
-      (res.body.models as { id: string; limits: { guest: number; account: number } }[]).map(
-        (model) => [model.id, model.limits],
-      ),
+      (
+        res.body.models as {
+          id: string;
+          limits: { guest: number; account: number } | null;
+        }[]
+      ).map((model) => [model.id, model.limits]),
     );
     // What the API calls the limits is what a turn is actually paced by.
     expect(byId[chosen]).toEqual(limits);
-    for (const entry of Object.values(byId)) {
-      expect(entry.account).toBeGreaterThan(entry.guest);
+    // Priced models are paced, and an account gets more on each of them.
+    for (const [id, entry] of Object.entries(byId)) {
+      if (id === 'travelclaw-local') continue;
+      expect(entry!.account).toBeGreaterThan(entry!.guest);
     }
+    // The desk's own model is the one without a pace, and it is the one in use here.
+    expect(byId['travelclaw-local']).toBeNull();
+    expect(res.body.current).toBe(chosen);
   });
 
-  it('drops to the offline desk model when the key goes away', async () => {
+  it('drops to the offline desk model when the key goes away — and stops pacing', async () => {
     const previous = process.env.TRAVELCLAW_MODEL_API_KEY;
     delete process.env.TRAVELCLAW_MODEL_API_KEY;
     try {
@@ -187,6 +195,16 @@ describe('auto-selected model and its pace, over HTTP', () => {
       expect(res.body.provider).toBe('mock');
       const catalog = await agent.get('/api/models');
       expect(catalog.body.current).toBe('travelclaw-local');
+      // The only unlimited model on the desk, and the one everybody uses today.
+      expect(
+        (catalog.body.models as { id: string; limits: unknown }[]).find(
+          (model) => model.id === 'travelclaw-local',
+        )?.limits,
+      ).toBeNull();
+      // Well past the paid model's guest allowance, with no pace in sight.
+      for (let i = 0; i < limits.guest + 8; i += 1) {
+        expect((await turn(agent, sessionId)).status).toBe(201);
+      }
     } finally {
       process.env.TRAVELCLAW_MODEL_API_KEY = previous;
     }

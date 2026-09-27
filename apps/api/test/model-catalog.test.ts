@@ -87,15 +87,21 @@ describe('model catalog', () => {
     ).toBe('brand-new-model-2027');
   });
 
+  it('leaves the desk’s own model unpaced — the limit belongs to a model, not the desk', () => {
+    expect(limitsFor(DESK_MODEL_ID)).toBeNull();
+    const catalog = modelCatalog(
+      config({ ...live, modelName: 'gpt-4o-mini', modelNames: ['gpt-4o'] }),
+    );
+    expect(catalog.models.find((model) => model.id === DESK_MODEL_ID)?.limits).toBeNull();
+  });
+
   it('paces a bigger model tighter than a small one, and an account far above a guest', () => {
-    const mini = limitsFor('gpt-4o-mini');
-    const big = limitsFor('gpt-4o');
-    const desk = limitsFor(DESK_MODEL_ID);
+    const mini = limitsFor('gpt-4o-mini')!;
+    const big = limitsFor('gpt-4o')!;
     expect(mini.guest).toBeGreaterThan(big.guest);
-    expect(desk.guest).toBeGreaterThan(mini.guest);
-    for (const limits of [desk, mini, big]) {
-      expect(limits.account).toBeGreaterThan(limits.guest);
-    }
-    expect(limitsFor('some-new-model-2027').guest).toBeLessThanOrEqual(mini.guest);
+    expect(mini.account).toBeGreaterThan(mini.guest);
+    expect(big.account).toBeGreaterThan(big.guest);
+    // A priced model the catalog has never heard of is paced conservatively, not left open.
+    expect(limitsFor('some-new-model-2027')!.guest).toBeLessThanOrEqual(mini.guest);
   });
 });

@@ -37,18 +37,23 @@ export interface AuthConfig {
  * Turns allowed per ten-minute window, by caller tier. A guest gets a taste of a model; a
  * signed-in account gets several times more. Limits are per model, so a bigger model can be
  * rationed tighter than a small one without touching the other's allowance.
+ *
+ * `null` means the model is not paced at all — the desk's own model, which runs in this
+ * process and costs nothing per turn. A limit is a property of a model, not of the desk:
+ * it arrives with a model that has a provider bill behind it.
  */
 export interface ModelLimits {
   guest: number;
   account: number;
 }
 
-/** One model this desk can run, with the pace it runs at. */
+/** One model this desk can run, with the pace it runs at. `limits: null` means no pace. */
 export interface ModelRecord {
   id: string;
   label: string;
   provider: 'mock' | 'openai';
-  limits: ModelLimits;
+  /** `null` when this model is not paced. */
+  limits: ModelLimits | null;
   /** True for the desk's own renderer: no provider call, no key, no per-turn cost. */
   offline: boolean;
   /** False for a configured model that cannot run yet, e.g. missing provider key. */

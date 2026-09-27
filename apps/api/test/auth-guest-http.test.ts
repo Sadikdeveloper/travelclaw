@@ -170,24 +170,24 @@ describe('guest sessions over HTTP', () => {
     expect(stale.body.error.message).not.toMatch(/sign in to use/i);
   });
 
-  it('rate-limits chat turns from a guest tighter than a signed-up account', async () => {
+  /**
+   * The desk's own model carries no turn limit: it runs in this process and costs nothing
+   * per turn, so there is nothing to ration. A limit belongs to a model that has a bill
+   * behind it (see test/model-limits-http.test.ts for that side of it), and a guest using
+   * the desk's model is never stopped for using it.
+   */
+  it('does not pace chat turns on the desk’s own model, for a guest or an account', async () => {
     const agent = request.agent(app.getHttpServer());
-    await agent.post('/api/auth/guest').set('User-Agent', 'test/turn-pacer');
+    await agent.post('/api/auth/guest').set('User-Agent', 'test/unpaced-turns');
     const session = await agent.post('/api/sessions').send({ channel: 'webchat' });
 
-    let last: { status: number; body: { error?: { code?: string; message?: string } } } = {
-      status: 0,
-      body: {},
-    };
-    for (let i = 0; i < 20; i += 1) {
-      last = await agent
+    const turns = 25;
+    for (let i = 0; i < turns; i += 1) {
+      const res = await agent
         .post(`/api/sessions/${session.body.id}/messages`)
         .send({ content: `turn ${i}` });
+      expect(res.status).toBe(201);
     }
-    expect(last.status).toBe(429);
-    expect(last.body.error?.code).toBe('rate_limited');
-    expect(last.body.error?.message).toMatch(/wait a few minutes/i);
-    expect(last.body.error?.message).toMatch(/sign in for a higher limit/i);
   });
 
   /**

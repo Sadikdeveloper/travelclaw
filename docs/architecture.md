@@ -132,10 +132,22 @@ rather than quietly answered by a different model. Guests and signed-in accounts
 by the same model; what separates the tiers is the pace on it. Choosing is a decision for
 later, and the catalog plus the per-model pace are the shape it will need when it comes.
 
-Rate limiting is one limiter per tier and model, built lazily from the catalog
-(`ChatController.limiterFor`), plus one address-wide limiter for guests across all models. The
-429 names the model it ran out on, the allowance on that model, and what would raise it — for
-a guest, signing in; for an account, waiting. It never reads as a sign-in wall.
+### A limit is a property of a model
+
+There is no desk-wide turn limit, and today nothing is paced at all: the desk's own model runs
+in this process and costs nothing per turn, so there is nothing to ration. A traveler is
+stopped by a _model's_ limit, not by the desk. When a model with a provider bill behind it is
+added, the pace arrives with it — an entry in `model-catalog.ts` carries a `limits` object, and
+`limits: null` (the desk's own model) means that model is not paced.
+
+Where a model does carry limits, they are per tier and per ten-minute window — a guest gets a
+taste, a signed-in account gets several times more — and enforcement is one limiter per tier
+and model (`ChatController.limiterFor`), plus an address-wide limiter for guests that only
+counts turns taken on priced models. The 429 names the model it ran out on, the allowance on
+that model, and what would raise it. It never reads as a sign-in wall.
+
+`GET /api/models` publishes each model's limits (or `null`), which is also how the control UI
+knows there is nothing to pace on the model currently in use.
 
 A visitor is never sent to a sign-in page. `AuthProvider` handles a failed bootstrap as a
 `problem` (`rate_limited` or `unreachable`) and `RequireAuth` renders it with a retry —

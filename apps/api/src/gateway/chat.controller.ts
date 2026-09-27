@@ -12,6 +12,7 @@ import {
   chatSchema,
   sendMessageSchema,
   type ChatInput,
+  type ModelLimits,
   type ModelRecord,
   type SendMessageInput,
   type UserRecord,
@@ -26,7 +27,7 @@ import { TURN_WINDOW_MS } from '../models/model-catalog';
 import { ModelService } from '../models/model.service';
 import { GatewayService } from './gateway.service';
 
-/** Turns a guest may run from one address across all models. Aggregate, so it stays flat. */
+/** Turns a guest may run from one address across *paced* models. Unpaced models are exempt. */
 const GUEST_IP_TURNS = 30;
 
 @ApiTags('chat')
@@ -94,6 +95,12 @@ export class ChatController {
   }
 
   private checkTurnLimit(req: Request, user: UserRecord, model: ModelRecord): void {
+    // A model with no limit is not paced at all. That is the desk's own model today, which
+    // runs here and costs nothing per turn — a traveler is stopped by a model's limit, never
+    // by the desk itself. A limitation arrives with a model that has a bill behind it.
+    const limits = model.limits;
+    if (!limits) return;
+
     const tier = user.isGuest ? 'guest' : 'account';
     if (user.isGuest && !this.guestIpLimiter.consume(clientKey(req))) {
       // Same reasoning as the guest-minting cap in AuthController: a guest hitting a pace
@@ -102,9 +109,9 @@ export class ChatController {
         `Guest chats from this address are paced at ${GUEST_IP_TURNS} turns every 10 minutes, across every model. Wait a few minutes, or sign in for a higher limit.`,
       );
     }
-    if (this.limiterFor(tier, model).consume(user.id)) return;
+    if (this.limiterFor(tier, model.id, limits).consume(user.id)) return;
 
-    const allowed = tier === 'guest' ? model.limits.guest : model.limits.account;
+    const allowed = tier === 'guest' ? limits.guest : limits.account;
     // Name the model and the tier: a traveler who hits a pace should know which model ran
     // out and what would raise it, rather than reading a generic refusal.
     throw rateLimited(
@@ -114,12 +121,16 @@ export class ChatController {
     );
   }
 
-  private limiterFor(tier: 'guest' | 'account', model: ModelRecord): RateLimiter {
-    const key = `${tier}:${model.id}`;
+  private limiterFor(
+    tier: 'guest' | 'account',
+    modelId: string,
+    limits: ModelLimits,
+  ): RateLimiter {
+    const key = `${tier}:${modelId}`;
     let limiter = this.turnLimiters.get(key);
     if (!limiter) {
       limiter = new RateLimiter(
-        tier === 'guest' ? model.limits.guest : model.limits.account,
+        tier === 'guest' ? limits.guest : limits.account,
         TURN_WINDOW_MS,
       );
       this.turnLimiters.set(key, limiter);

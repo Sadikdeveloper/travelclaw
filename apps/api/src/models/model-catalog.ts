@@ -10,16 +10,18 @@ export const DESK_MODEL_ID = 'travelclaw-local';
 /**
  * The models this desk can run, best first.
  *
- * `rank` is which model the desk reaches for when it is free to choose, and turns per ten
- * minutes is what each one costs a traveler to use. Both are policy: a bigger model is
- * rationed tighter than a small one, and an account's allowance is several times a guest's.
- * Adding a model is one entry here plus its name in TRAVELCLAW_MODELS.
+ * `rank` is which model the desk reaches for when it is free to choose, and `limits` is what
+ * that model costs a traveler to use — `null` for a model with no bill behind it, which today
+ * is the desk's own. Both are policy, and both belong to the model: a bigger, costlier model
+ * is rationed tighter than a small one, an account's allowance is several times a guest's,
+ * and a model that costs nothing per turn is not paced at all. Adding a model is one entry
+ * here plus its name in TRAVELCLAW_MODELS.
  */
 const KNOWN_MODELS: {
   id: string;
   label: string;
   rank: number;
-  limits: ModelLimits;
+  limits: ModelLimits | null;
 }[] = [
   {
     id: 'gpt-4o',
@@ -43,8 +45,9 @@ const KNOWN_MODELS: {
     id: DESK_MODEL_ID,
     label: 'Desk model',
     rank: 0,
-    // Runs in this process: no provider call, no key, no per-turn cost.
-    limits: { guest: 15, account: 60 },
+    // Runs in this process: no provider call, no key, no bill. Nothing to ration, so it is
+    // not paced — a traveler is stopped by a model's limit, never by the desk itself.
+    limits: null,
   },
 ];
 
@@ -58,8 +61,11 @@ const UNKNOWN_RANK = 1;
 /** A configured model we have no entry for is served, but paced conservatively. */
 const UNKNOWN_LIMITS: ModelLimits = { guest: 3, account: 20 };
 
-export function limitsFor(id: string): ModelLimits {
-  return KNOWN_MODELS.find((model) => model.id === id)?.limits ?? UNKNOWN_LIMITS;
+/** `null` for a model that is not paced at all. */
+export function limitsFor(id: string): ModelLimits | null {
+  const known = KNOWN_MODELS.find((model) => model.id === id);
+  if (known) return known.limits;
+  return UNKNOWN_LIMITS;
 }
 
 export function labelFor(id: string): string {
