@@ -11,6 +11,8 @@ export interface AppConfig {
   modelBaseUrl: string;
   modelApiKey: string;
   modelName: string;
+  /** Other models the desk offers, from TRAVELCLAW_MODELS. The chosen one is always first. */
+  modelNames: string[];
   network: boolean;
   seed: boolean;
   taskDelayMs: number;
@@ -18,6 +20,8 @@ export interface AppConfig {
   googleClientId: string | null;
   cookieSecure: boolean;
   cookieName: string;
+  /** Extra origins allowed to call the gateway. Empty means same-origin only. */
+  allowedOrigins: string[];
   sessionTtlDays: number;
 }
 
@@ -61,6 +65,10 @@ export function loadConfig(
     modelName:
       env.TRAVELCLAW_MODEL_NAME ||
       (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
+    modelNames: (env.TRAVELCLAW_MODELS || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
     network: env.TRAVELCLAW_NETWORK !== '0',
     seed: env.TRAVELCLAW_SEED !== '0',
     taskDelayMs:
@@ -69,6 +77,10 @@ export function loadConfig(
     googleClientId: env.TRAVELCLAW_GOOGLE_CLIENT_ID?.trim() || null,
     cookieSecure: env.TRAVELCLAW_COOKIE_SECURE === '1',
     cookieName: 'travelclaw_session',
+    allowedOrigins: (env.TRAVELCLAW_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     sessionTtlDays: Number(env.TRAVELCLAW_SESSION_TTL_DAYS || 30),
   };
 }

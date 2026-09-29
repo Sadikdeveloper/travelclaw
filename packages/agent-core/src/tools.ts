@@ -1,15 +1,19 @@
 import { MAX_OUTLINE_DAYS } from '@travelclaw/shared';
+import { z } from 'zod';
 import { eachDate, inclusiveDayCount } from './dates';
 import { findDestinationByName } from './destinations';
 import { extractHints } from './extract';
+import { zodToJsonSchema } from './tool-args';
 import type {
   BudgetData,
   CurrencyData,
+  ModelToolSpec,
   OutlineData,
   PackingData,
   PlacesData,
   RememberData,
   ToolContext,
+  ToolInput,
   ToolResult,
   ThemeCard,
   TripHints,
@@ -17,12 +21,62 @@ import type {
   WeatherData,
 } from './types';
 
-interface ToolDefinition {
+/** The ordinary turn's ceiling. A desk request still wakes desks instead. */
+export const MAX_TOOLS_PER_TURN = 3;
+
+export interface ToolDefinition {
   name: string;
   description: string;
+  /** Plain words for the traveler. Used when a model call to this tool is rejected. */
+  label: string;
   triggers: string[];
-  run: (text: string, ctx: ToolContext) => Promise<ToolResult>;
+  /**
+   * The argument contract for a model call. Field names match `TripHints` so a
+   * validated payload merges straight into the hints a router call would build.
+   */
+  args: z.ZodType<Partial<TripHints>, z.ZodTypeDef, unknown>;
+  run: (input: ToolInput, ctx: ToolContext) => Promise<ToolResult>;
 }
+
+const isoDateArg = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  .describe('Date as YYYY-MM-DD');
+
+const cityArg = z.string().trim().min(2).max(80).describe('City name, for example Lisbon');
+
+const daysArg = z.number().int().min(1).max(18).describe('Number of days, 1 to 18');
+
+const longDaysArg = z.number().int().min(1).max(60).describe('Number of days, 1 to 60');
+
+const shortDaysArg = z.number().int().min(1).max(21).describe('Number of days, 1 to 21');
+
+const travelersArg = z
+  .number()
+  .int()
+  .min(1)
+  .max(12)
+  .describe('How many people are traveling');
+
+const paceArg = z
+  .enum(['relaxed', 'steady', 'packed'])
+  .describe('How full each day is: relaxed, steady, or packed');
+
+const styleArg = z
+  .enum(['lean', 'comfortable', 'splurge'])
+  .describe('Spending style: lean, comfortable, or splurge');
+
+const interestsArg = z
+  .array(z.string().trim().min(2).max(24))
+  .max(6)
+  .describe('A few interests, for example food, museums, hiking');
+
+const currencyArg = z
+  .string()
+  .length(3)
+  .regex(/^[A-Za-z]{3}$/, 'Use a three-letter currency code')
+  .transform((value) => value.toUpperCase())
+  .describe('Three-letter currency code, for example USD');
 
 const USD_RATES: Record<string, number> = {
   USD: 1,
@@ -44,10 +98,18 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'trip.outline',
     description: 'Build a day-by-day outline from a destination and dates.',
+    label: 'day-by-day outline',
     triggers: ['itinerary', 'outline', 'plan my', 'days in'],
-    run: async (text) => {
-      const hints = extractHints(text);
-      const data = buildOutline(hints);
+    args: z.object({
+      destination: cityArg,
+      startDate: isoDateArg,
+      endDate: isoDateArg.optional().describe('Last day, inclusive'),
+      days: daysArg.optional().describe('Length instead of an endDate'),
+      pace: paceArg.optional(),
+      interests: interestsArg.optional(),
+    }),
+    run: async (input) => {
+      const data = buildOutline(input.hints);
       if (!data) {
         return {
           name: 'trip.outline',
@@ -68,10 +130,18 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'budget.estimate',
     description: 'Estimate on-the-ground daily spend. Flights are excluded.',
+    label: 'budget estimate',
     triggers: ['budget', 'cost', 'how much'],
-    run: async (text) => {
-      const hints = extractHints(text);
-      const data = estimateBudget(hints);
+    args: z.object({
+      destination: cityArg,
+      days: longDaysArg.optional().describe('Length instead of a date range'),
+      startDate: isoDateArg.optional(),
+      endDate: isoDateArg.optional(),
+      travelers: travelersArg.optional(),
+      style: styleArg.optional(),
+    }),
+    run: async (input) => {
+      const data = estimateBudget(input.hints);
       if (!data) {
         return {
           name: 'budget.estimate',
@@ -92,10 +162,16 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'packing.list',
     description: 'Pack a bag from climate and trip length.',
+    label: 'packing list',
     triggers: ['pack', 'packing', 'suitcase'],
-    run: async (text) => {
-      const hints = extractHints(text);
-      const data = buildPackingList(hints);
+    args: z.object({
+      destination: cityArg.optional(),
+      days: shortDaysArg.optional(),
+      startDate: isoDateArg.optional(),
+      endDate: isoDateArg.optional(),
+    }),
+    run: async (input) => {
+      const data = buildPackingList(input.hints);
       return {
         name: 'packing.list',
         ok: true,
@@ -107,9 +183,14 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'places.suggest',
     description: 'Suggest a few anchors in one city.',
+    label: 'place list',
     triggers: ['where to eat', 'neighborhood', 'places in'],
-    run: async (text) => {
-      const hints = extractHints(text);
+    args: z.object({
+      destination: cityArg,
+      interests: interestsArg.optional(),
+    }),
+    run: async (input) => {
+      const hints = input.hints;
       if (!hints.destination) {
         return {
           name: 'places.suggest',
@@ -132,9 +213,15 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'currency.convert',
     description: 'Convert an amount between currencies.',
+    label: 'currency conversion',
     triggers: ['convert', 'exchange', 'currency'],
-    run: async (text, ctx) => {
-      const hints = extractHints(text);
+    args: z.object({
+      amount: z.number().positive().max(1_000_000_000).describe('How much to convert'),
+      fromCurrency: currencyArg,
+      toCurrency: currencyArg,
+    }),
+    run: async (input, ctx) => {
+      const hints = input.hints;
       if (!hints.amount || !hints.fromCurrency || !hints.toCurrency) {
         return {
           name: 'currency.convert',
@@ -160,9 +247,14 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'weather.outlook',
     description: 'Summarize a short forecast or a seasonal note.',
+    label: 'weather check',
     triggers: ['weather', 'forecast', 'rain'],
-    run: async (text, ctx) => {
-      const hints = extractHints(text);
+    args: z.object({
+      destination: cityArg,
+      startDate: isoDateArg.optional(),
+    }),
+    run: async (input, ctx) => {
+      const hints = input.hints;
       if (!hints.destination) {
         return {
           name: 'weather.outlook',
@@ -183,10 +275,20 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'visa.notes',
     description: 'Entry checklist. Not a visa ruling.',
+    label: 'entry checklist',
     triggers: ['visa', 'entry', 'passport'],
-    run: async (text) => {
-      const hints = extractHints(text);
-      const data = visaNotes(hints);
+    args: z.object({
+      destination: cityArg.optional(),
+      passportCountry: z
+        .string()
+        .trim()
+        .min(2)
+        .max(56)
+        .optional()
+        .describe('Country of the passport the traveler holds'),
+    }),
+    run: async (input) => {
+      const data = visaNotes(input.hints);
       return {
         name: 'visa.notes',
         ok: true,
@@ -198,10 +300,19 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
   {
     name: 'memory.remember',
     description: 'Store a preference, fact, or decision.',
+    label: 'memory note',
     triggers: ['remember', 'i prefer', 'i always'],
-    run: async (text) => {
-      const hints = extractHints(text);
-      if (!hints.rememberText) {
+    args: z.object({
+      rememberText: z
+        .string()
+        .trim()
+        .min(1)
+        .max(500)
+        .describe('The preference, fact, or decision to store, in one sentence'),
+    }),
+    run: async (input) => {
+      const rememberText = input.hints.rememberText;
+      if (!rememberText) {
         return {
           name: 'memory.remember',
           ok: false,
@@ -210,7 +321,7 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
           data: null,
         };
       }
-      const data = rememberFromText(hints.rememberText);
+      const data = rememberFromText(rememberText);
       return {
         name: 'memory.remember',
         ok: true,
@@ -241,7 +352,7 @@ export function routeTools(
   const names: string[] = [];
   for (const item of scored) {
     if (!names.includes(item.name)) names.push(item.name);
-    if (names.length === 3) break;
+    if (names.length === MAX_TOOLS_PER_TURN) break;
   }
   return names;
 }
@@ -263,6 +374,23 @@ function structuredHit(name: string, hints: TripHints, lower: string): boolean {
   return false;
 }
 
+export function findTool(name: string): ToolDefinition | undefined {
+  return BUNDLED_TOOLS.find((item) => item.name === name);
+}
+
+/** The catalog as the provider sees it: name, description, JSON Schema arguments. */
+export function toolSpecs(tools: ToolDefinition[] = BUNDLED_TOOLS): ModelToolSpec[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: zodToJsonSchema(tool.args),
+  }));
+}
+
+/**
+ * Run the deterministic router's picks. The router reads the traveler's text,
+ * so the hints it builds are the same ones a model call would have to supply.
+ */
 export async function runTools(
   text: string,
   names: string[],
@@ -270,11 +398,37 @@ export async function runTools(
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = [];
   for (const name of names) {
-    const tool = BUNDLED_TOOLS.find((item) => item.name === name);
+    const tool = findTool(name);
     if (!tool) continue;
-    results.push(await tool.run(text, ctx));
+    results.push(await runTool(tool, text, extractHints(text), 'router', ctx));
   }
   return results;
+}
+
+/**
+ * One tool execution. A tool that throws becomes a failed result with a traveler
+ * sentence, so a bug in one tool cannot take the turn down with it.
+ */
+export async function runTool(
+  tool: ToolDefinition,
+  text: string,
+  hints: TripHints,
+  source: 'model' | 'router',
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  try {
+    const result = await tool.run({ text, hints }, ctx);
+    return { ...result, source };
+  } catch (error) {
+    return {
+      name: tool.name,
+      ok: false,
+      summary: `The ${tool.label} hit an error, so it did not finish.`,
+      data: null,
+      warning: error instanceof Error ? error.message : 'tool threw',
+      source,
+    };
+  }
 }
 
 export function buildOutline(hints: TripHints): OutlineData | null {

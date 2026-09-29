@@ -5,25 +5,35 @@ import {
   loginSchema,
   registerSchema,
   type AuthConfig,
+  type AuthSessionResponse,
   type GoogleAuthInput,
   type LoginInput,
   type RegisterInput,
   type UserRecord,
 } from '@travelclaw/shared';
 import type { Request, Response } from 'express';
-import { clientKey, rateLimited } from '../common/rate-limit';
+import { browserKey, clientKey, rateLimited } from '../common/rate-limit';
 import { ZodValidationPipe } from '../common/zod-pipe';
 import { loadConfig } from '../config';
 import { AuthService } from './auth.service';
 import { clearSessionCookie, setSessionCookie } from './cookies';
+import type { AuthResult } from './auth.service';
 import { AuthGuard } from './auth.guard';
 import { CurrentUser } from './current-user.decorator';
-import { parseCookies } from './tokens';
+import { sessionTokenOf } from './tokens';
 
 @ApiTags('auth')
 @Controller('api/auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+
+  /**
+   * A visitor who ran into the guest-minting cap has not done anything wrong and does
+   * not need an account. Say what the limit is and that signing in is optional, so this
+   * never reads as a sign-in wall.
+   */
+  private static readonly GUEST_PACE =
+    'Too many new guest sessions have started from this address. This is a short cooldown, not a sign-in wall — try again in a few minutes, or sign in if you already have an account.';
 
   @Get('config')
   @ApiOperation({ summary: 'Whether Google sign-in is enabled' })
@@ -37,17 +47,38 @@ export class AuthController {
   async guest(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<UserRecord> {
-    const existing = this.auth.verifyToken(currentToken(req));
+  ): Promise<UserRecord | AuthSessionResponse> {
+    const token = currentToken(req);
+    const existing = this.auth.verifyToken(token);
     // Already signed in — guest or real, does not matter — so this is idempotent and
-    // never mints a second identity for a visitor who merely reloaded the page.
+    // never mints a second identity for a visitor who merely reloaded the page. A client
+    // that could not keep the cookie proves who it is with the token from its first call.
     if (existing) return existing;
+    if (!token) {
+      // No credential of any kind, but this may still be a browser we have met: the guest
+      // last seen from this address and user agent resumes rather than starting over. This
+      // is what keeps a frame that can hold nothing from spending the guest budget a page
+      // load at a time, and what makes the mint limit unreachable by ordinary reloads.
+      const pinned = this.auth.pinnedGuestId(browserKey(req));
+      const resumed = pinned ? this.auth.resumeGuest(pinned) : null;
+      if (resumed) return this.issue(res, resumed);
+    }
     if (!this.auth.guestLimiter.consume(clientKey(req))) {
-      throw rateLimited();
+      throw rateLimited(AuthController.GUEST_PACE);
     }
     const result = await this.auth.createGuest();
+    this.auth.rememberGuestPin(browserKey(req), result.user.id);
+    return this.issue(res, result);
+  }
+
+  /**
+   * Sets the session cookie and hands back the raw token. The token is the fallback for a
+   * client whose browser will not keep a cross-site cookie (an embedded preview): it sends
+   * it back as `Authorization: Bearer`. Same secret either way — see `docs/security.md`.
+   */
+  private issue(res: Response, result: AuthResult): AuthSessionResponse {
     setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    return { ...result.user, sessionToken: result.token };
   }
 
   @Post('register')
@@ -56,7 +87,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.registerLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
@@ -66,8 +97,8 @@ export class AuthController {
       body.displayName,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    this.auth.forgetGuestPin(browserKey(req));
+    return this.issue(res, result);
   }
 
   @Post('login')
@@ -77,7 +108,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.loginLimiter.consume(`${clientKey(req)}:${body.email}`)) {
       throw rateLimited();
     }
@@ -86,8 +117,8 @@ export class AuthController {
       body.password,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    this.auth.forgetGuestPin(browserKey(req));
+    return this.issue(res, result);
   }
 
   @Post('google')
@@ -97,7 +128,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(googleAuthSchema)) body: GoogleAuthInput,
-  ): Promise<UserRecord> {
+  ): Promise<AuthSessionResponse> {
     if (!this.auth.loginLimiter.consume(clientKey(req))) {
       throw rateLimited();
     }
@@ -105,8 +136,8 @@ export class AuthController {
       body.credential,
       currentGuestId(req, this.auth),
     );
-    setSessionCookie(res, result.token, result.expiresAt);
-    return result.user;
+    this.auth.forgetGuestPin(browserKey(req));
+    return this.issue(res, result);
   }
 
   @Post('logout')
@@ -115,6 +146,9 @@ export class AuthController {
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): { ok: true } {
     const token = currentToken(req);
     if (token) this.auth.logout(token);
+    // Signing out must stick even for a browser that could only be recognised by address
+    // and user agent, so the pin goes too — the next visitor is a new guest.
+    this.auth.forgetGuestPin(browserKey(req));
     clearSessionCookie(res);
     return { ok: true };
   }
@@ -128,11 +162,13 @@ export class AuthController {
 }
 
 function currentToken(req: Request): string | undefined {
-  return parseCookies(req.headers.cookie)[loadConfig().cookieName];
+  return sessionTokenOf(req.headers, loadConfig().cookieName);
 }
 
 /** The caller's guest id, if their current cookie belongs to a guest — else undefined. */
 function currentGuestId(req: Request, auth: AuthService): string | undefined {
   const user = auth.verifyToken(currentToken(req));
-  return user?.isGuest ? user.id : undefined;
+  if (user) return user.isGuest ? user.id : undefined;
+  // A browser with no credential can still carry its guest chats into a new account.
+  return auth.pinnedGuestId(browserKey(req)) ?? undefined;
 }
