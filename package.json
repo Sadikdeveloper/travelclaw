@@ -18,7 +18,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:reset": "rm -f data/travelclaw.db"
+    "db:reset": "node -e \"fs.rmSync('data/travelclaw.db', { force: true })\""
   },
   "devDependencies": {
     "prettier": "^3.5.3"
