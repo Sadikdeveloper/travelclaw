@@ -200,7 +200,7 @@ A flight or hotel request does not go through that tool list. It wakes one or tw
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key, and that is a later step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats, plus a connectors page for their own provider keys. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key (see Connectors), never code. Nobody has to sign in to chat — a guest is provisioned on first load — but chats belong to the account that made them, guest or signed-in.
 
 The chat shows the trail, not just the answer. Under each reply, a process trail lists what actually happened, in order: every tool that ran and who asked for it (the model, or the router standing in), every desk that was woken, and which model wrote the reply. The newest trail opens itself; older ones collapse. While a turn runs, the composer's send button becomes a stop button — stopping ends the waiting and reconciles with whatever the desk already persisted (the message is saved before the model runs, and the socket refills a reply that lands late).
 
@@ -211,6 +211,26 @@ Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, ar
 ## Channels
 
 `ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit in `ChannelsService`. Autoload is a later task because scanning a folder for code is an easy way to run something nobody reviewed.
+
+## Connectors
+
+A connector is a stored, named provider key (plus a base URL where relevant)
+that a traveler adds through the connectors page or `PUT /api/connectors/:name`.
+It carries no code, no tool definition, and no prompt text — built-in tools
+resolve one by name when they call out. The only names the desk knows are
+`currency` (Frankfurter-compatible rates) and `weather` (Open-Meteo-compatible
+forecast), listed in `ConnectorsService`; anything else is refused.
+
+Each traveler has their own rows in the `connectors` table, so one account's key
+is never another's. Where the operator sets an env fallback
+(`TRAVELCLAW_CURRENCY_*`, `TRAVELCLAW_WEATHER_*`), it applies only when that
+traveler stored nothing — a stored row replaces it outright. A turn resolves
+credentials through `ConnectorsService.resolverFor(userId)`, passed to the tools
+as `ctx.connectors`; the key travels only in an `Authorization` header, and a
+401/403 marks that traveler's row `rejected` while the tool falls back to its
+labeled default. Status is `configured` / `missing` / `rejected`, and no API
+response, error string, log line, chat message, or prompt ever carries the
+secret — the UI shows only the last four characters of a traveler's own key.
 
 ## Memory
 

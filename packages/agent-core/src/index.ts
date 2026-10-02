@@ -30,6 +30,7 @@ export { completeTurn, formatToolList, mockProvider, parseCommand } from './turn
 export type {
   ActiveTripHint,
   BudgetData,
+  ConnectorCredentials,
   CurrencyData,
   DestinationProfile,
   HistoryTurn,
@@ -44,6 +45,7 @@ export type {
   PersonaBundle,
   PlacesData,
   RememberData,
+  ToolConnectors,
   ToolContext,
   ToolInput,
   ToolResult,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AgentsModule } from '../agents/agents.module';
 import { AuthModule } from '../auth/auth.module';
+import { ConnectorsModule } from '../connectors/connectors.module';
 import { MemoryModule } from '../memory/memory.module';
 import { ModelsModule } from '../models/models.module';
 import { SessionsModule } from '../sessions/sessions.module';
@@ -23,6 +24,7 @@ import { GatewayService } from './gateway.service';
     TasksModule,
     WorkspaceModule,
     ModelsModule,
+    ConnectorsModule,
   ],
   controllers: [ChatController],
   providers: [GatewayService, DeskGateway],

@@ -24,7 +24,7 @@ Those desks write a brief. They do not search a provider, hold a seat, or take p
 
 ## Next, in this order
 
-- [ ] **User-added connectors.** Only after built-in tools are called by the model. A connector is a key the traveler provides, not a new language.
+- [x] **User-added connectors.** Only after built-in tools are called by the model. A connector is a key the traveler provides, not a new language.
 - [ ] **Flight and stay search** behind an explicit provider key. The desks already ask yes / no / still working. A provider may return offers. It must not claim a hold until the provider says one exists. No card storage.
 - [ ] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [ ] **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.

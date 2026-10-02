@@ -135,6 +135,18 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_url TEXT,
+  api_key TEXT,
+  status TEXT NOT NULL DEFAULT 'configured',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_session ON agent_tasks(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_trips_start ON trips(start_date);
@@ -143,4 +155,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_key ON sessions(user_id, key
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_google ON users(google_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connectors_user_name ON connectors(user_id, name);
 `;

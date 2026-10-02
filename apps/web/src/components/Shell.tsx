@@ -1,5 +1,5 @@
 import type { HealthReport, SessionRecord } from '@travelclaw/shared';
-import { Menu, Plus, Search, X } from 'lucide-react';
+import { Menu, Plug, Plus, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useLiveRevision } from '../App';
@@ -118,6 +118,13 @@ export function Shell() {
           <Plus size={16} aria-hidden="true" />
           New chat
         </NavLink>
+
+        <nav className="nav" aria-label="Desk">
+          <NavLink to="/connectors" onClick={() => setMenuOpen(false)}>
+            <Plug size={16} aria-hidden="true" />
+            Connectors
+          </NavLink>
+        </nav>
 
         <div className="side-section chats-section">
           <div className="side-section-head">

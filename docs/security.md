@@ -8,7 +8,7 @@ arbitrary API clients — see Pairing below before you expose this past your own
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
 - Tools cannot run shell commands. Keep it that way.
 - Workspace writes are limited to the five persona files, and paths are checked against the workspace root.
-- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter when the network flag is on.
+- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; a stored connector may repoint one at a compatible base URL (see Connectors).
 - Treat visa and safety text as a checklist. The desk is not an authority.
 
 ## Accounts
@@ -32,6 +32,14 @@ arbitrary API clients — see Pairing below before you expose this past your own
 - A limit is a pace, not an authentication demand. The 429 from guest minting and from a guest turn says what the limit is and that an account is optional, and the control UI shows it with a retry rather than a sign-in page. An expired cookie is recovered in place (`setSessionRecovery` in `apps/web/src/api.ts`), so `unauthenticated` reaches a traveler only when a real account's session has ended.
 - A guest's chats are mirrored into that browser's `localStorage` purely for a fast reload; the server-side row under its guest id is still what actually runs each turn and is the source of truth. Clearing that browser's storage or cookies does not delete anything server-side, but nothing else can read it back either — sign in to keep it.
 - Registering, signing in, or completing Google sign-in from a guest session folds that guest's chats into the resulting account (in place when it is a brand-new account, by reassigning `sessions` rows when it is an existing one) — see `AuthService.absorbGuest` in `apps/api/src/auth/auth.service.ts`. A failed sign-in attempt never touches the guest or its chats.
+
+## Connectors
+
+- A connector secret is stored per account in the `connectors` table, as written — the database is a plain SQLite file, so whoever can read `data/travelclaw.db` can read stored keys. That is the same trust boundary as the rest of this desk; do not expose the database file, and do not store a key you would not store in `.env`.
+- The secret is never returned: `GET /api/connectors` and the write responses carry only a `keySuffix` (the last four characters of that traveler's _own_ key, or `••••` when too short to hint at), and an operator env fallback shows no suffix at all. Validation and rejection errors name the field, never the value.
+- The secret is never logged, never persisted into a chat message or tool trace, and never placed in the model prompt. Tools send it only as an `Authorization: Bearer` header to the connector's own base URL — never as a query parameter, where it would land in logs.
+- A base URL must be `http(s)` without embedded credentials, and is validated on write. Non-http values are ignored at call time. A connector cannot introduce new code, new tool definitions, new prompt text, or new destinations beyond its own base URL — the path and parameters stay the tool's.
+- A traveler's own row replaces the operator's env fallback outright for their turns, so what the desk uses for them is exactly what their connectors page shows. A 401/403 marks their row `rejected`; saving again clears the flag.
 
 ## Pairing (still open)
 
