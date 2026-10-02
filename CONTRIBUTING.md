@@ -18,6 +18,8 @@ pnpm dev
 - Gateway: http://localhost:3000/health
 - OpenAPI: http://localhost:3000/docs
 
+The control UI is ready before the gateway, which has to compile first (and again after each save). Until `Gateway listening` appears in the `apps/api` output, a page loaded in that gap says the gateway is not answering — use Try again — and the dev server prints one `gateway is not accepting connections` line rather than a stack trace per refused connection. A tab that was already open reconnects by itself.
+
 Node 22.13 or newer is required. The gateway uses the built-in `node:sqlite` module.
 
 ## Where to start
