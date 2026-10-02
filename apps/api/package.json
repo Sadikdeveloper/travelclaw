@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NODE_OPTIONS='--disable-warning=ExperimentalWarning' nest start --watch",
+    "dev": "nest start --watch",
     "build": "nest build",
     "start": "node --disable-warning=ExperimentalWarning dist/main.js",
     "test": "jest --runInBand",
