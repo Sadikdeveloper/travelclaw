@@ -248,10 +248,9 @@ export interface ConnectorCredentials {
 }
 
 /**
- * How built-in tools resolve a traveler-provided connector by name. The gateway
- * builds this per turn from the caller's stored connectors plus the operator's
- * env fallback. `rejected` lets a tool report a 401/403 so the desk can mark
- * that connector without ever seeing the secret itself.
+ * How built-in tools resolve an operator-held connector by name. The gateway
+ * builds this per turn from the operator's env. `rejected` lets a tool report
+ * a 401/403 so the desk can log it without ever seeing the secret itself.
  */
 export interface ToolConnectors {
   get(name: string): ConnectorCredentials | undefined;

@@ -177,56 +177,6 @@ export const planTripSchema = z.object({
   interests: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
 });
 
-/** The only connector names the desk knows. Anything else is refused. */
-export const connectorNameSchema = z.enum(['currency', 'weather']);
-
-/**
- * A traveler-provided key (plus base URL where relevant). Both fields are
- * optional so one can be updated without resending the other: an omitted field
- * keeps its stored value, an empty string clears it. After the merge at least
- * one of the two must remain — deleting both is what DELETE is for.
- *
- * Error messages name the field, never the value: a key must not appear in an
- * API response or an error string.
- */
-export const upsertConnectorSchema = z
-  .object({
-    baseUrl: z.string().trim().max(200, 'That URL is too long').optional(),
-    apiKey: z
-      .string()
-      .trim()
-      .max(500, 'That key is too long')
-      .refine((value) => !/[\r\n]/.test(value), {
-        message: 'That key has a line break in it',
-      })
-      .optional(),
-  })
-  .superRefine((value, ctx) => {
-    const baseUrl = value.baseUrl?.trim() ?? '';
-    if (baseUrl !== '') {
-      let parsed: URL | null = null;
-      try {
-        parsed = new URL(baseUrl);
-      } catch {
-        parsed = null;
-      }
-      if (
-        !parsed ||
-        (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-        !parsed.hostname ||
-        parsed.username !== '' ||
-        parsed.password !== ''
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['baseUrl'],
-          message:
-            'Use an http(s) URL without credentials, for example https://api.example.com',
-        });
-      }
-    }
-  });
-
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
@@ -241,5 +191,3 @@ export type CreateTripInput = z.infer<typeof createTripSchema>;
 export type UpdateTripInput = z.infer<typeof updateTripSchema>;
 export type PlanTripInput = z.infer<typeof planTripSchema>;
 export type WorkspaceFileName = z.infer<typeof workspaceFileSchema>;
-export type ConnectorNameInput = z.infer<typeof connectorNameSchema>;
-export type UpsertConnectorInput = z.infer<typeof upsertConnectorSchema>;

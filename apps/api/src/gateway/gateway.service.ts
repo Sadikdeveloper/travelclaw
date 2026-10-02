@@ -121,7 +121,7 @@ export class GatewayService {
           now: new Date(),
           network: config.network,
           fetchImpl: fetch,
-          connectors: this.connectors.resolverFor(userId),
+          connectors: this.connectors.resolverFor(),
         },
       },
     );

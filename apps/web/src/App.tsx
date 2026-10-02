@@ -5,7 +5,6 @@ import { useAuth } from './auth';
 import { RequireAuth } from './components/RequireAuth';
 import { Shell } from './components/Shell';
 import { ChatPage } from './pages/ChatPage';
-import { ConnectorsPage } from './pages/ConnectorsPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 
@@ -42,7 +41,6 @@ export function App() {
             <Route index element={<ChatPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="chat/:sessionId" element={<ChatPage />} />
-            <Route path="connectors" element={<ConnectorsPage />} />
             <Route path="*" element={<Missing />} />
           </Route>
         </Route>

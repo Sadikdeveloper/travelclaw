@@ -23,10 +23,7 @@ export interface AppConfig {
   /** Extra origins allowed to call the gateway. Empty means same-origin only. */
   allowedOrigins: string[];
   sessionTtlDays: number;
-  /**
-   * Operator fallback for traveler connectors. A traveler's own row always wins;
-   * these apply only when they stored nothing for that connector.
-   */
+  /** Operator-held provider keys that built-in tools resolve by connector name. */
   currencyBaseUrl: string | null;
   currencyApiKey: string | null;
   weatherBaseUrl: string | null;

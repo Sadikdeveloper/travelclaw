@@ -8,11 +8,13 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 
 /**
- * Connectors are keys a traveler provides, not a new language: they are stored
- * per account, resolved by name inside built-in tools, and never echoed back —
- * not in a response, an error string, or a chat turn.
+ * Connectors are operator-held provider keys that built-in tools resolve by
+ * name. The traveler never provides one: provider access is the desk's job.
+ * The key travels only in an Authorization header — never in a chat turn, a
+ * stored transcript, or an error string — and there is no HTTP surface for
+ * reading or writing connectors at all.
  */
-describe('connectors', () => {
+describe('provider connectors', () => {
   let app: INestApplication;
   const dir = mkdtempSync(join(tmpdir(), 'travelclaw-connectors-'));
   const originalFetch = global.fetch;
@@ -70,194 +72,55 @@ describe('connectors', () => {
     return agent;
   }
 
-  it('lists every supported connector as missing for a fresh account', async () => {
-    const agent = await signedInAgent();
-    const res = await agent.get('/api/connectors');
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual([
-      {
-        name: 'currency',
-        label: 'Rates',
-        detail: expect.any(String),
-        status: 'missing',
-        source: null,
-        baseUrl: null,
-        keySuffix: null,
-        updatedAt: null,
-      },
-      {
-        name: 'weather',
-        label: 'Forecast',
-        detail: expect.any(String),
-        status: 'missing',
-        source: null,
-        baseUrl: null,
-        keySuffix: null,
-        updatedAt: null,
-      },
-    ]);
-  });
-
-  it('stores a connector and never returns the secret', async () => {
-    const agent = await signedInAgent();
-    const key = 'sk-rates-key-7890';
-    const saved = await agent.put('/api/connectors/currency').send({
-      baseUrl: 'https://rates.example.com/',
-      apiKey: key,
-    });
-    expect(saved.status).toBe(200);
-    expect(saved.body).toMatchObject({
-      name: 'currency',
-      status: 'configured',
-      source: 'account',
-      baseUrl: 'https://rates.example.com',
-      keySuffix: '7890',
-    });
-    expect(JSON.stringify(saved.body)).not.toContain(key);
-
-    const listed = await agent.get('/api/connectors');
-    expect(listed.status).toBe(200);
-    expect(JSON.stringify(listed.body)).not.toContain(key);
-    expect(
-      listed.body.find((entry: { name: string }) => entry.name === 'currency'),
-    ).toMatchObject({ status: 'configured', keySuffix: '7890' });
-  });
-
-  it('runs a tool through the stored connector without leaking the key', async () => {
-    const agent = await signedInAgent();
-    const key = 'sk-live-rates-4455';
-    await agent.put('/api/connectors/currency').send({
-      baseUrl: 'https://rates.example.com',
-      apiKey: key,
-    });
-
-    const res = await agent.post('/api/chat').send({ content: 'convert 100 USD to EUR' });
-    expect(res.status).toBe(201);
-    expect(res.body.tools).toEqual([
-      {
-        name: 'currency.convert',
-        ok: true,
-        summary: expect.stringMatching(/100 USD is about 92 EUR/),
-        source: 'router',
-      },
-    ]);
-    expect(seen).toHaveLength(1);
-    expect(seen[0].url).toBe('https://rates.example.com/latest?from=USD&to=EUR&amount=100');
-    expect(seen[0].auth).toBe(`Bearer ${key}`);
-    // The turn's reply, trace, and stored transcript carry no secret.
-    expect(JSON.stringify(res.body)).not.toContain(key);
-    const stored = await agent.get(`/api/sessions/${res.body.session.id}`);
-    expect(JSON.stringify(stored.body)).not.toContain(key);
-  });
-
-  it('marks a connector rejected when its provider refuses the key', async () => {
-    const agent = await signedInAgent();
-    await agent.put('/api/connectors/currency').send({ apiKey: 'sk-bad-key' });
-    ratesStatus = 401;
-
-    const res = await agent.post('/api/chat').send({ content: 'convert 100 USD to EUR' });
-    // The desk table is the labeled fallback: the turn still answers.
-    expect(res.status).toBe(201);
-    expect(res.body.tools[0].summary).toMatch(/desk-table/);
-
-    const listed = await agent.get('/api/connectors');
-    expect(
-      listed.body.find((entry: { name: string }) => entry.name === 'currency').status,
-    ).toBe('rejected');
-
-    // Saving again clears the flag.
-    const saved = await agent
-      .put('/api/connectors/currency')
-      .send({ apiKey: 'sk-new-key' });
-    expect(saved.body.status).toBe('configured');
-  });
-
-  it('keeps an omitted field and clears an emptied one', async () => {
-    const agent = await signedInAgent();
-    await agent.put('/api/connectors/currency').send({
-      baseUrl: 'https://rates.example.com',
-      apiKey: 'sk-keep-me-1122',
-    });
-    // Only the base URL is resent: the key stays.
-    const kept = await agent.put('/api/connectors/currency').send({
-      baseUrl: 'https://other.example.com',
-    });
-    expect(kept.body).toMatchObject({
-      baseUrl: 'https://other.example.com',
-      keySuffix: '1122',
-      status: 'configured',
-    });
-    // An empty key clears it; the base URL alone still configures.
-    const cleared = await agent.put('/api/connectors/currency').send({ apiKey: '' });
-    expect(cleared.body).toMatchObject({
-      baseUrl: 'https://other.example.com',
-      keySuffix: null,
-      status: 'configured',
-    });
-  });
-
-  it('refuses validation failures without echoing the key', async () => {
-    const agent = await signedInAgent();
-    const key = 'sk-never-echoed-6677';
-    const badUrl = await agent.put('/api/connectors/currency').send({
-      baseUrl: 'ftp://rates.example.com',
-      apiKey: key,
-    });
-    expect(badUrl.status).toBe(400);
-    expect(JSON.stringify(badUrl.body)).not.toContain(key);
-
-    const unknown = await agent.put('/api/connectors/flights').send({ apiKey: key });
-    expect(unknown.status).toBe(404);
-    expect(JSON.stringify(unknown.body)).not.toContain(key);
-
-    const empty = await agent.put('/api/connectors/weather').send({ apiKey: '' });
-    expect(empty.status).toBe(400);
-    expect(empty.body.error.code).toBe('connector_empty');
-  });
-
-  it('falls back to the operator environment when a traveler stored nothing', async () => {
-    process.env.TRAVELCLAW_CURRENCY_BASE_URL = 'https://env-rates.example.com';
-    process.env.TRAVELCLAW_CURRENCY_API_KEY = 'sk-env-operator-key';
+  it('runs a tool through the operator connector without leaking the key', async () => {
+    process.env.TRAVELCLAW_CURRENCY_BASE_URL = 'https://rates.example.com';
+    process.env.TRAVELCLAW_CURRENCY_API_KEY = 'sk-operator-rates-4455';
     try {
       const agent = await signedInAgent();
-      const listed = await agent.get('/api/connectors');
-      expect(
-        listed.body.find((entry: { name: string }) => entry.name === 'currency'),
-      ).toMatchObject({
-        status: 'configured',
-        source: 'environment',
-        baseUrl: 'https://env-rates.example.com',
-        // Not even a suffix: the operator's key is not this traveler's to inspect.
-        keySuffix: null,
-      });
-      expect(JSON.stringify(listed.body)).not.toContain('sk-env-operator-key');
-
       const res = await agent.post('/api/chat').send({ content: 'convert 100 USD to EUR' });
+
       expect(res.status).toBe(201);
+      expect(res.body.tools).toEqual([
+        {
+          name: 'currency.convert',
+          ok: true,
+          summary: expect.stringMatching(/100 USD is about 92 EUR/),
+          source: 'router',
+        },
+      ]);
       expect(seen).toHaveLength(1);
       expect(seen[0].url).toBe(
-        'https://env-rates.example.com/latest?from=USD&to=EUR&amount=100',
+        'https://rates.example.com/latest?from=USD&to=EUR&amount=100',
       );
-      expect(seen[0].auth).toBe('Bearer sk-env-operator-key');
-      expect(JSON.stringify(res.body)).not.toContain('sk-env-operator-key');
+      expect(seen[0].auth).toBe('Bearer sk-operator-rates-4455');
+      // The turn's reply, trace, and stored transcript carry no secret.
+      expect(JSON.stringify(res.body)).not.toContain('sk-operator-rates-4455');
+      const stored = await agent.get(`/api/sessions/${res.body.session.id}`);
+      expect(JSON.stringify(stored.body)).not.toContain('sk-operator-rates-4455');
     } finally {
       delete process.env.TRAVELCLAW_CURRENCY_BASE_URL;
       delete process.env.TRAVELCLAW_CURRENCY_API_KEY;
     }
   });
 
-  it('forgets a connector on delete and keeps accounts apart', async () => {
-    const first = await signedInAgent();
-    await first.put('/api/connectors/weather').send({ apiKey: 'sk-first-2233' });
-    const removed = await first.delete('/api/connectors/weather');
-    expect(removed.status).toBe(200);
-    expect(removed.body).toMatchObject({ name: 'weather', status: 'missing' });
+  it('falls back to the desk table when the provider refuses the key', async () => {
+    process.env.TRAVELCLAW_CURRENCY_API_KEY = 'sk-rejected-key';
+    ratesStatus = 401;
+    try {
+      const agent = await signedInAgent();
+      const res = await agent.post('/api/chat').send({ content: 'convert 100 USD to EUR' });
 
-    // A second account never saw the first one's row.
-    const second = await signedInAgent();
-    const listed = await second.get('/api/connectors');
-    expect(
-      listed.body.find((entry: { name: string }) => entry.name === 'weather').status,
-    ).toBe('missing');
+      expect(res.status).toBe(201);
+      expect(res.body.tools[0].summary).toMatch(/desk-table/);
+      expect(JSON.stringify(res.body)).not.toContain('sk-rejected-key');
+    } finally {
+      delete process.env.TRAVELCLAW_CURRENCY_API_KEY;
+    }
+  });
+
+  it('exposes no HTTP surface for connectors', async () => {
+    const agent = await signedInAgent();
+    const res = await agent.get('/api/connectors');
+    expect(res.status).toBe(404);
   });
 });

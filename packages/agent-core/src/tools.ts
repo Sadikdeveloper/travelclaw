@@ -671,7 +671,7 @@ export async function convertCurrency(
   ctx: ToolContext,
 ): Promise<CurrencyData> {
   if (ctx.network && ctx.fetchImpl) {
-    // A traveler connector may point this at a Frankfurter-compatible rates API
+    // An operator connector may point this at a Frankfurter-compatible rates API
     // and add a key. The key travels only in the Authorization header — it never
     // appears in the summary, data, or warning below.
     const connector = ctx.connectors?.get('currency');
@@ -733,7 +733,7 @@ export async function weatherOutlook(
   const profile = hints.destination ? findDestinationByName(hints.destination) : undefined;
   const destination = profile?.name ?? hints.destination ?? 'that city';
   if (ctx.network && ctx.fetchImpl && profile) {
-    // Same shape as currency: a traveler connector may point this at an
+    // Same shape as currency: an operator connector may point this at an
     // Open-Meteo-compatible forecast API and add a key, header-only.
     const connector = ctx.connectors?.get('weather');
     const base = connectorBase(connector?.baseUrl, 'https://api.open-meteo.com');
@@ -867,9 +867,9 @@ function weatherLabel(code: number | undefined): string {
 }
 
 /**
- * A connector base URL the gateway already validated. Defense in depth: only
- * http(s) is honored here, anything else falls back to the desk default, and a
- * key is never appended to a URL — headers only.
+ * A connector base URL from the operator's env. Defense in depth: only http(s)
+ * is honored here, anything else falls back to the desk default, and a key is
+ * never appended to a URL — headers only.
  */
 function connectorBase(raw: string | undefined, fallback: string): string {
   if (!raw) return fallback;

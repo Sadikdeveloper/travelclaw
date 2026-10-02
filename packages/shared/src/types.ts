@@ -203,33 +203,6 @@ export interface ToolRunRecord {
   createdAt: string;
 }
 
-/**
- * A connector is a stored provider key (plus a base URL where relevant) that a
- * traveler added. It carries no code, no tool definition, and no prompt text —
- * built-in tools resolve it by name when they make an outbound call.
- */
-export type ConnectorName = 'currency' | 'weather';
-export type ConnectorStatus = 'configured' | 'missing' | 'rejected';
-
-/**
- * Where a connector's credentials came from. `account` is this traveler's own
- * row; `environment` is the operator's env fallback; `null` means missing.
- */
-export type ConnectorSource = 'account' | 'environment' | null;
-
-export interface ConnectorRecord {
-  name: ConnectorName;
-  label: string;
-  detail: string;
-  status: ConnectorStatus;
-  source: ConnectorSource;
-  /** The base URL in use, when one is set. Never a secret. */
-  baseUrl: string | null;
-  /** Last four characters of the key, so a traveler can tell keys apart. */
-  keySuffix: string | null;
-  updatedAt: string | null;
-}
-
 export type DeskKind = 'flight' | 'stay';
 export type AgentTaskStatus = 'working' | 'awaiting' | 'accepted' | 'rejected';
 export type TaskDecision = 'complete' | 'no' | 'still_working';

@@ -8,7 +8,7 @@ arbitrary API clients — see Pairing below before you expose this past your own
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
 - Tools cannot run shell commands. Keep it that way.
 - Workspace writes are limited to the five persona files, and paths are checked against the workspace root.
-- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; a stored connector may repoint one at a compatible base URL (see Connectors).
+- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; an operator connector may repoint one at a compatible base URL (see Connectors).
 - Treat visa and safety text as a checklist. The desk is not an authority.
 
 ## Accounts
@@ -35,11 +35,9 @@ arbitrary API clients — see Pairing below before you expose this past your own
 
 ## Connectors
 
-- A connector secret is stored per account in the `connectors` table, as written — the database is a plain SQLite file, so whoever can read `data/travelclaw.db` can read stored keys. That is the same trust boundary as the rest of this desk; do not expose the database file, and do not store a key you would not store in `.env`.
-- The secret is never returned: `GET /api/connectors` and the write responses carry only a `keySuffix` (the last four characters of that traveler's _own_ key, or `••••` when too short to hint at), and an operator env fallback shows no suffix at all. Validation and rejection errors name the field, never the value.
-- The secret is never logged, never persisted into a chat message or tool trace, and never placed in the model prompt. Tools send it only as an `Authorization: Bearer` header to the connector's own base URL — never as a query parameter, where it would land in logs.
-- A base URL must be `http(s)` without embedded credentials, and is validated on write. Non-http values are ignored at call time. A connector cannot introduce new code, new tool definitions, new prompt text, or new destinations beyond its own base URL — the path and parameters stay the tool's.
-- A traveler's own row replaces the operator's env fallback outright for their turns, so what the desk uses for them is exactly what their connectors page shows. A 401/403 marks their row `rejected`; saving again clears the flag.
+- Connector secrets live in the operator's env, alongside the model key — never in SQLite, and never provided by the traveler. There is no HTTP surface for reading or writing them.
+- The secret is never logged, never persisted into a chat message or tool trace, and never placed in the model prompt. Tools send it only as an `Authorization: Bearer` header to the connector's own base URL — never as a query parameter, where it would land in logs. A rejection warning names the connector, never the key.
+- A connector cannot introduce new code, new tool definitions, new prompt text, or new destinations beyond its own base URL — the path and parameters stay the tool's. Non-http base URLs are ignored at call time.
 
 ## Pairing (still open)
 
