@@ -172,6 +172,12 @@ export interface ActiveTripHint {
 
 export interface TurnRequest {
   text: string;
+  /**
+   * Extra lines appended to the model's copy of the message only — the deterministic
+   * router never sees them. The gateway uses it to tell the model which files a
+   * traveler attached without letting a file name like "weather.pdf" steer routing.
+   */
+  modelNote?: string;
   persona: PersonaBundle;
   memory: string[];
   history: HistoryTurn[];

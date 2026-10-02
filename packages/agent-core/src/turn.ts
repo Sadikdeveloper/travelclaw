@@ -56,6 +56,9 @@ export async function completeTurn(
   const routerNames =
     command?.name === 'remember' ? ['memory.remember'] : routeTools(text).slice(0, 3);
   const history = input.history.slice(-8);
+  // What the model reads: the traveler's words, plus any gateway note (attachments).
+  // Routing above already ran on the raw text, so a note cannot steer tool choice.
+  const userText = input.modelNote ? `${input.text}\n\n${input.modelNote}` : input.text;
 
   let toolResults: ToolResult[];
   if (command?.name === 'remember' || deps.provider.usesTools !== true) {
@@ -67,7 +70,7 @@ export async function completeTurn(
     const first = await deps.provider.complete({
       system: assemblePrompt(input, [], { toolCalling: true }),
       history,
-      user: input.text,
+      user: userText,
       fallback: renderFallback(text, [], input.persona.name),
       tools: toolSpecs(),
     });
@@ -97,7 +100,7 @@ export async function completeTurn(
   const completion = await deps.provider.complete({
     system: assemblePrompt(input, toolResults),
     history,
-    user: input.text,
+    user: userText,
     fallback,
   });
   const traces = toolResults.map((result) => ({

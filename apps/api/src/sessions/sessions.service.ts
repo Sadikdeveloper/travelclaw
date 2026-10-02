@@ -3,6 +3,7 @@ import {
   sessionKey,
   WEBCHAT_CHANNEL,
   type CreateSessionInput,
+  type MessageAttachment,
   type MessageRecord,
   type MessageRole,
   type SessionRecord,
@@ -30,6 +31,7 @@ interface MessageRow {
   role: MessageRole;
   content: string;
   tools_json: string;
+  attachments_json: string;
   provider: string | null;
   model: string | null;
   created_at: string;
@@ -123,24 +125,31 @@ export class SessionsService {
     content: string,
     tools: ToolTrace[] = [],
     meta?: { provider?: string; model?: string },
+    attachments: MessageAttachment[] = [],
   ): MessageRecord {
     const session = this.requireRow(sessionId);
     const now = nowIso();
     const id = newId();
     this.db.run(
-      `INSERT INTO messages (id, session_id, role, content, tools_json, provider, model, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (id, session_id, role, content, tools_json, attachments_json, provider, model, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       sessionId,
       role,
       content,
       JSON.stringify(tools),
+      JSON.stringify(attachments),
       meta?.provider || null,
       meta?.model || null,
       now,
     );
+    // An attachment-only message still deserves a real title, not "New desk note".
+    const titleFromText =
+      content || attachments.map((attachment) => attachment.name).join(', ');
     const title =
-      session.title === 'New chat' && role === 'user' ? titleFrom(content) : session.title;
+      session.title === 'New chat' && role === 'user'
+        ? titleFrom(titleFromText)
+        : session.title;
     this.db.run(
       'UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?',
       now,
@@ -214,6 +223,7 @@ function mapMessage(row: MessageRow): MessageRecord {
     role: row.role,
     content: row.content,
     tools: parseJson<ToolTrace[]>(row.tools_json, []),
+    attachments: parseJson<MessageAttachment[]>(row.attachments_json, []),
     provider: row.provider,
     model: row.model,
     createdAt: row.created_at,
