@@ -5,6 +5,21 @@ export type MemoryKind = 'preference' | 'fact' | 'decision';
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChannelStatus = 'ready' | 'disabled' | 'not_configured';
 
+/**
+ * A file the traveler attached to a message. Only the name, kind, size, and — for
+ * images — a small inline thumbnail travel with the message; the bytes stay on the
+ * device that picked them. Document parsing is a later step (docs/roadmap.md), so
+ * the desk is told what was attached, not handed the file itself.
+ */
+export interface MessageAttachment {
+  name: string;
+  mime: string;
+  size: number;
+  kind: 'image' | 'document';
+  /** Inline data-URL preview for images, capped small. Absent for documents. */
+  thumb?: string | null;
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
@@ -102,6 +117,7 @@ export interface MessageRecord {
   role: MessageRole;
   content: string;
   tools: ToolTrace[];
+  attachments: MessageAttachment[];
   provider: string | null;
   model: string | null;
   createdAt: string;

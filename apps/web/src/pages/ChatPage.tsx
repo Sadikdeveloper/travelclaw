@@ -1,15 +1,19 @@
 import type {
   AgentTaskRecord,
+  MessageAttachment,
   MessageRecord,
   SessionRecord,
   TaskDecision,
 } from '@travelclaw/shared';
-import { Hotel, Plane, Send, Sparkles } from 'lucide-react';
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
+import { Hotel, Plane, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useLiveRevision } from '../App';
 import { api, ApiError } from '../api';
 import { AgentCard } from '../components/AgentCard';
+import { AttachmentChip } from '../components/AttachmentChip';
+import { Composer } from '../components/Composer';
+import { ProcessTrail } from '../components/ProcessTrail';
 import { RichText } from '../components/RichText';
 import { Banner } from '../components/Status';
 import { useAuth } from '../auth';
@@ -28,13 +32,17 @@ export function ChatPage() {
   const revision = useLiveRevision();
   const { user } = useAuth();
   const generation = useRef(0);
+  const abort = useRef<AbortController | null>(null);
   const [title, setTitle] = useState('New chat');
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [tasks, setTasks] = useState<AgentTaskRecord[]>([]);
   const [draft, setDraft] = useState(params.get('draft') ?? '');
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState('');
+  const transcript = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
 
   // The hero landing view only applies to a brand-new, not-yet-opened chat — once a
   // specific chat id is in the URL, it always gets the normal thread, even mid-send.
@@ -47,6 +55,7 @@ export function ChatPage() {
       setTitle('New chat');
       return;
     }
+    stickToBottom.current = true;
     if (user?.isGuest) {
       // Instant paint from this device's own cache while the network request is
       // still in flight — nothing else backs a guest's chat on first render.
@@ -54,23 +63,22 @@ export function ChatPage() {
       if (cached.length) setMessages(cached);
     }
     const seq = ++generation.current;
-    Promise.all([
-      api<{ session: SessionRecord; messages: MessageRecord[] }>(
-        `/api/sessions/${sessionId}`,
-      ),
-      api<AgentTaskRecord[]>(`/api/sessions/${sessionId}/tasks`),
-    ])
-      .then(([opened, desks]) => {
-        if (seq !== generation.current) return;
-        setTitle(opened.session.title);
-        setMessages(opened.messages);
-        setTasks(desks);
-        if (user?.isGuest) mirrorGuestMessages(user.id, sessionId, opened.messages);
-      })
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : 'Could not open that chat'),
-      );
+    loadChat(sessionId, seq).catch(() => setError('Could not open that chat'));
   }, [sessionId, revision, user]);
+
+  /** Fetch one chat's messages and desks, honoring the newest caller only. */
+  async function loadChat(id: string, seq: number): Promise<MessageRecord[] | null> {
+    const [opened, desks] = await Promise.all([
+      api<{ session: SessionRecord; messages: MessageRecord[] }>(`/api/sessions/${id}`),
+      api<AgentTaskRecord[]>(`/api/sessions/${id}/tasks`),
+    ]);
+    if (seq !== generation.current) return null;
+    setTitle(opened.session.title);
+    setMessages(opened.messages);
+    setTasks(desks);
+    if (user?.isGuest) mirrorGuestMessages(user.id, id, opened.messages);
+    return opened.messages;
+  }
 
   async function decide(taskId: string, decision: TaskDecision) {
     setDeciding(taskId);
@@ -88,51 +96,88 @@ export function ChatPage() {
     }
   }
 
-  async function send(text: string) {
+  function stop() {
+    abort.current?.abort();
+  }
+
+  async function send(text: string, files: MessageAttachment[]) {
     const content = text.trim();
-    if (!content || sending) return;
+    if (sending || (!content && !files.length)) return;
+    const controller = new AbortController();
+    abort.current = controller;
     setSending(true);
     setError('');
     setDraft('');
+    setAttachments([]);
+    stickToBottom.current = true;
+    let id = sessionId;
     try {
-      let id = sessionId;
       if (!id) {
         const session = await api<SessionRecord>('/api/sessions', {
           method: 'POST',
           body: JSON.stringify({ channel: 'webchat' }),
+          signal: controller.signal,
         });
         id = session.id;
       }
       await api(`/api/sessions/${id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, attachments: files }),
+        signal: controller.signal,
       });
-      const seq = ++generation.current;
-      const [opened, desks] = await Promise.all([
-        api<{ session: SessionRecord; messages: MessageRecord[] }>(`/api/sessions/${id}`),
-        api<AgentTaskRecord[]>(`/api/sessions/${id}/tasks`),
-      ]);
-      if (seq === generation.current) {
-        setTitle(opened.session.title);
-        setMessages(opened.messages);
-        setTasks(desks);
-        if (user?.isGuest) mirrorGuestMessages(user.id, id, opened.messages);
-      }
+      await loadChat(id, ++generation.current);
       if (!sessionId) navigate(`/chat/${id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'The turn failed');
-      setDraft(content);
+      if (isAbort(err)) {
+        // Stopped, not failed: the desk may already hold the message (it is persisted
+        // before the model runs), so reconcile with what it has. The socket refills
+        // the reply if the turn lands after we stopped watching.
+        let current: MessageRecord[] | null = null;
+        if (id) {
+          current = await loadChat(id, ++generation.current).catch(() => null);
+          if (!sessionId) navigate(`/chat/${id}`);
+        }
+        const lastUser = [...(current ?? [])].reverse().find((m) => m.role === 'user');
+        if (!lastUser || lastUser.content !== content) {
+          // The message never reached the desk — hand it back to the composer.
+          setDraft(content);
+          setAttachments(files);
+        }
+      } else {
+        setError(err instanceof ApiError ? err.message : 'The turn failed');
+        setDraft(content);
+        setAttachments(files);
+      }
     } finally {
+      abort.current = null;
       setSending(false);
     }
   }
 
-  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      void send(draft);
-    }
-  }
+  // Follow the trail down as it grows, unless the traveler scrolled up to read.
+  useEffect(() => {
+    const el = transcript.current;
+    if (!el || !stickToBottom.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, tasks, sending]);
+
+  const lastAssistantId = useMemo(
+    () => [...messages].reverse().find((message) => message.role === 'assistant')?.id,
+    [messages],
+  );
+
+  const composer = (
+    <Composer
+      variant={isLanding ? 'hero' : 'thread'}
+      draft={draft}
+      onDraftChange={setDraft}
+      attachments={attachments}
+      onAttachmentsChange={setAttachments}
+      sending={sending}
+      onSend={(text, files) => void send(text, files)}
+      onStop={stop}
+    />
+  );
 
   if (isLanding) {
     return (
@@ -140,9 +185,9 @@ export function ChatPage() {
         <section className="hero">
           <div className="hero-inner">
             <img src="/mark.svg" alt="" className="hero-mark" />
-            <span className="agentic-badge">
+            <span className="mode-chip mode-chip-hero">
               <Sparkles size={13} aria-hidden="true" />
-              Agentic chat
+              Agent mode
             </span>
             <h1>Your next trip, one message away.</h1>
             <p className="hero-sub">
@@ -150,47 +195,20 @@ export function ChatPage() {
               books until you say so.
             </p>
             {error ? <Banner message={error} tone="bad" /> : null}
-            <form
-              className="hero-composer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void send(draft);
-              }}
-            >
-              <label className="sr-only" htmlFor="hero-draft">
-                Message
-              </label>
-              <textarea
-                id="hero-draft"
-                rows={1}
-                value={draft}
-                placeholder="A flight, a hotel, or both"
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={onComposerKeyDown}
-              />
-              <button
-                className="hero-send"
-                type="submit"
-                disabled={sending || !draft.trim()}
-                aria-label="Send"
-              >
-                <Send size={18} aria-hidden="true" />
-              </button>
-            </form>
+            {composer}
             <div className="hero-chips">
               {prompts.map(({ text, icon: Icon }) => (
                 <button
                   key={text}
                   type="button"
                   disabled={sending}
-                  onClick={() => void send(text)}
+                  onClick={() => void send(text, [])}
                 >
                   <Icon size={14} />
                   {text}
                 </button>
               ))}
             </div>
-            {sending ? <p className="muted hero-sending">Sending…</p> : null}
           </div>
         </section>
       </div>
@@ -202,25 +220,51 @@ export function ChatPage() {
       <section className="thread">
         <header className="thread-head">
           <strong>{title}</strong>
-          <span className="agentic-badge agentic-badge-inline">
-            <Sparkles size={12} aria-hidden="true" />
-            Agentic
-          </span>
         </header>
-        <div className="transcript" aria-live="polite">
+        <div
+          className="transcript"
+          aria-live="polite"
+          ref={transcript}
+          onScroll={() => {
+            const el = transcript.current;
+            if (!el) return;
+            stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+          }}
+        >
           {error ? <Banner message={error} tone="bad" /> : null}
-          {messages.map((message) => (
-            <div key={message.id} className="turn">
-              <article className={message.role === 'user' ? 'bubble user' : 'bubble'}>
+          {messages.map((message) => {
+            const messageTasks = tasks.filter((task) => task.messageId === message.id);
+            return (
+              <div key={message.id} className="turn">
                 {message.role === 'user' ? (
-                  message.content
+                  <article className="bubble user">
+                    {message.attachments.length ? (
+                      <div className="bubble-files">
+                        {message.attachments.map((attachment, index) => (
+                          <AttachmentChip
+                            key={`${message.id}-${index}`}
+                            attachment={attachment}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                    {message.content ? message.content : null}
+                  </article>
                 ) : (
-                  <RichText text={message.content} />
+                  <>
+                    <article className="bubble">
+                      <RichText text={message.content} />
+                    </article>
+                    {message.role === 'assistant' ? (
+                      <ProcessTrail
+                        message={message}
+                        tasks={messageTasks}
+                        latest={message.id === lastAssistantId}
+                      />
+                    ) : null}
+                  </>
                 )}
-              </article>
-              {tasks
-                .filter((task) => task.messageId === message.id)
-                .map((task) => (
+                {messageTasks.map((task) => (
                   <AgentCard
                     key={task.id}
                     task={task}
@@ -228,38 +272,32 @@ export function ChatPage() {
                     onDecide={(decision) => void decide(task.id, decision)}
                   />
                 ))}
+              </div>
+            );
+          })}
+          {sending ? (
+            <div className="working" aria-live="polite">
+              <span className="working-spinner" aria-hidden="true" />
+              <div className="working-copy">
+                <strong>The desk is working</strong>
+                <span className="working-steps" aria-hidden="true">
+                  <span>reading your message</span>
+                  <span>running its tools</span>
+                  <span>writing the reply</span>
+                </span>
+              </div>
+              <button className="btn-ghost working-stop" type="button" onClick={stop}>
+                Stop
+              </button>
             </div>
-          ))}
-          {sending ? <p className="muted">Sending…</p> : null}
+          ) : null}
         </div>
-        <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send(draft);
-          }}
-        >
-          <label className="field">
-            <span className="sr-only">Message</span>
-            <textarea
-              value={draft}
-              placeholder="A flight, a hotel, or both"
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={onComposerKeyDown}
-            />
-          </label>
-          <div className="row">
-            <button
-              className="btn copper"
-              type="submit"
-              disabled={sending || !draft.trim()}
-            >
-              Send
-            </button>
-            <span className="muted">Enter sends. Shift+Enter starts a line.</span>
-          </div>
-        </form>
+        {composer}
       </section>
     </div>
   );
+}
+
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
 }

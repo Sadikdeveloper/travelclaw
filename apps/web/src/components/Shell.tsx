@@ -110,7 +110,7 @@ export function Shell() {
           <img src="/mark.svg" alt="" />
           <div>
             <strong>TravelClaw</strong>
-            <em>Agentic Chat</em>
+            <em>Agent mode</em>
           </div>
         </div>
 

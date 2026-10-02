@@ -1,3 +1,4 @@
+import type { MessageAttachment } from './types';
 import { z } from 'zod';
 
 export const paceSchema = z.enum(['relaxed', 'steady', 'packed']);
@@ -63,17 +64,45 @@ export const taskDecisionSchema = z.object({
   decision: z.enum(['complete', 'no', 'still_working']),
 });
 
-export const sendMessageSchema = z.object({
-  content: z.string().trim().min(1).max(8000),
+/** Kept small on purpose: the wire carries a name and a thumbnail, never the bytes. */
+export const attachmentSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  mime: z.string().trim().min(3).max(120),
+  size: z.number().int().min(1).max(12_582_912),
+  kind: z.enum(['image', 'document']),
+  thumb: z.string().max(180_000).nullable().optional(),
 });
 
-export const chatSchema = z.object({
-  content: z.string().trim().min(1).max(8000),
-  agentId: z.string().trim().min(1).max(40).optional(),
-  channel: z.string().trim().min(1).max(32).default('webchat'),
-  peerId: z.string().trim().min(1).max(80).optional(),
-  sessionId: z.string().trim().min(1).optional(),
-});
+export const attachmentsSchema = z.array(attachmentSchema).max(4);
+
+/** A message needs words or a file — either one alone is a real turn. */
+function hasSubstance(value: { content: string; attachments?: MessageAttachment[] }) {
+  return value.content.length > 0 || (value.attachments?.length ?? 0) > 0;
+}
+
+export const sendMessageSchema = z
+  .object({
+    content: z.string().trim().max(8000),
+    attachments: attachmentsSchema.optional(),
+  })
+  .refine(hasSubstance, {
+    message: 'Say something or attach a file',
+    path: ['content'],
+  });
+
+export const chatSchema = z
+  .object({
+    content: z.string().trim().max(8000),
+    attachments: attachmentsSchema.optional(),
+    agentId: z.string().trim().min(1).max(40).optional(),
+    channel: z.string().trim().min(1).max(32).default('webchat'),
+    peerId: z.string().trim().min(1).max(80).optional(),
+    sessionId: z.string().trim().min(1).optional(),
+  })
+  .refine(hasSubstance, {
+    message: 'Say something or attach a file',
+    path: ['content'],
+  });
 
 export const createMemorySchema = z.object({
   agentId: z.string().trim().min(1).max(40).optional(),
@@ -155,6 +184,7 @@ export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 export type ChatInput = z.infer<typeof chatSchema>;
+export type AttachmentInput = z.infer<typeof attachmentSchema>;
 export type CreateMemoryInput = z.infer<typeof createMemorySchema>;
 export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceSchema>;
 export type CreateTripInput = z.infer<typeof createTripSchema>;

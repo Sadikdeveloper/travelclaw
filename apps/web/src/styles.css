@@ -576,7 +576,7 @@ h3 {
 .chat-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
 }
 .turn {
   display: flex;
@@ -602,8 +602,314 @@ h3 {
   align-items: center;
   gap: 10px;
 }
+.agent-card-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-card-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #f1e7da;
+  color: var(--copper-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.agent-card-actions .btn,
+.agent-card-actions .btn-ghost {
+  padding: 7px 12px;
+  font-size: 0.84rem;
+}
 .agent-card p {
   margin: 0;
+}
+
+/* Attachments: a chip while composing, and the same chip in a sent bubble. */
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #faf6ef;
+  border-radius: 12px;
+  padding: 4px 8px 4px 4px;
+  max-width: 250px;
+  min-width: 0;
+}
+.attach-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+.attach-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #f1e7da;
+  color: var(--copper-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.attach-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.attach-size {
+  color: var(--muted);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.attach-remove {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.attach-remove:hover {
+  background: #f0e4d5;
+  color: var(--ink);
+}
+.bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.bubble.user .bubble-files:only-child {
+  margin-bottom: 0;
+}
+.bubble.user .attach-chip {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.bubble.user .attach-icon {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f6f1e7;
+}
+.bubble.user .attach-size {
+  color: #cbbba8;
+}
+
+/* The process trail: what the desk did, in order, under the answer it produced. */
+.trail,
+.working {
+  width: 100%;
+  max-width: 68ch;
+}
+.trail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  width: 100%;
+  padding: 5px 10px;
+  background: #f5efe5;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  text-align: left;
+}
+.trail-head:hover {
+  border-color: var(--copper);
+  color: var(--ink);
+}
+.trail-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+.trail-count {
+  color: var(--muted);
+}
+.trail-via {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trail-chev {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.trail-chev.open {
+  transform: rotate(180deg);
+}
+.trail-steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  position: relative;
+}
+.trail-steps::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  background: #e8dcc9;
+  border-radius: 2px;
+}
+.trail-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.step-icon {
+  position: relative;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: white;
+  border: 1px solid var(--line);
+  color: var(--sea-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.trail-step.failed .step-icon {
+  color: var(--danger);
+  border-color: #efd0cc;
+}
+.step-body {
+  min-width: 0;
+  padding-top: 4px;
+}
+.step-line {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+.step-detail {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: #eee7db;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.source-chip.bad {
+  background: #f8e8e6;
+  color: var(--danger);
+}
+.trail-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The live "it is working" row: honest about the steps, stoppable at any point. */
+.working {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed var(--line);
+  background: #f7f1e8;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.working-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid #e0d3c3;
+  border-top-color: var(--copper);
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.working-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.working-copy strong {
+  font-size: 0.85rem;
+}
+.working-steps {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.working-steps span {
+  opacity: 0.35;
+  animation: step-glow 2.4s infinite;
+}
+.working-steps span:nth-child(2) {
+  animation-delay: 0.8s;
+}
+.working-steps span:nth-child(3) {
+  animation-delay: 1.6s;
+}
+@keyframes step-glow {
+  0%,
+  20% {
+    opacity: 0.35;
+  }
+  35%,
+  60% {
+    opacity: 1;
+    color: var(--copper-deep);
+  }
+  75%,
+  100% {
+    opacity: 0.35;
+  }
+}
+.working-stop {
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  flex-shrink: 0;
 }
 .status-chip {
   display: inline-flex;
@@ -663,17 +969,14 @@ h3 {
   display: flex;
   flex-direction: column;
 }
-.thread-head,
-.composer {
+.thread-head {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
-}
-.thread-head {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.agentic-badge {
+.mode-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -681,30 +984,119 @@ h3 {
   border-radius: 999px;
   background: rgba(196, 98, 45, 0.12);
   border: 1px solid rgba(196, 98, 45, 0.35);
-  color: var(--copper);
+  color: var(--copper-deep);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
 }
-.agentic-badge-inline {
-  font-size: 0.68rem;
-  padding: 3px 9px;
+.mode-chip-hero {
+  font-size: 0.78rem;
+  padding: 5px 12px;
 }
+
+/* The composer: attach, write, send — or stop while the desk works. */
 .composer {
-  border-bottom: 0;
   border-top: 1px solid var(--line);
+  padding: 10px 14px 12px;
   display: grid;
   gap: 8px;
+  background: var(--paper-2);
 }
-.composer textarea {
-  width: 100%;
+.composer.hero-composer {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: white;
+  box-shadow: var(--shadow);
+  padding: 10px;
+}
+.composer-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.composer-main.dragging {
+  outline: 2px dashed var(--copper);
+  outline-offset: 4px;
+  border-radius: 14px;
+}
+.composer-main textarea {
+  flex: 1;
+  min-width: 0;
   border: 0;
   resize: none;
-  min-height: 64px;
   background: transparent;
-  padding: 0;
+  min-height: 40px;
+  max-height: 160px;
+  padding: 10px 6px;
+  font: inherit;
+  line-height: 1.45;
+}
+.composer-main textarea:focus {
+  outline: none;
+}
+.composer-tool,
+.send-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer-tool {
+  background: transparent;
+  color: var(--muted);
+}
+.composer-tool:hover {
+  background: #f1e7da;
+  color: var(--ink);
+}
+.composer-tool:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+.send-btn {
+  background: var(--ink);
+  color: #f6f1e7;
+}
+.send-btn:hover {
+  background: #2a241e;
+}
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.send-btn.stop {
+  background: var(--danger);
+}
+.send-btn.stop:hover {
+  background: #6f2923;
+}
+.composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.composer-files {
+  padding: 2px 4px 0;
+}
+.composer-meta {
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+}
+.composer-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.attach-notice {
+  color: var(--danger);
+  font-size: 0.78rem;
 }
 .transcript {
   overflow: auto;
@@ -808,7 +1200,12 @@ h3 {
   align-items: center;
   justify-content: center;
   background:
-    linear-gradient(180deg, rgba(255, 250, 243, 0.5) 0%, rgba(255, 250, 243, 0.88) 58%, var(--paper-2) 100%),
+    linear-gradient(
+      180deg,
+      rgba(255, 250, 243, 0.5) 0%,
+      rgba(255, 250, 243, 0.88) 58%,
+      var(--paper-2) 100%
+    ),
     url('/hero-bg.jpg') center 70% / cover no-repeat;
 }
 .hero-inner {
@@ -837,49 +1234,8 @@ h3 {
   color: var(--ink-soft);
   max-width: 48ch;
 }
-.hero-composer {
-  width: 100%;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  background: white;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 10px 10px 10px 22px;
-  box-shadow: var(--shadow);
-}
 .hero-composer textarea {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  resize: none;
-  background: transparent;
-  max-height: 120px;
-  min-height: 24px;
-  padding: 7px 0;
-  font: inherit;
-}
-.hero-composer textarea:focus {
-  outline: none;
-}
-.hero-send {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: none;
-  background: var(--ink);
-  color: #f6f1e7;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.hero-send:hover {
-  background: #2a241e;
-}
-.hero-send:disabled {
-  opacity: 0.5;
-  cursor: wait;
+  padding: 10px 8px;
 }
 .hero-chips {
   display: flex;
@@ -907,15 +1263,12 @@ h3 {
   opacity: 0.6;
   cursor: wait;
 }
-.hero-sending {
-  margin: 0;
-}
 @media (max-width: 620px) {
   .hero-inner {
     padding: 24px 16px;
   }
-  .hero-composer {
-    padding-left: 16px;
+  .composer.hero-composer {
+    padding: 8px;
   }
 }
 
@@ -962,11 +1315,20 @@ h3 {
   .day {
     grid-template-columns: 1fr;
   }
+  /* On a phone the thread owns the viewport: the transcript scrolls inside, the
+     composer stays pinned under it, and nothing needs a page-level scroll. */
   .chat-layout {
+    height: calc(100dvh - 76px);
+  }
+  .chat-layout.chat-landing {
     height: auto;
+    min-height: calc(100dvh - 96px);
   }
   .canvas {
     padding: 18px 14px 36px;
+  }
+  .canvas:has(.chat-layout) {
+    padding: 10px;
   }
   .transcript {
     box-shadow: none;
@@ -976,12 +1338,30 @@ h3 {
     flex-wrap: wrap;
     row-gap: 6px;
   }
+  .composer {
+    padding: 8px 10px 10px;
+  }
+  .composer-meta {
+    gap: 6px;
+  }
+  .trail-via {
+    flex-basis: 100%;
+    margin-left: 26px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;
     transition: none !important;
+  }
+  .working-spinner,
+  .working-steps span,
+  .pulse {
+    animation: none !important;
+  }
+  .working-steps span {
+    opacity: 0.8;
   }
 }
 

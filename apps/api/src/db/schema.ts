@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   tools_json TEXT NOT NULL DEFAULT '[]',
+  attachments_json TEXT NOT NULL DEFAULT '[]',
   provider TEXT,
   model TEXT,
   created_at TEXT NOT NULL,

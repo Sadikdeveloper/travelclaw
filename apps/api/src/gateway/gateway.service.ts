@@ -6,7 +6,12 @@ import {
   planAgentDesks,
   type OutlineData,
 } from '@travelclaw/agent-core';
-import { WEBCHAT_CHANNEL, type ChatResponse, type ModelRecord } from '@travelclaw/shared';
+import {
+  WEBCHAT_CHANNEL,
+  type ChatResponse,
+  type MessageAttachment,
+  type ModelRecord,
+} from '@travelclaw/shared';
 import { loadConfig } from '../config';
 import { EventsService } from '../events/events.service';
 import { AgentsService } from '../agents/agents.service';
@@ -37,6 +42,7 @@ export class GatewayService {
   async handleIncoming(
     input: {
       content: string;
+      attachments?: MessageAttachment[];
       agentId?: string;
       channel?: string;
       peerId?: string;
@@ -66,7 +72,17 @@ export class GatewayService {
       return { session: reset, message, tools: [], provider: 'desk', model: 'command' };
     }
 
-    this.sessions.append(session.id, 'user', input.content);
+    this.sessions.append(
+      session.id,
+      'user',
+      input.content,
+      [],
+      undefined,
+      input.attachments ?? [],
+    );
+    // Desk routing reads the traveler's own words: a file named "hotel-list.pdf" is
+    // not itself a hotel request. The model, which can reason about what a file is,
+    // gets the attachment note as part of its turn text.
     const desks = planAgentDesks(input.content);
     if (desks.length) return this.startDesks(session.id, input.content, desks, userId);
 
@@ -77,6 +93,7 @@ export class GatewayService {
     const turn = await completeTurn(
       {
         text: input.content,
+        modelNote: attachmentNote(input.attachments),
         persona: {
           name: agent.name,
           soul: files.soul,
@@ -194,4 +211,17 @@ export class GatewayService {
 
 function wantsSavedTrip(text: string): boolean {
   return /\b(save|create)\b.{0,40}\btrip\b|\bsave (this|that|it)\b/i.test(text);
+}
+
+/**
+ * The one line the model learns about attachments: what arrived, and of what kind.
+ * The gateway never receives the bytes, so the note cannot promise contents — a
+ * later document-ingestion step (docs/roadmap.md) is what would read a file.
+ */
+function attachmentNote(attachments: MessageAttachment[] | undefined): string | undefined {
+  if (!attachments?.length) return undefined;
+  const listed = attachments
+    .map((attachment) => `${attachment.name} (${attachment.kind})`)
+    .join(', ');
+  return `[The traveler attached: ${listed}. The files are on their device — acknowledge them by name and ask for anything you would need read aloud.]`;
 }

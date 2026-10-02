@@ -325,6 +325,27 @@ describe('the offline path', () => {
     expect(turn.remembered?.body).toBe('I prefer trains to taxis');
     expect(turn.tools[0]).toMatchObject({ name: 'memory.remember', source: 'router' });
   });
+
+  it('shows a model note to the model but never to the router', async () => {
+    const provider = scriptedProvider([
+      { text: 'Got the file, thanks.', provider: 'openai', model: 'gpt-test' },
+    ]);
+
+    const turn = await completeTurn(
+      {
+        ...request('hello'),
+        modelNote: '[attached: packing-list.pdf (document)]',
+      },
+      { provider, ctx },
+    );
+
+    expect(provider.calls[0].user).toContain('hello');
+    expect(provider.calls[0].user).toContain('packing-list.pdf');
+    // The router chose from "hello" alone — a file named packing-list.pdf did not
+    // summon the packing tool.
+    expect(turn.tools.map((tool) => tool.name)).not.toContain('packing.list');
+    expect(turn.reply).toBe('Got the file, thanks.');
+  });
 });
 
 describe('tool errors', () => {

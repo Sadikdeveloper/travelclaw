@@ -156,6 +156,56 @@ describe('gateway', () => {
     expect(bobMessage.status).toBe(404);
   });
 
+  it('keeps attachments with the message and accepts a file-only turn', async () => {
+    const agent = await signedInAgent();
+    const first = await agent.post('/api/chat').send({
+      content: 'Here is our itinerary draft',
+      attachments: [
+        {
+          name: 'lisbon.jpg',
+          mime: 'image/jpeg',
+          size: 204800,
+          kind: 'image',
+          thumb: 'data:image/jpeg;base64,ZmFrZQ==',
+        },
+        { name: 'notes.pdf', mime: 'application/pdf', size: 90112, kind: 'document' },
+      ],
+    });
+    expect(first.status).toBe(201);
+    const opened = await agent.get(`/api/sessions/${first.body.session.id}`);
+    expect(opened.status).toBe(200);
+    const userMessage = opened.body.messages.find(
+      (message: { role: string }) => message.role === 'user',
+    );
+    expect(userMessage.attachments).toHaveLength(2);
+    expect(userMessage.attachments[0]).toMatchObject({ name: 'lisbon.jpg', kind: 'image' });
+    expect(userMessage.attachments[0].thumb).toBe('data:image/jpeg;base64,ZmFrZQ==');
+    expect(userMessage.attachments[1]).toMatchObject({
+      name: 'notes.pdf',
+      kind: 'document',
+    });
+
+    // A file on its own is a real turn — no words required.
+    const only = await agent.post(`/api/sessions/${first.body.session.id}/messages`).send({
+      content: '',
+      attachments: [
+        { name: 'boarding-pass.png', mime: 'image/png', size: 40960, kind: 'image' },
+      ],
+    });
+    expect(only.status).toBe(201);
+    const after = await agent.get(`/api/sessions/${first.body.session.id}`);
+    const lastUser = [...after.body.messages]
+      .reverse()
+      .find((message: { role: string }) => message.role === 'user');
+    expect(lastUser.attachments[0].name).toBe('boarding-pass.png');
+
+    // Words nor file — refused before anything runs.
+    const empty = await agent
+      .post(`/api/sessions/${first.body.session.id}/messages`)
+      .send({ content: '   ' });
+    expect(empty.status).toBe(400);
+  });
+
   it('rejects an inverted date range', async () => {
     const res = await request(app.getHttpServer()).post('/api/trips').send({
       destination: 'Rome',

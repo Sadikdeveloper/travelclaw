@@ -73,7 +73,7 @@ export class ChatController {
     const model = this.models.best();
     this.checkTurnLimit(req, user, model);
     return this.gateway.handleIncoming(
-      { content: body.content, sessionId: id },
+      { content: body.content, attachments: body.attachments, sessionId: id },
       user.id,
       model,
     );

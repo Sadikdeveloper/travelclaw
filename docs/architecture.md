@@ -202,6 +202,10 @@ A flight or hotel request does not go through that tool list. It wakes one or tw
 
 The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key, and that is a later step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
 
+The chat shows the trail, not just the answer. Under each reply, a process trail lists what actually happened, in order: every tool that ran and who asked for it (the model, or the router standing in), every desk that was woken, and which model wrote the reply. The newest trail opens itself; older ones collapse. While a turn runs, the composer's send button becomes a stop button — stopping ends the waiting and reconciles with whatever the desk already persisted (the message is saved before the model runs, and the socket refills a reply that lands late).
+
+The composer is the mode line. A tag reading `Agent mode` sits under the input, both on the landing hero and inside a thread, so the traveler can see how the desk behaves while typing. Attachments are metadata: a traveler can attach up to four images or documents per message, images carry a small inline thumbnail rendered in the browser, and the model is told what arrived by name — the files themselves never reach the gateway. Reading document contents is a later roadmap step, so the desk acknowledges a file rather than opening it.
+
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
 ## Channels

@@ -23,6 +23,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateLegacyNames();
     this.migrateToAccounts();
     this.migrateToGuests();
+    this.migrateToAttachments();
     this.db.exec(SCHEMA);
   }
 
@@ -91,6 +92,23 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     const columns = this.all<{ name: string }>('PRAGMA table_info(users)');
     if (columns.some((column) => column.name === 'is_guest')) return;
     this.db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0');
+  }
+
+  /**
+   * Messages gained an `attachments_json` column: names, kinds, sizes, and image
+   * thumbnails ride with the row — the files themselves never reach the gateway.
+   * Existing installs get the column in place, defaulting to "no attachments".
+   */
+  private migrateToAttachments() {
+    const tables = this.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    );
+    if (!tables.some((table) => table.name === 'messages')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(messages)');
+    if (columns.some((column) => column.name === 'attachments_json')) return;
+    this.db.exec(
+      "ALTER TABLE messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'",
+    );
   }
 
   onModuleDestroy() {

@@ -110,4 +110,75 @@ describe('accounts migration', () => {
       else process.env.DATABASE_PATH = previous.DATABASE_PATH;
     }
   });
+
+  it('adds attachments_json to a pre-attachments messages table, empty by default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-attach-'));
+    const dbPath = join(dir, 'legacy.db');
+
+    // An install from before attachments: messages with tools but no attachments.
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        display_name TEXT NOT NULL,
+        google_id TEXT UNIQUE,
+        is_guest INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        peer_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tools_json TEXT NOT NULL DEFAULT '[]',
+        provider TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+      INSERT INTO users VALUES ('u1', 'ada@example.com', NULL, 'Ada', NULL, 0, '2025-01-01', '2025-01-01');
+      INSERT INTO sessions VALUES ('s1', 'key-1', 'u1', 'marlow', 'webchat', 'operator', 'Old chat', '2025-01-01', '2025-01-01');
+      INSERT INTO messages VALUES ('m1', 's1', 'user', 'hello', '[]', NULL, NULL, '2025-01-01');
+    `);
+    legacy.close();
+
+    const previous = { DATABASE_PATH: process.env.DATABASE_PATH };
+    process.env.DATABASE_PATH = dbPath;
+    try {
+      const service = new DatabaseService();
+      service.onModuleInit();
+      try {
+        const columns = service
+          .all<{ name: string }>('PRAGMA table_info(messages)')
+          .map((c) => c.name);
+        expect(columns).toContain('attachments_json');
+        const message = service.get<{ content: string; attachments_json: string }>(
+          'SELECT * FROM messages WHERE id = ?',
+          'm1',
+        );
+        expect(message?.content).toBe('hello');
+        expect(message?.attachments_json).toBe('[]');
+      } finally {
+        service.onModuleDestroy();
+      }
+    } finally {
+      if (previous.DATABASE_PATH === undefined) delete process.env.DATABASE_PATH;
+      else process.env.DATABASE_PATH = previous.DATABASE_PATH;
+    }
+  });
 });
