@@ -13,6 +13,7 @@ import {
   type ModelRecord,
 } from '@travelclaw/shared';
 import { loadConfig } from '../config';
+import { ConnectorsService } from '../connectors/connectors.service';
 import { EventsService } from '../events/events.service';
 import { AgentsService } from '../agents/agents.service';
 import { MemoryService } from '../memory/memory.service';
@@ -36,6 +37,7 @@ export class GatewayService {
     private readonly tasks: TasksService,
     private readonly workspace: WorkspaceService,
     private readonly models: ModelService,
+    private readonly connectors: ConnectorsService,
     private readonly events: EventsService,
   ) {}
 
@@ -115,7 +117,12 @@ export class GatewayService {
       },
       {
         provider: this.models.providerFor(model),
-        ctx: { now: new Date(), network: config.network, fetchImpl: fetch },
+        ctx: {
+          now: new Date(),
+          network: config.network,
+          fetchImpl: fetch,
+          connectors: this.connectors.resolverFor(),
+        },
       },
     );
 

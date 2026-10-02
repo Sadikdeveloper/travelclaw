@@ -237,10 +237,31 @@ export interface ModelProvider {
   }): Promise<ModelCompletion>;
 }
 
+/**
+ * What a tool reads from a connector: a base URL override and/or a key. The key
+ * travels only in an Authorization header — never in a summary, data payload,
+ * warning, or the model prompt.
+ */
+export interface ConnectorCredentials {
+  baseUrl?: string;
+  apiKey?: string;
+}
+
+/**
+ * How built-in tools resolve an operator-held connector by name. The gateway
+ * builds this per turn from the operator's env. `rejected` lets a tool report
+ * a 401/403 so the desk can log it without ever seeing the secret itself.
+ */
+export interface ToolConnectors {
+  get(name: string): ConnectorCredentials | undefined;
+  rejected?(name: string): void;
+}
+
 export interface ToolContext {
   now: Date;
   network: boolean;
   fetchImpl?: typeof fetch;
+  connectors?: ToolConnectors;
 }
 
 export interface JsonSchemaObject {

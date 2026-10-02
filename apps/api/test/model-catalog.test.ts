@@ -26,6 +26,10 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     cookieName: 'travelclaw_session',
     allowedOrigins: [],
     sessionTtlDays: 30,
+    currencyBaseUrl: null,
+    currencyApiKey: null,
+    weatherBaseUrl: null,
+    weatherApiKey: null,
     ...overrides,
   };
 }

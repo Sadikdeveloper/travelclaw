@@ -200,7 +200,7 @@ A flight or hotel request does not go through that tool list. It wakes one or tw
 
 ## What the traveler sees
 
-The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler does not add tools: a connector is a key, and that is a later step. A traveler signs in (email, then optionally Google) before chatting; chats belong to that account.
+The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler only says what they need: provider access is the desk's job (see Connectors), and anything the desk needs back arrives as a turn, not a setting. Nobody has to sign in to chat — a guest is provisioned on first load — but chats belong to the account that made them, guest or signed-in.
 
 The chat shows the trail, not just the answer. Under each reply, a process trail lists what actually happened, in order: every tool that ran and who asked for it (the model, or the router standing in), every desk that was woken, and which model wrote the reply. The newest trail opens itself; older ones collapse. While a turn runs, the composer's send button becomes a stop button — stopping ends the waiting and reconciles with whatever the desk already persisted (the message is saved before the model runs, and the socket refills a reply that lands late).
 
@@ -211,6 +211,23 @@ Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, ar
 ## Channels
 
 `ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit in `ChannelsService`. Autoload is a later task because scanning a folder for code is an easy way to run something nobody reviewed.
+
+## Connectors
+
+A connector is an operator-held provider key (plus a base URL where relevant)
+that built-in tools resolve by name when they call out. It carries no code, no
+tool definition, and no prompt text. The only names the desk knows are
+`currency` (Frankfurter-compatible rates) and `weather` (Open-Meteo-compatible
+forecast), listed in `ConnectorsService`; anything else resolves to nothing.
+
+Credentials live in the operator's env (`TRAVELCLAW_CURRENCY_*`,
+`TRAVELCLAW_WEATHER_*`). There is no HTTP surface for connectors and no
+per-traveler storage: the desk holds the keys, and the traveler only says what
+they need. A turn resolves credentials through
+`ConnectorsService.resolverFor()`, passed to the tools as `ctx.connectors`; the
+key travels only in an `Authorization` header, and a 401/403 is logged as a
+warning naming the connector while the tool falls back to its labeled default.
+No chat message, transcript, error string, or prompt ever carries the secret.
 
 ## Memory
 
@@ -223,6 +240,11 @@ A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips
 ## Data
 
 Node's built-in `node:sqlite` keeps the gateway free of native addons. The API is still marked experimental by Node, so the start script silences that warning. Schema is applied on boot from `apps/api/src/db/schema.ts`. There is no migration framework yet. If you change columns, delete `data/travelclaw.db` or write a small versioned statement.
+
+## Control UI in production
+
+`pnpm build` emits `apps/web/dist`. The gateway serves it when that folder exists. In development, Vite proxies `/api`, `/health`, `/docs`, and `/socket.io` to port 3000. The browser never calls localhost.
+lclaw.db` or write a small versioned statement.
 
 ## Control UI in production
 

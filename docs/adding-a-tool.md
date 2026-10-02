@@ -35,4 +35,21 @@ which path called it: it reads `input.hints`, and both paths fill that shape.
 - Time-box outbound HTTP to a few seconds and keep a labeled fallback.
 - Cap list length. An 18-day outline is the current maximum.
 
+## Resolving a connector
+
+A tool that calls a provider reads that provider's connector from `ctx.connectors`:
+
+```ts
+const connector = ctx.connectors?.get('currency');
+const base = connectorBase(connector?.baseUrl, 'https://api.frankfurter.app');
+const headers = authHeaders(connector?.apiKey);
+```
+
+The gateway builds the resolver per turn from the operator's env, so the tool
+never handles key management itself. Send the key as an `Authorization: Bearer`
+header only — never in the URL, the summary, `data`, or a warning. Report a
+401/403 with `ctx.connectors?.rejected?.('<name>')` and fall back to the labeled
+default. Adding a new connector name means adding a slot in
+`apps/api/src/connectors/connectors.service.ts`: only code can invent one.
+
 Skills, meaning markdown procedures loaded beside the code, are not part of this version. Add that layer only if someone who is not changing TypeScript needs to change when a tool runs.

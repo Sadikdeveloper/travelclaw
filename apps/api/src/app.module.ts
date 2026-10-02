@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
 import { ChannelsModule } from './channels/channels.module';
+import { ConnectorsModule } from './connectors/connectors.module';
 import { DatabaseModule } from './db/database.module';
 import { DeskModule } from './desk/desk.module';
 import { EventsModule } from './events/events.module';
@@ -31,6 +32,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
     ToolsModule,
     TasksModule,
     ChannelsModule,
+    ConnectorsModule,
     ModelsModule,
     HeartbeatModule,
     GatewayModule,

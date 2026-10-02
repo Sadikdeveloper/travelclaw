@@ -671,10 +671,18 @@ export async function convertCurrency(
   ctx: ToolContext,
 ): Promise<CurrencyData> {
   if (ctx.network && ctx.fetchImpl) {
+    // An operator connector may point this at a Frankfurter-compatible rates API
+    // and add a key. The key travels only in the Authorization header — it never
+    // appears in the summary, data, or warning below.
+    const connector = ctx.connectors?.get('currency');
+    const base = connectorBase(connector?.baseUrl, 'https://api.frankfurter.app');
+    const headers = authHeaders(connector?.apiKey);
     try {
-      const url = `https://api.frankfurter.app/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${amount}`;
-      const response = await fetchWithTimeout(ctx.fetchImpl, url, 4000);
-      if (response.ok) {
+      const url = `${base}/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${amount}`;
+      const response = await fetchWithTimeout(ctx.fetchImpl, url, 4000, headers);
+      if (response.status === 401 || response.status === 403) {
+        ctx.connectors?.rejected?.('currency');
+      } else if (response.ok) {
         const body = (await response.json()) as { rates?: Record<string, number> };
         const converted = body.rates?.[to];
         if (typeof converted === 'number') {
@@ -725,15 +733,22 @@ export async function weatherOutlook(
   const profile = hints.destination ? findDestinationByName(hints.destination) : undefined;
   const destination = profile?.name ?? hints.destination ?? 'that city';
   if (ctx.network && ctx.fetchImpl && profile) {
+    // Same shape as currency: an operator connector may point this at an
+    // Open-Meteo-compatible forecast API and add a key, header-only.
+    const connector = ctx.connectors?.get('weather');
+    const base = connectorBase(connector?.baseUrl, 'https://api.open-meteo.com');
+    const headers = authHeaders(connector?.apiKey);
     try {
-      const url = new URL('https://api.open-meteo.com/v1/forecast');
+      const url = new URL(`${base}/v1/forecast`);
       url.searchParams.set('latitude', String(profile.coordinates.lat));
       url.searchParams.set('longitude', String(profile.coordinates.lon));
       url.searchParams.set('daily', 'weathercode,temperature_2m_max,temperature_2m_min');
       url.searchParams.set('timezone', 'auto');
       url.searchParams.set('forecast_days', '5');
-      const response = await fetchWithTimeout(ctx.fetchImpl, url.toString(), 4000);
-      if (response.ok) {
+      const response = await fetchWithTimeout(ctx.fetchImpl, url.toString(), 4000, headers);
+      if (response.status === 401 || response.status === 403) {
+        ctx.connectors?.rejected?.('weather');
+      } else if (response.ok) {
         const body = (await response.json()) as {
           daily?: {
             time?: string[];
@@ -851,15 +866,33 @@ function weatherLabel(code: number | undefined): string {
   return 'storms';
 }
 
+/**
+ * A connector base URL from the operator's env. Defense in depth: only http(s)
+ * is honored here, anything else falls back to the desk default, and a key is
+ * never appended to a URL — headers only.
+ */
+function connectorBase(raw: string | undefined, fallback: string): string {
+  if (!raw) return fallback;
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return fallback;
+}
+
+function authHeaders(apiKey: string | undefined): Record<string, string> {
+  const key = apiKey?.trim();
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
 async function fetchWithTimeout(
   fetchImpl: typeof fetch,
   url: string,
   ms: number,
+  headers: Record<string, string> = {},
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetchImpl(url, { signal: controller.signal });
+    return await fetchImpl(url, { signal: controller.signal, headers });
   } finally {
     clearTimeout(timer);
   }

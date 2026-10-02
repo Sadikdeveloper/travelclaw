@@ -23,6 +23,11 @@ export interface AppConfig {
   /** Extra origins allowed to call the gateway. Empty means same-origin only. */
   allowedOrigins: string[];
   sessionTtlDays: number;
+  /** Operator-held provider keys that built-in tools resolve by connector name. */
+  currencyBaseUrl: string | null;
+  currencyApiKey: string | null;
+  weatherBaseUrl: string | null;
+  weatherApiKey: string | null;
 }
 
 export function loadEnvFiles(cwd = process.cwd()): void {
@@ -82,5 +87,9 @@ export function loadConfig(
       .map((origin) => origin.trim())
       .filter(Boolean),
     sessionTtlDays: Number(env.TRAVELCLAW_SESSION_TTL_DAYS || 30),
+    currencyBaseUrl: env.TRAVELCLAW_CURRENCY_BASE_URL?.trim() || null,
+    currencyApiKey: env.TRAVELCLAW_CURRENCY_API_KEY?.trim() || null,
+    weatherBaseUrl: env.TRAVELCLAW_WEATHER_BASE_URL?.trim() || null,
+    weatherApiKey: env.TRAVELCLAW_WEATHER_API_KEY?.trim() || null,
   };
 }
