@@ -243,6 +243,9 @@ export interface ModelProvider {
  * warning, or the model prompt.
  */
 export interface ConnectorCredentials {
+  /** Present for named flight/stay sources; absent for simple singleton tools. */
+  providerId?: string;
+  providerName?: string;
   baseUrl?: string;
   apiKey?: string;
 }
@@ -254,6 +257,8 @@ export interface ConnectorCredentials {
  */
 export interface ToolConnectors {
   get(name: string): ConnectorCredentials | undefined;
+  /** All operator-managed sources for a search slot. Older/singleton tools use `get`. */
+  all?(name: string): ConnectorCredentials[];
   rejected?(name: string): void;
 }
 

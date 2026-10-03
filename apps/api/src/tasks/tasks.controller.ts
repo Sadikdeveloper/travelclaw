@@ -1,6 +1,12 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { taskDecisionSchema, type TaskDecision, type UserRecord } from '@travelclaw/shared';
+import {
+  requestOfferHoldSchema,
+  taskDecisionSchema,
+  type RequestOfferHoldInput,
+  type TaskDecision,
+  type UserRecord,
+} from '@travelclaw/shared';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-pipe';
@@ -35,5 +41,23 @@ export class TasksController {
     const sessionId = this.tasks.sessionIdFor(id);
     this.sessions.get(sessionId, user.id); // 404s if this chat is not the caller's
     return this.tasks.decide(id, body.decision);
+  }
+
+  @Post('tasks/:taskId/offers/:offerId/hold')
+  @ApiOperation({
+    summary: 'Ask the named provider to hold one offer after the traveler confirms',
+  })
+  async holdOffer(
+    @CurrentUser() user: UserRecord,
+    @Param('taskId') taskId: string,
+    @Param('offerId') offerId: string,
+    @Body(new ZodValidationPipe(requestOfferHoldSchema)) body: RequestOfferHoldInput,
+  ) {
+    // The explicit literal `confirm: true` is required by the shared schema; it
+    // prevents a generic POST or stale link from becoming a provider action.
+    void body;
+    const sessionId = this.tasks.sessionIdForOffer(taskId, offerId);
+    this.sessions.get(sessionId, user.id); // 404s if the offer belongs to another traveler
+    return this.tasks.holdOffer(taskId, offerId);
   }
 }

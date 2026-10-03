@@ -196,7 +196,7 @@ weather, availability, or a booking. The router is also the fallback when a live
 returns no tool call. Either way the tool result is what the model narrates; a runtime
 error inside a tool becomes a failed result with the desk still speaking, not a dead turn.
 
-A flight or hotel request does not go through that tool list. It wakes one or two desks, Flight and Stay, and the traveler sees those working. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything. A provider hold is a later step, and only after the traveler accepts a real offer.
+A flight or hotel request does not go through that tool list. It wakes one or two desks, Flight and Stay, and the traveler sees those working. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything. When a provider key is configured, the desk may show real offers; asking the provider to hold one is a separate traveler action, and the desk reports a hold only after confirmation.
 
 ## What the traveler sees
 
@@ -215,19 +215,97 @@ Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, ar
 ## Connectors
 
 A connector is an operator-held provider key (plus a base URL where relevant)
-that built-in tools resolve by name when they call out. It carries no code, no
-tool definition, and no prompt text. The only names the desk knows are
-`currency` (Frankfurter-compatible rates) and `weather` (Open-Meteo-compatible
-forecast), listed in `ConnectorsService`; anything else resolves to nothing.
+that a built-in tool or desk resolves by name when it calls out. It carries no
+code, no tool definition, and no prompt text. `ConnectorsService` lists the
+`currency` (Frankfurter-compatible rates), `weather` (Open-Meteo-compatible
+forecast), `flight`, and `stay` slots; anything else resolves to nothing.
 
 Credentials live in the operator's env (`TRAVELCLAW_CURRENCY_*`,
-`TRAVELCLAW_WEATHER_*`). There is no HTTP surface for connectors and no
-per-traveler storage: the desk holds the keys, and the traveler only says what
-they need. A turn resolves credentials through
-`ConnectorsService.resolverFor()`, passed to the tools as `ctx.connectors`; the
-key travels only in an `Authorization` header, and a 401/403 is logged as a
-warning naming the connector while the tool falls back to its labeled default.
-No chat message, transcript, error string, or prompt ever carries the secret.
+`TRAVELCLAW_WEATHER_*`, `TRAVELCLAW_FLIGHT_*`, and `TRAVELCLAW_STAY_*`). There is
+no HTTP surface for configuring connectors and no per-traveler storage: the
+desk holds the keys, and the traveler only says what they need. A turn or desk
+resolves credentials through `ConnectorsService.resolverFor()`; the key travels
+only in an `Authorization` header, and a 401/403 is logged as a warning naming
+the connector. For the built-in rate and weather tools, a failure falls back to
+their labeled desk estimate. Flight and stay search instead say that no offers
+were returned. No chat message, transcript, error string, or prompt ever carries
+the secret.
+
+## Flight and stay search
+
+### What provider documentation means for a worldwide desk
+
+A single integration should not be described as exhaustive worldwide coverage. Duffel's flight docs describe sending an offer request to a _range_ of airlines and returning the offers those suppliers provide; its response can be partial when suppliers do not answer within the search window ([offer requests](https://duffel.com/docs/api/v2/offer-requests)). For lodging, Booking.com and Expedia document live search/availability APIs, but they also require market context: Booking.com asks for the booker's country/platform, while Expedia requires the point-of-sale country and documents unsupported points of sale ([Booking.com search guide](https://demand.developers.booking.com/demand/docs/getting-started/try-out-the-api/), [Expedia Rapid shopping](https://developers.expediagroup.com/rapid/lodging/shopping/about-shopping-api), [Expedia point-of-sale requirements](https://developers.expediagroup.com/rapid/setup/launch-requirements/lodging-launch-reqs)). Hotelbeds likewise documents a separate recheck step for rates that need up-to-date availability and price ([Hotelbeds Booking API](https://developer.hotelbeds.com/documentation/hotels/booking-api/)). These are commercial partner APIs, not anonymous public search endpoints.
+
+Therefore TravelClaw treats global coverage as **multiple operator-managed sources, explicitly attributed results, and honest partial failures**—not a promise that any one API covers every route or property. Operators must obtain the relevant supplier/affiliate access and verify the actual routes, properties, point-of-sale markets, terms, and production pricing before launch.
+
+### Operator configuration and fan-out
+
+A flight or stay search can query up to eight compatible sources of that kind in parallel. Configure JSON arrays with `TRAVELCLAW_FLIGHT_PROVIDERS_JSON` and `TRAVELCLAW_STAY_PROVIDERS_JSON`; each entry has a stable operator id, optional display name, base URL, and key:
+
+```json
+[
+  {
+    "id": "global-flights",
+    "name": "Global Flights Adapter",
+    "baseUrl": "https://operator-adapter.example/api",
+    "apiKey": "operator-held-secret"
+  },
+  {
+    "id": "regional-flights",
+    "name": "Regional Flights Adapter",
+    "baseUrl": "https://regional-adapter.example/api",
+    "apiKey": "operator-held-secret"
+  }
+]
+```
+
+The key belongs to the operator and stays on the server; travelers never supply one. A nonblank `*_PROVIDERS_JSON` value takes precedence over that kind's legacy `TRAVELCLAW_FLIGHT_BASE_URL` / `TRAVELCLAW_FLIGHT_API_KEY` or stay equivalents. An explicit `[]` disables that search kind. If the JSON setting is blank, the legacy pair remains supported as one source. Each URL must implement the normalized TravelClaw adapter contract below; vendor APIs have different request/response and booking flows, so this is **not** a direct Duffel, Booking.com, Expedia, or Hotelbeds integration.
+
+All configured sources receive the same search and optional market context. TravelClaw does not yet infer route/property coverage or choose providers by region: an adapter may return no offers for a market it does not cover. The UI and task brief identify each source and retrieval time. A failed source does not discard another source's valid results; it is disclosed as a partial search. If every source fails, no offer is shown. Valid offers are interleaved in each source's own order, capped at six total, and are not falsely ranked across currencies. No results from a configured source means no currently returned offers, not proof that the route or city has no inventory.
+
+### Point of sale and display context
+
+Optional defaults can be sent to every adapter as `bookerCountry`, `currency`, and `language` query parameters:
+
+- `TRAVELCLAW_BOOKER_COUNTRY`: ISO 3166-1 alpha-2 **point-of-sale/booker country** (not the route origin, destination, or passport nationality).
+- `TRAVELCLAW_SEARCH_CURRENCY`: requested ISO 4217 currency.
+- `TRAVELCLAW_SEARCH_LANGUAGE`: requested language tag, such as `en-NG`.
+
+Blank values are omitted so an adapter can use its own configured market. These are operator defaults for a single-market/self-hosted deployment; a multi-market deployment still needs a per-traveler booking-market preference rather than guessing from the trip route. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
+
+### Search contract
+
+Flight search uses `GET {base}/search/flights` with `origin`, `destination`, `departDate`, `travelers`, and optional `returnDate`. Stay search uses `GET {base}/search/stays` with `destination`, `checkIn`, `checkOut`, and `travelers`. Either request may additionally include `bookerCountry`, `currency`, and `language`. The desk sends each key only as `Authorization: Bearer ...`; it never goes in a URL, transcript, warning, or model prompt. Redirects are refused so a credential is not forwarded to another host. If the traveler does not specify a party size, the query uses one traveler and the brief names that assumption. A flight query with no written return date is one-way; a stay query requires check-in and check-out (an explicit number of nights may supply the latter).
+
+A successful adapter response is JSON with an optional provider label and an offer list:
+
+```json
+{
+  "provider": "Fare Desk",
+  "offers": [
+    {
+      "id": "provider-offer-id",
+      "price": { "amount": "182.40", "currency": "EUR" },
+      "title": "Optional provider title",
+      "detail": "Optional provider detail",
+      "segments": [{ "from": "LOS", "to": "LIS", "carrier": "Example Air" }],
+      "stay": { "name": "Optional hotel name", "roomType": "double", "nights": 4 },
+      "hold": {
+        "confirmed": true,
+        "ref": "provider-hold-reference",
+        "expiresAt": "2026-10-02T18:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+`price.amount` is required and must come from the source; it is a non-negative number or decimal string, capped at one billion and three decimal places. Offers without a usable id and price are dropped, never filled in from a desk estimate. The desk records when it received each response, shows the source and time, and stores offers against the chat task in SQLite (up to 24 recent unheld offers per task; provider-confirmed holds are retained). `GET /api/sessions/:id/tasks` returns the saved offers when the chat is opened again.
+
+### Holds and provider identity
+
+A hold exists only when the source explicitly confirms it with a reference. A search never asks for a hold. The traveler can choose **Ask provider to hold** on a displayed offer; that POST requires `{ "confirm": true }` and calls the same source's `POST {base}/holds` with `{ "kind": "flight" | "stay", "offerId": "provider-offer-id" }`. Each adapter must implement the underlying supplier's correct revalidation/hold flow; a vague response (`pending`, `requested`, `held` without a reference), HTTP error, or timeout remains an offer. Provider confirmation and reference are persisted. The connector id and endpoint identity that returned the offer are stored privately; if either changes before a hold request, the desk refuses to send the old offer id to another source and asks for a fresh search. This is not a booking; there is no payment action or card storage.
 
 ## Memory
 
@@ -240,11 +318,6 @@ A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips
 ## Data
 
 Node's built-in `node:sqlite` keeps the gateway free of native addons. The API is still marked experimental by Node, so the start script silences that warning. Schema is applied on boot from `apps/api/src/db/schema.ts`. There is no migration framework yet. If you change columns, delete `data/travelclaw.db` or write a small versioned statement.
-
-## Control UI in production
-
-`pnpm build` emits `apps/web/dist`. The gateway serves it when that folder exists. In development, Vite proxies `/api`, `/health`, `/docs`, and `/socket.io` to port 3000. The browser never calls localhost.
-lclaw.db` or write a small versioned statement.
 
 ## Control UI in production
 

@@ -135,7 +135,37 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Offers a provider returned to a desk. Every number here is the provider's own:
+-- the desk stores what it was told and never fills a gap with an estimate.
+CREATE TABLE IF NOT EXISTS offers (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  -- Stable operator-assigned connector id, in addition to the endpoint snapshot below.
+  provider_id TEXT NOT NULL,
+  -- Snapshot of the non-secret endpoint identity. Holds never silently go to a new provider.
+  provider_base_url TEXT NOT NULL,
+  provider_offer_id TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  total_amount REAL NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT,
+  hold TEXT NOT NULL DEFAULT 'none',
+  hold_ref TEXT,
+  hold_expires_at TEXT,
+  hold_note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_offers_task ON offers(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_offers_session ON offers(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_session ON agent_tasks(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_trips_start ON trips(start_date);
 CREATE INDEX IF NOT EXISTS idx_memory_agent ON memory_notes(agent_id, created_at);

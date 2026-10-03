@@ -2,6 +2,15 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GATEWAY_VERSION } from '@travelclaw/shared';
 
+export interface SearchProviderConfig {
+  /** Stable operator-assigned id; saved offers use it to return holds to this source. */
+  id: string;
+  /** Friendly source label. A provider response can supply a more specific label. */
+  name?: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 export interface AppConfig {
   host: string;
   port: number;
@@ -28,6 +37,18 @@ export interface AppConfig {
   currencyApiKey: string | null;
   weatherBaseUrl: string | null;
   weatherApiKey: string | null;
+  /** `null` means use the legacy single-provider env; an empty array disables search. */
+  flightProviders: SearchProviderConfig[] | null;
+  stayProviders: SearchProviderConfig[] | null;
+  /** Optional single-install pricing/content market; never inferred from the route. */
+  searchBookerCountry: string | null;
+  searchCurrency: string | null;
+  searchLanguage: string | null;
+  /** Legacy single-provider settings, kept as a compatible fallback. */
+  flightBaseUrl: string | null;
+  flightApiKey: string | null;
+  stayBaseUrl: string | null;
+  stayApiKey: string | null;
 }
 
 export function loadEnvFiles(cwd = process.cwd()): void {
@@ -91,5 +112,89 @@ export function loadConfig(
     currencyApiKey: env.TRAVELCLAW_CURRENCY_API_KEY?.trim() || null,
     weatherBaseUrl: env.TRAVELCLAW_WEATHER_BASE_URL?.trim() || null,
     weatherApiKey: env.TRAVELCLAW_WEATHER_API_KEY?.trim() || null,
+    flightProviders: parseSearchProviders(
+      env.TRAVELCLAW_FLIGHT_PROVIDERS_JSON,
+      'TRAVELCLAW_FLIGHT_PROVIDERS_JSON',
+    ),
+    stayProviders: parseSearchProviders(
+      env.TRAVELCLAW_STAY_PROVIDERS_JSON,
+      'TRAVELCLAW_STAY_PROVIDERS_JSON',
+    ),
+    searchBookerCountry: normalizeCode(
+      env.TRAVELCLAW_BOOKER_COUNTRY,
+      /^[A-Za-z]{2}$/,
+      'TRAVELCLAW_BOOKER_COUNTRY',
+    ),
+    searchCurrency: normalizeCode(
+      env.TRAVELCLAW_SEARCH_CURRENCY,
+      /^[A-Za-z]{3}$/,
+      'TRAVELCLAW_SEARCH_CURRENCY',
+    ),
+    searchLanguage: normalizeCode(
+      env.TRAVELCLAW_SEARCH_LANGUAGE,
+      /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/,
+      'TRAVELCLAW_SEARCH_LANGUAGE',
+    ),
+    flightBaseUrl: env.TRAVELCLAW_FLIGHT_BASE_URL?.trim() || null,
+    flightApiKey: env.TRAVELCLAW_FLIGHT_API_KEY?.trim() || null,
+    stayBaseUrl: env.TRAVELCLAW_STAY_BASE_URL?.trim() || null,
+    stayApiKey: env.TRAVELCLAW_STAY_API_KEY?.trim() || null,
   };
+}
+
+const MAX_SEARCH_PROVIDERS_PER_KIND = 8;
+
+function normalizeCode(
+  raw: string | undefined,
+  pattern: RegExp,
+  envName: string,
+): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  if (!pattern.test(value)) throw new Error(`${envName} has an invalid code format.`);
+  return envName === 'TRAVELCLAW_SEARCH_LANGUAGE' ? value : value.toUpperCase();
+}
+
+/** Parse operator-only provider config without ever echoing credential values on error. */
+function parseSearchProviders(
+  raw: string | undefined,
+  envName: string,
+): SearchProviderConfig[] | null {
+  if (raw === undefined || raw.trim() === '') return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${envName} must be a JSON array of provider definitions.`);
+  }
+  if (!Array.isArray(parsed) || parsed.length > MAX_SEARCH_PROVIDERS_PER_KIND) {
+    throw new Error(
+      `${envName} must contain no more than ${MAX_SEARCH_PROVIDERS_PER_KIND} providers.`,
+    );
+  }
+
+  const ids = new Set<string>();
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`${envName}[${index}] must be an object.`);
+    }
+    const value = entry as Record<string, unknown>;
+    const id = typeof value.id === 'string' ? value.id.trim() : '';
+    const name = typeof value.name === 'string' ? value.name.trim() : undefined;
+    const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl.trim() : '';
+    const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)) {
+      throw new Error(`${envName}[${index}].id must be a short alphanumeric identifier.`);
+    }
+    if (ids.has(id)) throw new Error(`${envName} contains a duplicate provider id.`);
+    if (name !== undefined && (!name || name.length > 80)) {
+      throw new Error(`${envName}[${index}].name must be 1 to 80 characters.`);
+    }
+    if (!baseUrl || baseUrl.length > 2048 || !apiKey || apiKey.length > 4096) {
+      throw new Error(`${envName}[${index}] needs a baseUrl and apiKey.`);
+    }
+    ids.add(id);
+    return { id, ...(name ? { name } : {}), baseUrl, apiKey };
+  });
 }

@@ -13,8 +13,8 @@ Shared packages hold the contracts and the tool engine so both can be tested wit
 | **One gateway**                  | The gateway owns SQLite, HTTP, WebSocket, and scheduling.                                                                                                                                                                                                                                                                                                                                          |
 | **Control UI**                   | The Vite app talks to the gateway with relative `/api` URLs.                                                                                                                                                                                                                                                                                                                                       |
 | **Tools, then the model**        | An ordinary turn runs at most three tools. They are TypeScript functions, not markdown. The model asks for them; the router stands in when there is no key or no tool call. Either way they run before the narration, so a missing key cannot invent prices, weather, or a booking.                                                                                                                |
-| **Flight desk and Stay desk**    | A flight or hotel request does not go through that tool list. It wakes one or two desks. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything.                                                                                                                                                                                          |
-| **Keys, not code**               | Provider keys are the operator's env, resolved by connector name — `currency` and `weather` today. Built-in tools resolve one when they call out; it adds no code, prompt text, or tool. The traveler never provides a key: they say what they need, and the desk owns the rest.                                                                                                                   |
+| **Flight desk and Stay desk**    | A flight or hotel request wakes one or two desks. Configured operator-managed sources are queried in parallel; results name their source and retrieval time, and partial provider failures are disclosed. The traveler may separately ask the source to hold one; it is a hold only after provider confirmation. Nothing is purchased.                                                             |
+| **Keys, not code**               | Provider keys are the operator's env, resolved by connector name — `currency`, `weather`, `flight`, and `stay`. Multiple compatible flight or stay adapters can be configured; with none, the desk brief is unchanged. Keys add no traveler setting, prompt text, or model tool.                                                                                                                   |
 | **A pace per model**             | The desk runs the strongest model it can run — nobody picks one, guests least of all. A turn limit belongs to a _model_, not the desk: the desk's own model runs here and costs nothing, so it is not paced, while a model with a provider bill carries a per-tier allowance in `apps/api/src/models/model-catalog.ts`. `GET /api/models` publishes both and the model in use.                     |
 | **What the traveler sees**       | A chat and a sidebar of their chats, with a process trail under each reply: which tools ran and who asked for them, which desks woke, which model answered. The composer carries an `Agent mode` tag, a stop button while a turn runs, and image/document attach (metadata and thumbnails only — files stay on the device). Tools are functions we register, called by the model or by the router. |
 | **Memory you can read**          | `MEMORY.md` is the human-readable copy. SQLite is the index. Kinds are `preference`, `fact`, and `decision`.                                                                                                                                                                                                                                                                                       |
@@ -54,7 +54,7 @@ flowchart LR
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
 6. Persist the assistant message, each tool trace marked `model` or `router`, and emit `chat.completed`.
 
-A provider hold is a later step, and only after the traveler accepts a real offer.
+A provider hold is a separate, explicit traveler action after an offer is shown. Only a provider confirmation can mark it held; that still does not purchase anything.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
@@ -93,19 +93,20 @@ cookie session, password hashing, guest promotion, and Google linking work.
 
 ## Documentation
 
-| Section                                                                   | What's covered                                                              |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [Why it is split this way](docs/architecture.md#why-it-is-split-this-way) | Gateway, control UI, shared contracts, tool engine, workspace, extensions   |
-| [Accounts](docs/architecture.md#accounts)                                 | Email/password, Google sign-in, cookie session, chats scoped to the account |
-| [Session keys](docs/architecture.md#session-keys)                         | `agent:<agentId>:<channel>:<peerId>`                                        |
-| [Turns](docs/architecture.md#turns)                                       | Persist, route, run tools, narrate, emit `chat.completed`                   |
-| [What the traveler sees](docs/architecture.md#what-the-traveler-sees)     | Chat and sidebar. Tools stay internal.                                      |
-| [Channels](docs/architecture.md#channels)                                 | Webchat built in. Telegram and Discord not configured.                      |
-| [Connectors](docs/architecture.md#connectors)                             | Operator-held keys. Tools resolve them by name.                             |
-| [Memory](docs/architecture.md#memory)                                     | `MEMORY.md` plus the SQLite index                                           |
-| [Heartbeat](docs/architecture.md#heartbeat)                               | One-minute cron, `departure-watch`, `NO_REPLY`                              |
-| [Data](docs/architecture.md#data)                                         | `node:sqlite`, schema on boot, no migration framework                       |
-| [Control UI in production](docs/architecture.md#control-ui-in-production) | Gateway serves `apps/web/dist`. Vite proxies in development.                |
+| Section                                                                   | What's covered                                                                              |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [Why it is split this way](docs/architecture.md#why-it-is-split-this-way) | Gateway, control UI, shared contracts, tool engine, workspace, extensions                   |
+| [Accounts](docs/architecture.md#accounts)                                 | Email/password, Google sign-in, cookie session, chats scoped to the account                 |
+| [Session keys](docs/architecture.md#session-keys)                         | `agent:<agentId>:<channel>:<peerId>`                                                        |
+| [Turns](docs/architecture.md#turns)                                       | Persist, route, run tools, narrate, emit `chat.completed`                                   |
+| [What the traveler sees](docs/architecture.md#what-the-traveler-sees)     | Chat and sidebar. Tools stay internal.                                                      |
+| [Channels](docs/architecture.md#channels)                                 | Webchat built in. Telegram and Discord not configured.                                      |
+| [Connectors](docs/architecture.md#connectors)                             | Operator-held keys. Tools resolve them by name.                                             |
+| [Flight and stay search](docs/architecture.md#flight-and-stay-search)     | Parallel compatible providers, source-labeled offers, market caveats, confirmed holds only. |
+| [Memory](docs/architecture.md#memory)                                     | `MEMORY.md` plus the SQLite index                                                           |
+| [Heartbeat](docs/architecture.md#heartbeat)                               | One-minute cron, `departure-watch`, `NO_REPLY`                                              |
+| [Data](docs/architecture.md#data)                                         | `node:sqlite`, schema on boot, no migration framework                                       |
+| [Control UI in production](docs/architecture.md#control-ui-in-production) | Gateway serves `apps/web/dist`. Vite proxies in development.                                |
 
 ## Author
 

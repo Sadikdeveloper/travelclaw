@@ -1,5 +1,6 @@
 import type {
   AgentTaskRecord,
+  HoldAttempt,
   MessageAttachment,
   MessageRecord,
   SessionRecord,
@@ -41,6 +42,7 @@ export function ChatPage() {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [deciding, setDeciding] = useState('');
+  const [holdingOfferId, setHoldingOfferId] = useState('');
   const transcript = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
@@ -93,6 +95,26 @@ export function ChatPage() {
       setError(err instanceof ApiError ? err.message : 'Could not save that answer');
     } finally {
       setDeciding('');
+    }
+  }
+
+  async function askProviderToHold(taskId: string, offerId: string) {
+    setHoldingOfferId(offerId);
+    setError('');
+    try {
+      const result = await api<HoldAttempt>(`/api/tasks/${taskId}/offers/${offerId}/hold`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true }),
+      });
+      setTasks((current) =>
+        current.map((task) => (task.id === result.task.id ? result.task : task)),
+      );
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : 'Could not ask the provider for a hold',
+      );
+    } finally {
+      setHoldingOfferId('');
     }
   }
 
@@ -268,8 +290,13 @@ export function ChatPage() {
                   <AgentCard
                     key={task.id}
                     task={task}
-                    busy={deciding === task.id}
+                    busy={
+                      deciding === task.id ||
+                      Boolean(task.offers?.some((offer) => offer.id === holdingOfferId))
+                    }
+                    holdingOfferId={holdingOfferId}
                     onDecide={(decision) => void decide(task.id, decision)}
+                    onHold={(offerId) => void askProviderToHold(task.id, offerId)}
                   />
                 ))}
               </div>

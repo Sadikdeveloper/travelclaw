@@ -111,6 +111,60 @@ describe('accounts migration', () => {
     }
   });
 
+  it('backfills provider_id on offers saved before provider fan-out was added', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-offers-'));
+    const dbPath = join(dir, 'legacy.db');
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE offers (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        provider_base_url TEXT NOT NULL,
+        provider_offer_id TEXT NOT NULL,
+        retrieved_at TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        total_amount REAL NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT,
+        hold TEXT NOT NULL DEFAULT 'none',
+        hold_ref TEXT,
+        hold_expires_at TEXT,
+        hold_note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO offers VALUES (
+        'o1', 's1', 't1', 'flight', 'Global Fares', 'https://fares.example.test',
+        'F-1', '2026-10-02T09:30:00Z', 'USD', 180, 'LOS to LIS', NULL,
+        'none', NULL, NULL, NULL, '2026-10-02T09:30:00Z', '2026-10-02T09:30:00Z'
+      );
+    `);
+    legacy.close();
+
+    const previous = { DATABASE_PATH: process.env.DATABASE_PATH };
+    process.env.DATABASE_PATH = dbPath;
+    try {
+      const service = new DatabaseService();
+      service.onModuleInit();
+      try {
+        const offer = service.get<{ provider_id: string; provider_base_url: string }>(
+          'SELECT provider_id, provider_base_url FROM offers WHERE id = ?',
+          'o1',
+        );
+        expect(offer?.provider_id).toBe('https://fares.example.test');
+        expect(offer?.provider_id).toBe(offer?.provider_base_url);
+      } finally {
+        service.onModuleDestroy();
+      }
+    } finally {
+      if (previous.DATABASE_PATH === undefined) delete process.env.DATABASE_PATH;
+      else process.env.DATABASE_PATH = previous.DATABASE_PATH;
+    }
+  });
+
   it('adds attachments_json to a pre-attachments messages table, empty by default', () => {
     const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-attach-'));
     const dbPath = join(dir, 'legacy.db');
