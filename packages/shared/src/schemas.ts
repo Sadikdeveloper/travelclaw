@@ -41,6 +41,49 @@ export const googleAuthSchema = z.object({
   credential: z.string().trim().min(1, 'Missing Google credential'),
 });
 
+function optionalNormalizedCode(
+  pattern: RegExp,
+  message: string,
+  normalize: (value: string) => string,
+) {
+  return z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+    z.string().trim().regex(pattern, message).transform(normalize).nullable().optional(),
+  );
+}
+
+function normalizeLanguageTag(value: string): string {
+  return value
+    .split('-')
+    .map((part, index) => {
+      if (index === 0) return part.toLowerCase();
+      if (/^[A-Za-z]{2}$/.test(part) || /^\d{3}$/.test(part)) return part.toUpperCase();
+      if (/^[A-Za-z]{4}$/.test(part)) {
+        return `${part.slice(0, 1).toUpperCase()}${part.slice(1).toLowerCase()}`;
+      }
+      return part.toLowerCase();
+    })
+    .join('-');
+}
+
+export const updateMarketPreferencesSchema = z.object({
+  bookerCountry: optionalNormalizedCode(
+    /^[A-Za-z]{2}$/,
+    'Use a two-letter point-of-sale country code',
+    (value) => value.toUpperCase(),
+  ),
+  currency: optionalNormalizedCode(
+    /^[A-Za-z]{3}$/,
+    'Use a three-letter currency code',
+    (value) => value.toUpperCase(),
+  ),
+  language: optionalNormalizedCode(
+    /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/,
+    'Use a language tag such as en or en-NG',
+    normalizeLanguageTag,
+  ),
+});
+
 export const createAgentSchema = z.object({
   id: z
     .string()
@@ -186,6 +229,7 @@ export type RequestOfferHoldInput = z.infer<typeof requestOfferHoldSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
+export type UpdateMarketPreferencesInput = z.infer<typeof updateMarketPreferencesSchema>;
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;

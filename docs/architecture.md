@@ -266,13 +266,15 @@ All configured sources receive the same search and optional market context. Trav
 
 ### Point of sale and display context
 
-Optional defaults can be sent to every adapter as `bookerCountry`, `currency`, and `language` query parameters:
+Each traveler can save a search market on their account: `bookerCountry` (ISO 3166-1 alpha-2 point-of-sale/booker country), optional `currency` (ISO 4217), and optional `language` (for example `en-NG`). Flight and stay searches use that traveler-owned market when any part of it is set. The booker country is never inferred from the route origin, destination, passport nationality, or trip currency.
 
-- `TRAVELCLAW_BOOKER_COUNTRY`: ISO 3166-1 alpha-2 **point-of-sale/booker country** (not the route origin, destination, or passport nationality).
-- `TRAVELCLAW_SEARCH_CURRENCY`: requested ISO 4217 currency.
-- `TRAVELCLAW_SEARCH_LANGUAGE`: requested language tag, such as `en-NG`.
+The operator env values remain only as a fallback for a single-market/self-hosted desk when the traveler has not saved a search market:
 
-Blank values are omitted so an adapter can use its own configured market. These are operator defaults for a single-market/self-hosted deployment; a multi-market deployment still needs a per-traveler booking-market preference rather than guessing from the trip route. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
+- `TRAVELCLAW_BOOKER_COUNTRY`: fallback ISO 3166-1 alpha-2 point-of-sale/booker country.
+- `TRAVELCLAW_SEARCH_CURRENCY`: fallback requested ISO 4217 currency.
+- `TRAVELCLAW_SEARCH_LANGUAGE`: fallback requested language tag, such as `en-NG`.
+
+Blank values are omitted so an adapter can use its own configured market. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
 
 ### Search contract
 

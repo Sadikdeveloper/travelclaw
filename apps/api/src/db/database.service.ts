@@ -23,6 +23,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateLegacyNames();
     this.migrateToAccounts();
     this.migrateToGuests();
+    this.migrateUserMarketPreferences();
     this.migrateToAttachments();
     this.db.exec(SCHEMA);
     this.migrateOfferProviderIds();
@@ -93,6 +94,31 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     const columns = this.all<{ name: string }>('PRAGMA table_info(users)');
     if (columns.some((column) => column.name === 'is_guest')) return;
     this.db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0');
+  }
+
+  /**
+   * Provider searches need traveler-owned point-of-sale preferences, not one
+   * install-wide market guessed from a route. Existing accounts start unset;
+   * adapters then receive no traveler market unless the account saves one.
+   */
+  private migrateUserMarketPreferences() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('users')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(users)');
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has('booker_country')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN booker_country TEXT');
+    }
+    if (!names.has('market_currency')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN market_currency TEXT');
+    }
+    if (!names.has('market_language')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN market_language TEXT');
+    }
   }
 
   /**

@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL,
   google_id TEXT UNIQUE,
   is_guest INTEGER NOT NULL DEFAULT 0,
+  booker_country TEXT,
+  market_currency TEXT,
+  market_language TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
