@@ -64,6 +64,11 @@ export const taskDecisionSchema = z.object({
   decision: z.enum(['complete', 'no', 'still_working']),
 });
 
+/** Explicit consent for the desk to ask a provider to hold one real offer. */
+export const requestOfferHoldSchema = z.object({
+  confirm: z.literal(true),
+});
+
 /** Kept small on purpose: the wire carries a name and a thumbnail, never the bytes. */
 export const attachmentSchema = z.object({
   name: z.string().trim().min(1).max(160),
@@ -177,6 +182,7 @@ export const planTripSchema = z.object({
   interests: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
 });
 
+export type RequestOfferHoldInput = z.infer<typeof requestOfferHoldSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;

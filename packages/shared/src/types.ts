@@ -207,6 +207,49 @@ export type DeskKind = 'flight' | 'stay';
 export type AgentTaskStatus = 'working' | 'awaiting' | 'accepted' | 'rejected';
 export type TaskDecision = 'complete' | 'no' | 'still_working';
 
+/**
+ * A hold exists only when the provider said one does and named a reference.
+ * Until then the row is an offer, and the desk says so.
+ */
+export type OfferHoldState = 'none' | 'confirmed';
+
+/**
+ * One offer a provider returned to a desk, stored as it arrived. Every number
+ * here came from the provider: nothing is estimated, converted, or filled in.
+ */
+export interface OfferRecord {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  kind: DeskKind;
+  /** The provider's own name when it gave one, else the connector host. */
+  provider: string;
+  /** The provider's id for this offer, echoed back when asking it for a hold. */
+  providerOfferId: string;
+  /** When the desk read this answer, so a stale price looks stale. */
+  retrievedAt: string;
+  currency: string;
+  totalAmount: number;
+  title: string;
+  detail: string | null;
+  hold: OfferHoldState;
+  holdRef: string | null;
+  holdExpiresAt: string | null;
+  /** Set when the provider sent hold-shaped details it never confirmed. */
+  holdNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What answering "hold that one" produced. `confirmed` is the provider's word, not ours. */
+export interface HoldAttempt {
+  offer: OfferRecord;
+  /** Updated task summary as well as the offer, so the UI cannot show stale hold copy. */
+  task: AgentTaskRecord;
+  confirmed: boolean;
+  note: string;
+}
+
 export interface AgentTaskRecord {
   id: string;
   sessionId: string;
@@ -216,6 +259,8 @@ export interface AgentTaskRecord {
   status: AgentTaskStatus;
   summary: string;
   pass: number;
+  /** Offers this desk found, when the operator set a provider key. Empty otherwise. */
+  offers?: OfferRecord[];
   createdAt: string;
   updatedAt: string;
 }

@@ -4,7 +4,7 @@ Work in this order. Later tasks assume the earlier ones exist. Pick the first un
 
 This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, are deferred. Tools are functions we register. The traveler does not see a tool catalog.
 
-Checked on 2026-09-25, after `5b4e911`.
+Checked on 2026-10-03, while extending live flight and stay search to multiple providers.
 
 ## Done
 
@@ -20,12 +20,13 @@ Checked on 2026-09-25, after `5b4e911`.
 - [x] **Accounts.** Email register and sign-in, cookie session, and Google sign-in behind `TRAVELCLAW_GOOGLE_CLIENT_ID`. Chats belong to the signed-in account.
 - [x] **Model-called tools.** The tool catalog goes to the provider as callable tools. A malformed call is rejected, not coerced. The router stays the fallback when the provider is `mock`, has no key, or asks for nothing, and a tool both picked runs once.
 
-Those desks write a brief. They do not search a provider, hold a seat, or take payment.
+Without a search key, those desks still write the same brief. With an operator key, they can show provider offers. A hold is separate, explicit, and reported only after provider confirmation; nothing is purchased.
 
 ## Next, in this order
 
 - [x] **Provider connectors.** Only after built-in tools are called by the model. A connector is an operator-held key a tool resolves by name, not a new language. The traveler never provides one: provider access is the desk's job, and anything the desk needs from the traveler arrives as a turn, not a setting.
-- [ ] **Flight and stay search** behind an explicit provider key. The desks already ask yes / no / still working. A provider may return offers. It must not claim a hold until the provider says one exists. No card storage.
+- [x] **Flight and stay search.** One or more operator-managed compatible adapters per kind, behind `TRAVELCLAW_*_PROVIDERS_JSON` (with the original single-provider env kept as a fallback). Sources are queried in parallel, results are named and timestamped, partial failures are disclosed, and offers persist. A hold is a separate explicit request, routed to the original source and shown only after provider confirmation. No card storage. See [provider contract and global-market caveats](architecture.md#flight-and-stay-search).
+- [ ] **Traveler market preferences.** Store each traveler's point-of-sale country and optional currency/language; use them for market-sensitive searches instead of the operator's single-market defaults or assumptions from the route.
 - [ ] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [ ] **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.
 - [ ] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`.

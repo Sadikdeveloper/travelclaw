@@ -4,6 +4,26 @@ export { deskName, planAgentDesks } from './desks';
 export type { DeskKind } from './desks';
 export { extractHints } from './extract';
 export {
+  MAX_OFFERS_PER_SEARCH,
+  flightQueryFrom,
+  requestProviderHold,
+  searchFlights,
+  searchStays,
+  stayQueryFrom,
+} from './providers';
+export type {
+  FlightQuery,
+  ProviderFailureReason,
+  ProviderHoldResult,
+  ProviderOffer,
+  ProviderSearchFailed,
+  ProviderSearchFound,
+  ProviderSearchResult,
+  ProviderSearchSource,
+  QueryDraft,
+  StayQuery,
+} from './providers';
+export {
   BUNDLED_TOOLS,
   buildOutline,
   buildPackingList,

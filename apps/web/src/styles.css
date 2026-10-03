@@ -625,6 +625,90 @@ h3 {
 .agent-card p {
   margin: 0;
 }
+.provider-offers {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 9px;
+}
+.provider-offers h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.provider-offers-note,
+.provider-offer-meta,
+.provider-offer-detail,
+.provider-offer-hold {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.provider-offer {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: #fffcf8;
+  border-radius: 12px;
+  padding: 10px 11px;
+  display: grid;
+  gap: 4px;
+}
+.provider-offer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.provider-offer-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+.offer-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #f3e7d7;
+  color: var(--copper-deep);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.offer-state.confirmed {
+  background: #e1f0eb;
+  color: var(--sea-deep);
+}
+.provider-offer-price {
+  color: var(--ink);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.provider-offer-detail {
+  overflow-wrap: anywhere;
+}
+.provider-offer-meta {
+  font-size: 0.74rem;
+}
+.provider-offer-hold {
+  color: var(--sea-deep);
+}
+.provider-offer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 4px;
+}
+.provider-offer-actions .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+.provider-offer-actions > span {
+  color: var(--muted);
+  font-size: 0.73rem;
+}
 
 /* Attachments: a chip while composing, and the same chip in a sent bubble. */
 .attach-chip {

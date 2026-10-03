@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { eachDate, inclusiveDayCount } from './dates';
 import { findDestinationByName } from './destinations';
 import { extractHints } from './extract';
+import { authHeaders, connectorBase, fetchWithTimeout } from './http';
 import { zodToJsonSchema } from './tool-args';
 import type {
   BudgetData,
@@ -679,7 +680,7 @@ export async function convertCurrency(
     const headers = authHeaders(connector?.apiKey);
     try {
       const url = `${base}/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${amount}`;
-      const response = await fetchWithTimeout(ctx.fetchImpl, url, 4000, headers);
+      const response = await fetchWithTimeout(ctx.fetchImpl, url, 4000, { headers });
       if (response.status === 401 || response.status === 403) {
         ctx.connectors?.rejected?.('currency');
       } else if (response.ok) {
@@ -745,7 +746,9 @@ export async function weatherOutlook(
       url.searchParams.set('daily', 'weathercode,temperature_2m_max,temperature_2m_min');
       url.searchParams.set('timezone', 'auto');
       url.searchParams.set('forecast_days', '5');
-      const response = await fetchWithTimeout(ctx.fetchImpl, url.toString(), 4000, headers);
+      const response = await fetchWithTimeout(ctx.fetchImpl, url.toString(), 4000, {
+        headers,
+      });
       if (response.status === 401 || response.status === 403) {
         ctx.connectors?.rejected?.('weather');
       } else if (response.ok) {
@@ -864,38 +867,6 @@ function weatherLabel(code: number | undefined): string {
   if (code <= 77) return 'snow';
   if (code <= 82) return 'showers';
   return 'storms';
-}
-
-/**
- * A connector base URL from the operator's env. Defense in depth: only http(s)
- * is honored here, anything else falls back to the desk default, and a key is
- * never appended to a URL — headers only.
- */
-function connectorBase(raw: string | undefined, fallback: string): string {
-  if (!raw) return fallback;
-  const trimmed = raw.trim().replace(/\/+$/, '');
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return fallback;
-}
-
-function authHeaders(apiKey: string | undefined): Record<string, string> {
-  const key = apiKey?.trim();
-  return key ? { Authorization: `Bearer ${key}` } : {};
-}
-
-async function fetchWithTimeout(
-  fetchImpl: typeof fetch,
-  url: string,
-  ms: number,
-  headers: Record<string, string> = {},
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetchImpl(url, { signal: controller.signal, headers });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function roundMoney(value: number): number {

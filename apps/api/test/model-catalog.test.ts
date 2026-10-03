@@ -30,6 +30,15 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     currencyApiKey: null,
     weatherBaseUrl: null,
     weatherApiKey: null,
+    flightProviders: null,
+    stayProviders: null,
+    searchBookerCountry: null,
+    searchCurrency: null,
+    searchLanguage: null,
+    flightBaseUrl: null,
+    flightApiKey: null,
+    stayBaseUrl: null,
+    stayApiKey: null,
     ...overrides,
   };
 }

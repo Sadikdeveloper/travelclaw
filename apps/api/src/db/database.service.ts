@@ -25,6 +25,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateToGuests();
     this.migrateToAttachments();
     this.db.exec(SCHEMA);
+    this.migrateOfferProviderIds();
   }
 
   /** Old installs used a skill catalog. Rename before CREATE so history is kept. */
@@ -108,6 +109,23 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     if (columns.some((column) => column.name === 'attachments_json')) return;
     this.db.exec(
       "ALTER TABLE messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'",
+    );
+  }
+
+  /** Offers need a stable connector id once one search can fan out to many providers. */
+  private migrateOfferProviderIds() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('offers')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(offers)');
+    if (columns.some((column) => column.name === 'provider_id')) return;
+    this.db.exec("ALTER TABLE offers ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
+    // Older rows used the endpoint itself as their hold-routing identity.
+    this.db.exec(
+      "UPDATE offers SET provider_id = provider_base_url WHERE provider_id = ''",
     );
   }
 
