@@ -238,6 +238,36 @@ describe('flight and stay provider search', () => {
     );
   });
 
+  it('uses the traveler market preference ahead of install-wide defaults', async () => {
+    process.env.TRAVELCLAW_FLIGHT_BASE_URL = 'https://fares.example.test';
+    process.env.TRAVELCLAW_FLIGHT_API_KEY = 'key';
+    process.env.TRAVELCLAW_BOOKER_COUNTRY = 'US';
+    process.env.TRAVELCLAW_SEARCH_CURRENCY = 'USD';
+    process.env.TRAVELCLAW_SEARCH_LANGUAGE = 'en-US';
+    const agent = await guestAgent();
+    const prefs = await agent.patch('/api/auth/me/market').send({
+      bookerCountry: 'ng',
+      currency: 'ngn',
+      language: 'en-NG',
+    });
+    expect(prefs.status).toBe(200);
+
+    const response = await searchFlight(agent);
+    const task = await taskFor(agent, response.body.session.id);
+
+    expect(task.summary).toContain(
+      'Pricing context: booker country NG, requested currency NGN, content language en-NG.',
+    );
+    expect(seen).toHaveLength(1);
+    const url = seen[0].url;
+    expect(url).toContain('bookerCountry=NG');
+    expect(url).toContain('currency=NGN');
+    expect(url).toContain('language=en-NG');
+    expect(url).not.toContain('bookerCountry=US');
+    expect(url).not.toContain('currency=USD');
+    expect(url).not.toContain('language=en-US');
+  });
+
   it('fans out globally, passes the configured point of sale, and holds through the source that returned the offer', async () => {
     process.env.TRAVELCLAW_FLIGHT_PROVIDERS_JSON = JSON.stringify([
       {

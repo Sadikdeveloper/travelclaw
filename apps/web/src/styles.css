@@ -259,6 +259,82 @@ a {
 .gateway-status {
   margin-bottom: 8px;
 }
+.market-box {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 250, 243, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 250, 243, 0.05);
+}
+.market-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #f6f1e7;
+  font-weight: 650;
+}
+.market-save {
+  border: 1px solid rgba(255, 250, 243, 0.18);
+  background: rgba(255, 250, 243, 0.08);
+  color: #f0c7ad;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.74rem;
+}
+.market-save:hover {
+  border-color: #f0c7ad;
+}
+.market-save:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.market-box p {
+  margin: 0;
+  color: #cbbba8;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+.market-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.market-box label {
+  display: grid;
+  gap: 4px;
+  color: #cbbba8;
+  font-size: 0.72rem;
+}
+.market-box input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(255, 250, 243, 0.14);
+  background: rgba(255, 250, 243, 0.08);
+  color: #f6f1e7;
+  border-radius: 9px;
+  padding: 7px 8px;
+  text-transform: none;
+}
+.market-box input::placeholder {
+  color: #8d8174;
+}
+.market-box input:focus {
+  outline: none;
+  border-color: #f0c7ad;
+}
+.market-message {
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.market-message.ok {
+  color: #add8c8;
+}
+.market-message.bad {
+  color: #f0b6ad;
+}
 .side-version {
   margin-top: 8px;
   opacity: 0.7;

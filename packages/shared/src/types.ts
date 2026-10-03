@@ -32,6 +32,15 @@ export interface AgentRecord {
   updatedAt: string;
 }
 
+export interface TravelerMarketPreferences {
+  /** ISO 3166-1 alpha-2 point-of-sale/booker country; never inferred from a trip route. */
+  bookerCountry: string | null;
+  /** Optional ISO 4217 display/request currency passed to compatible search adapters. */
+  currency: string | null;
+  /** Optional BCP-style language tag passed to compatible search adapters. */
+  language: string | null;
+}
+
 export interface UserRecord {
   id: string;
   email: string;
@@ -40,6 +49,8 @@ export interface UserRecord {
   hasGoogle: boolean;
   /** True for an auto-provisioned, no-signup visitor. Their chats live only on this device. */
   isGuest: boolean;
+  /** Market-sensitive searches use these traveler-owned preferences when set. */
+  market: TravelerMarketPreferences;
   createdAt: string;
   updatedAt: string;
 }

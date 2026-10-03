@@ -20,7 +20,9 @@ import type {
   HoldAttempt,
   OfferRecord,
   TaskDecision,
+  TravelerMarketPreferences,
 } from '@travelclaw/shared';
+import { AuthService } from '../auth/auth.service';
 import { newId, nowIso } from '../common/util';
 import { loadConfig } from '../config';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -79,6 +81,7 @@ export class TasksService {
     private readonly events: EventsService,
     private readonly sessions: SessionsService,
     private readonly connectors: ConnectorsService,
+    private readonly auth: AuthService,
   ) {}
 
   /** Used by the controller to check chat ownership before a decision touches a task. */
@@ -312,6 +315,10 @@ export class TasksService {
     }
 
     const config = loadConfig();
+    const market = searchMarket(
+      config,
+      this.auth.marketForUser(this.sessions.ownerOf(task.session_id)),
+    );
     const ctx: ToolContext = {
       now: new Date(),
       network: config.network,
@@ -329,7 +336,7 @@ export class TasksService {
           // search. The regular brief names the details still needed.
           return `${lead} Provider search needs ${draft.missing.join(', ')}; no provider call was made. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
         }
-        const query = { ...draft.query, ...searchMarket(config) };
+        const query = { ...draft.query, ...market };
         searchLead = `${flightSearchLead(query, task.pass, hints.travelers)}${marketNote(query)}`;
         result = await searchFlights(query, ctx);
       } else {
@@ -337,7 +344,7 @@ export class TasksService {
         if (!draft.query) {
           return `${lead} Provider search needs ${draft.missing.join(', ')}; no provider call was made. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
         }
-        const query = { ...draft.query, ...searchMarket(config) };
+        const query = { ...draft.query, ...market };
         searchLead = `${staySearchLead(query, task.pass, hints.travelers)}${marketNote(query)}`;
         result = await searchStays(query, ctx);
       }
@@ -523,12 +530,28 @@ function staySearchLead(
 
 type SearchMarket = { bookerCountry?: string; currency?: string; language?: string };
 
-function searchMarket(config: ReturnType<typeof loadConfig>): SearchMarket {
+function searchMarket(
+  config: ReturnType<typeof loadConfig>,
+  travelerMarket: TravelerMarketPreferences,
+): SearchMarket {
+  if (hasTravelerMarket(travelerMarket)) {
+    return {
+      ...(travelerMarket.bookerCountry
+        ? { bookerCountry: travelerMarket.bookerCountry }
+        : {}),
+      ...(travelerMarket.currency ? { currency: travelerMarket.currency } : {}),
+      ...(travelerMarket.language ? { language: travelerMarket.language } : {}),
+    };
+  }
   return {
     ...(config.searchBookerCountry ? { bookerCountry: config.searchBookerCountry } : {}),
     ...(config.searchCurrency ? { currency: config.searchCurrency } : {}),
     ...(config.searchLanguage ? { language: config.searchLanguage } : {}),
   };
+}
+
+function hasTravelerMarket(market: TravelerMarketPreferences): boolean {
+  return Boolean(market.bookerCountry || market.currency || market.language);
 }
 
 function marketNote(market: SearchMarket): string {

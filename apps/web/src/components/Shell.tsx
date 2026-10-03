@@ -1,15 +1,15 @@
-import type { HealthReport, SessionRecord } from '@travelclaw/shared';
+import type { HealthReport, SessionRecord, UserRecord } from '@travelclaw/shared';
 import { Menu, Plus, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useLiveRevision } from '../App';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { useAuth } from '../auth';
 import { mirrorGuestSessions } from '../guestChatCache';
 
 export function Shell() {
   const revision = useLiveRevision();
-  const { user, logout } = useAuth();
+  const { user, logout, setUser } = useAuth();
   // Keyed by id, not by the account object: a refreshed session must not tear down the
   // live socket or refetch the chat list, or a failing request can feed itself.
   const userId = user?.id;
@@ -21,6 +21,14 @@ export function Shell() {
   const [signingOut, setSigningOut] = useState(false);
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [marketCountry, setMarketCountry] = useState('');
+  const [marketCurrency, setMarketCurrency] = useState('');
+  const [marketLanguage, setMarketLanguage] = useState('');
+  const [marketSaving, setMarketSaving] = useState(false);
+  const [marketMessage, setMarketMessage] = useState<{
+    tone: 'ok' | 'bad';
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
     let stop = false;
@@ -71,6 +79,45 @@ export function Shell() {
     } finally {
       setSigningOut(false);
       setMenuOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    setMarketCountry(user?.market.bookerCountry ?? '');
+    setMarketCurrency(user?.market.currency ?? '');
+    setMarketLanguage(user?.market.language ?? '');
+  }, [user?.id, user?.market.bookerCountry, user?.market.currency, user?.market.language]);
+
+  useEffect(() => {
+    setMarketMessage(null);
+  }, [user?.id]);
+
+  async function saveMarket(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || marketSaving) return;
+    setMarketSaving(true);
+    setMarketMessage(null);
+    try {
+      const updated = await api<UserRecord>('/api/auth/me/market', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          bookerCountry: marketCountry.trim() || null,
+          currency: marketCurrency.trim() || null,
+          language: marketLanguage.trim() || null,
+        }),
+      });
+      setUser(updated);
+      setMarketMessage({ tone: 'ok', text: 'Market saved for provider searches.' });
+    } catch (error) {
+      setMarketMessage({
+        tone: 'bad',
+        text:
+          error instanceof ApiError
+            ? error.message
+            : 'Could not save that market preference.',
+      });
+    } finally {
+      setMarketSaving(false);
     }
   }
 
@@ -157,6 +204,53 @@ export function Shell() {
             <span className={down ? 'dot bad' : 'dot ok'} />
             {down ? 'Gateway quiet' : 'Gateway up'}
           </div>
+          {user ? (
+            <form className="market-box" onSubmit={(event) => void saveMarket(event)}>
+              <div className="market-head">
+                <span>Search market</span>
+                <button className="market-save" type="submit" disabled={marketSaving}>
+                  {marketSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              <p>Used for live flight and stay providers. Never guessed from a route.</p>
+              <div className="market-grid">
+                <label>
+                  Booker country
+                  <input
+                    value={marketCountry}
+                    maxLength={2}
+                    placeholder="NG"
+                    onChange={(event) => setMarketCountry(event.target.value.toUpperCase())}
+                  />
+                </label>
+                <label>
+                  Currency
+                  <input
+                    value={marketCurrency}
+                    maxLength={3}
+                    placeholder="NGN"
+                    onChange={(event) =>
+                      setMarketCurrency(event.target.value.toUpperCase())
+                    }
+                  />
+                </label>
+              </div>
+              <label className="market-language">
+                Language
+                <input
+                  value={marketLanguage}
+                  maxLength={24}
+                  placeholder="en-NG"
+                  onChange={(event) => setMarketLanguage(event.target.value)}
+                />
+              </label>
+              {marketMessage ? (
+                <span className={`market-message ${marketMessage.tone}`}>
+                  {marketMessage.text}
+                </span>
+              ) : null}
+            </form>
+          ) : null}
           {user?.isGuest ? (
             <div className="account-box account-box-guest">
               <div className="account-row">

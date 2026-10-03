@@ -63,6 +63,57 @@ describe('accounts migration', () => {
     }
   });
 
+  it('adds market preferences to a pre-existing users table without guessing values', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-market-'));
+    const dbPath = join(dir, 'legacy.db');
+
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        display_name TEXT NOT NULL,
+        google_id TEXT UNIQUE,
+        is_guest INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO users VALUES ('u1', 'ada@example.com', NULL, 'Ada', NULL, 0, '2025-01-01', '2025-01-01');
+    `);
+    legacy.close();
+
+    const previous = { DATABASE_PATH: process.env.DATABASE_PATH };
+    process.env.DATABASE_PATH = dbPath;
+    try {
+      const service = new DatabaseService();
+      service.onModuleInit();
+      try {
+        const columns = service
+          .all<{ name: string }>('PRAGMA table_info(users)')
+          .map((c) => c.name);
+        expect(columns).toEqual(
+          expect.arrayContaining(['booker_country', 'market_currency', 'market_language']),
+        );
+        const user = service.get<{
+          booker_country: string | null;
+          market_currency: string | null;
+          market_language: string | null;
+        }>('SELECT * FROM users WHERE id = ?', 'u1');
+        expect(user).toMatchObject({
+          booker_country: null,
+          market_currency: null,
+          market_language: null,
+        });
+      } finally {
+        service.onModuleDestroy();
+      }
+    } finally {
+      if (previous.DATABASE_PATH === undefined) delete process.env.DATABASE_PATH;
+      else process.env.DATABASE_PATH = previous.DATABASE_PATH;
+    }
+  });
+
   it('adds is_guest to a pre-existing users table without touching real accounts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-guest-'));
     const dbPath = join(dir, 'legacy.db');
