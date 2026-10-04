@@ -25,6 +25,18 @@ export interface AppConfig {
   modelName: string;
   /** Other models the desk offers, from TRAVELCLAW_MODELS. The chosen one is always first. */
   modelNames: string[];
+  /** Google Gemini API key and optional base URL (OpenAI-compatible endpoint). */
+  googleApiKey: string | null;
+  googleBaseUrl: string;
+  /** xAI Grok API key and optional base URL (OpenAI-compatible endpoint). */
+  xaiApiKey: string | null;
+  xaiBaseUrl: string;
+  /** DeepSeek API key and optional base URL (OpenAI-compatible endpoint). */
+  deepseekApiKey: string | null;
+  deepseekBaseUrl: string;
+  /** Moonshot Kimi API key and optional base URL (OpenAI-compatible endpoint). */
+  kimiApiKey: string | null;
+  kimiBaseUrl: string;
   network: boolean;
   browserWorkerUrl: string | null;
   browserWorkerToken: string | null;
@@ -116,6 +128,31 @@ export function loadConfig(
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
+    googleApiKey: env.TRAVELCLAW_GOOGLE_API_KEY?.trim() || env.GEMINI_API_KEY?.trim() || null,
+    googleBaseUrl: (
+      env.TRAVELCLAW_GOOGLE_BASE_URL ||
+      env.GEMINI_BASE_URL ||
+      'https://generativelanguage.googleapis.com/v1beta/openai'
+    ).replace(/\/$/, ''),
+    xaiApiKey: env.TRAVELCLAW_XAI_API_KEY?.trim() || env.XAI_API_KEY?.trim() || null,
+    xaiBaseUrl: (
+      env.TRAVELCLAW_XAI_BASE_URL ||
+      env.XAI_BASE_URL ||
+      'https://api.x.ai/v1'
+    ).replace(/\/$/, ''),
+    deepseekApiKey: env.TRAVELCLAW_DEEPSEEK_API_KEY?.trim() || env.DEEPSEEK_API_KEY?.trim() || null,
+    deepseekBaseUrl: (
+      env.TRAVELCLAW_DEEPSEEK_BASE_URL ||
+      env.DEEPSEEK_BASE_URL ||
+      'https://api.deepseek.com/v1'
+    ).replace(/\/$/, ''),
+    kimiApiKey: env.TRAVELCLAW_KIMI_API_KEY?.trim() || env.MOONSHOT_API_KEY?.trim() || env.KIMI_API_KEY?.trim() || null,
+    kimiBaseUrl: (
+      env.TRAVELCLAW_KIMI_BASE_URL ||
+      env.MOONSHOT_BASE_URL ||
+      env.KIMI_BASE_URL ||
+      'https://api.moonshot.ai/v1'
+    ).replace(/\/$/, ''),
     network: env.TRAVELCLAW_NETWORK !== '0',
     ...browserConfig(env),
     seed: env.TRAVELCLAW_SEED !== '0',

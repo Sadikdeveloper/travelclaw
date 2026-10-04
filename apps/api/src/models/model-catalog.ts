@@ -1,4 +1,4 @@
-import type { ModelCatalogRecord, ModelLimits, ModelRecord } from '@travelclaw/shared';
+import type { ModelCatalogRecord, ModelLimits, ModelRecord, ModelProviderType } from '@travelclaw/shared';
 import type { AppConfig } from '../config';
 
 /** Every turn limit on this desk is measured over this window. */
@@ -6,6 +6,15 @@ export const TURN_WINDOW_MS = 10 * 60 * 1000;
 
 /** The desk's own renderer: deterministic, offline, and the one model always offered. */
 export const DESK_MODEL_ID = 'travelclaw-local';
+
+export interface KnownModelDef {
+  id: string;
+  label: string;
+  provider: ModelProviderType;
+  tier: 'fast' | 'strong';
+  rank: number;
+  limits: ModelLimits | null;
+}
 
 /**
  * The models this desk can run, best first.
@@ -17,33 +26,119 @@ export const DESK_MODEL_ID = 'travelclaw-local';
  * and a model that costs nothing per turn is not paced at all. Adding a model is one entry
  * here plus its name in TRAVELCLAW_MODELS.
  */
-const KNOWN_MODELS: {
-  id: string;
-  label: string;
-  rank: number;
-  limits: ModelLimits | null;
-}[] = [
+export const KNOWN_MODELS: KnownModelDef[] = [
+  // OpenAI models
   {
     id: 'gpt-4o',
     label: 'GPT-4o',
+    provider: 'openai',
+    tier: 'strong',
     rank: 30,
     limits: { guest: 2, account: 15 },
   },
   {
     id: 'o4-mini',
     label: 'o4-mini',
+    provider: 'openai',
+    tier: 'strong',
     rank: 20,
     limits: { guest: 2, account: 15 },
   },
   {
     id: 'gpt-4o-mini',
     label: 'GPT-4o mini',
+    provider: 'openai',
+    tier: 'fast',
     rank: 10,
     limits: { guest: 5, account: 30 },
   },
+
+  // Google Gemini models (OpenAI-compatible endpoint)
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro',
+    provider: 'google',
+    tier: 'strong',
+    rank: 32,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
+    provider: 'google',
+    tier: 'fast',
+    rank: 12,
+    limits: { guest: 5, account: 30 },
+  },
+  {
+    id: 'gemini-1.5-flash',
+    label: 'Gemini 1.5 Flash',
+    provider: 'google',
+    tier: 'fast',
+    rank: 11,
+    limits: { guest: 5, account: 30 },
+  },
+
+  // xAI Grok models (OpenAI-compatible endpoint)
+  {
+    id: 'grok-2',
+    label: 'Grok 2',
+    provider: 'xai',
+    tier: 'strong',
+    rank: 28,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'grok-beta',
+    label: 'Grok Beta',
+    provider: 'xai',
+    tier: 'fast',
+    rank: 9,
+    limits: { guest: 5, account: 30 },
+  },
+
+  // DeepSeek models (OpenAI-compatible endpoint)
+  {
+    id: 'deepseek-reasoner',
+    label: 'DeepSeek Reasoner',
+    provider: 'deepseek',
+    tier: 'strong',
+    rank: 35,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'deepseek-chat',
+    label: 'DeepSeek Chat',
+    provider: 'deepseek',
+    tier: 'fast',
+    rank: 22,
+    limits: { guest: 5, account: 30 },
+  },
+
+  // Moonshot Kimi models (OpenAI-compatible endpoint)
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    provider: 'kimi',
+    tier: 'strong',
+    rank: 29,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'moonshot-v1-32k',
+    label: 'Moonshot v1 32k',
+    provider: 'kimi',
+    tier: 'fast',
+    rank: 18,
+    limits: { guest: 5, account: 30 },
+  },
+
+  // Desk model
   {
     id: DESK_MODEL_ID,
     label: 'Desk model',
+    provider: 'mock',
+    tier: 'fast',
     rank: 0,
     // Runs in this process: no provider call, no key, no bill. Nothing to ration, so it is
     // not paced — a traveler is stopped by a model's limit, never by the desk itself.
@@ -61,19 +156,56 @@ const UNKNOWN_RANK = 1;
 /** A configured model we have no entry for is served, but paced conservatively. */
 const UNKNOWN_LIMITS: ModelLimits = { guest: 3, account: 20 };
 
+export function modelDefFor(id: string): KnownModelDef | undefined {
+  return KNOWN_MODELS.find((model) => model.id === id);
+}
+
 /** `null` for a model that is not paced at all. */
 export function limitsFor(id: string): ModelLimits | null {
-  const known = KNOWN_MODELS.find((model) => model.id === id);
+  const known = modelDefFor(id);
   if (known) return known.limits;
   return UNKNOWN_LIMITS;
 }
 
 export function labelFor(id: string): string {
-  return KNOWN_MODELS.find((model) => model.id === id)?.label ?? id;
+  return modelDefFor(id)?.label ?? id;
+}
+
+export function providerForModelId(id: string): ModelProviderType {
+  if (id === DESK_MODEL_ID) return 'mock';
+  const known = modelDefFor(id);
+  if (known) return known.provider;
+  if (id.startsWith('gemini')) return 'google';
+  if (id.startsWith('grok')) return 'xai';
+  if (id.startsWith('deepseek')) return 'deepseek';
+  if (id.startsWith('kimi') || id.startsWith('moonshot')) return 'kimi';
+  return 'openai';
+}
+
+export function tierForModelId(id: string): 'fast' | 'strong' {
+  return modelDefFor(id)?.tier ?? 'strong';
 }
 
 function rankFor(id: string): number {
-  return KNOWN_MODELS.find((model) => model.id === id)?.rank ?? UNKNOWN_RANK;
+  return modelDefFor(id)?.rank ?? UNKNOWN_RANK;
+}
+
+export function isModelAvailable(config: AppConfig, id: string): boolean {
+  if (id === DESK_MODEL_ID) return true;
+  const provider = providerForModelId(id);
+  switch (provider) {
+    case 'google':
+      return Boolean(config.googleApiKey || config.modelApiKey);
+    case 'xai':
+      return Boolean(config.xaiApiKey || config.modelApiKey);
+    case 'deepseek':
+      return Boolean(config.deepseekApiKey || config.modelApiKey);
+    case 'kimi':
+      return Boolean(config.kimiApiKey || config.modelApiKey);
+    case 'openai':
+    default:
+      return Boolean(config.modelApiKey);
+  }
 }
 
 /**
@@ -90,28 +222,49 @@ function configuredIds(config: AppConfig): string[] {
 
 function entryFor(config: AppConfig, id: string): ModelRecord {
   const offline = id === DESK_MODEL_ID;
+  const provider = providerForModelId(id);
   return {
     id,
     label: labelFor(id),
-    provider: offline ? 'mock' : 'openai',
+    provider,
+    tier: tierForModelId(id),
     limits: limitsFor(id),
     offline,
-    available: offline || config.modelApiKey !== '',
+    available: isModelAvailable(config, id),
   };
 }
 
 /**
  * The model a turn runs on: the strongest available one this deployment actually has.
+ * Optionally filter by tier ('fast' | 'strong').
  *
  * Nobody picks a model — not a guest, not a signed-in account, and not the request. Using up
  * one model's pace never moves a traveler onto another model; it only stops them, with a
  * message saying which model ran out.
  */
-export function bestModelId(config: AppConfig): string {
+export function bestModelId(
+  config: AppConfig,
+  tierPreference?: 'fast' | 'strong',
+): string {
   const usable = configuredIds(config)
     .map((id) => entryFor(config, id))
     .filter((model) => model.available);
   const floor = usable.find((model) => model.offline);
+
+  if (tierPreference) {
+    const tierCandidates = usable.filter(
+      (model) => !model.offline && model.tier === tierPreference,
+    );
+    if (tierCandidates.length > 0) {
+      const bestTier = tierCandidates.reduce<ModelRecord | null>(
+        (winner, model) =>
+          winner && rankFor(winner.id) >= rankFor(model.id) ? winner : model,
+        null,
+      );
+      if (bestTier) return bestTier.id;
+    }
+  }
+
   const best = usable.reduce<ModelRecord | null>(
     (winner, model) => (winner && rankFor(winner.id) >= rankFor(model.id) ? winner : model),
     null,

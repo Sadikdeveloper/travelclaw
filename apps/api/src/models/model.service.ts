@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { mockProvider, type ModelProvider } from '@travelclaw/agent-core';
 import type { ModelCatalogRecord, ModelRecord } from '@travelclaw/shared';
 import { loadConfig } from '../config';
-import { DESK_MODEL_ID, modelCatalog } from './model-catalog';
+import { DESK_MODEL_ID, bestModelId, modelCatalog } from './model-catalog';
 import { openAiRequestBody, parseOpenAiMessage } from './openai';
+import { ModelCacheService } from './model-cache.service';
 
 /** What the desk rendering says when the live model is unavailable. */
 const DESK = { provider: 'mock', model: DESK_MODEL_ID } as const;
@@ -11,6 +12,7 @@ const DESK = { provider: 'mock', model: DESK_MODEL_ID } as const;
 @Injectable()
 export class ModelService {
   private readonly logger = new Logger(ModelService.name);
+  readonly cache = new ModelCacheService();
 
   /** Every model on offer, the pace on each, and which one a turn runs on by default. */
   catalog(): ModelCatalogRecord {
@@ -28,21 +30,51 @@ export class ModelService {
    * The model a turn runs on: the best available one this deployment has. Nobody chooses,
    * so there is no id to resolve and nothing to substitute — guests and signed-in accounts
    * are answered by the same model, and only the pace on it differs.
+   * Can optionally request a 'fast' model for basic tasks or 'strong' model for complex reasoning/tools.
    */
-  best(): ModelRecord {
-    const { models, current } = this.catalog();
-    return models.find((entry) => entry.id === current) ?? models[0];
+  best(tierPreference?: 'fast' | 'strong'): ModelRecord {
+    const config = loadConfig();
+    const currentId = bestModelId(config, tierPreference);
+    const { models } = this.catalog();
+    return models.find((entry) => entry.id === currentId) ?? models[0];
   }
 
   providerFor(model: ModelRecord): ModelProvider {
     const config = loadConfig();
-    if (model.provider === 'openai' && config.modelApiKey) {
+    if (model.offline || model.provider === 'mock') {
+      return mockProvider(DESK_MODEL_ID);
+    }
+
+    let baseUrl = config.modelBaseUrl;
+    let apiKey = config.modelApiKey;
+
+    if (model.provider === 'google') {
+      baseUrl = config.googleBaseUrl;
+      apiKey = config.googleApiKey || config.modelApiKey;
+    } else if (model.provider === 'xai') {
+      baseUrl = config.xaiBaseUrl;
+      apiKey = config.xaiApiKey || config.modelApiKey;
+    } else if (model.provider === 'deepseek') {
+      baseUrl = config.deepseekBaseUrl;
+      apiKey = config.deepseekApiKey || config.modelApiKey;
+    } else if (model.provider === 'kimi') {
+      baseUrl = config.kimiBaseUrl;
+      apiKey = config.kimiApiKey || config.modelApiKey;
+    }
+
+    if (apiKey) {
       return {
-        id: 'openai',
+        id: model.provider,
         model: model.id,
         // The live model may ask for tools. The mock cannot, so it keeps the router.
         usesTools: true,
-        complete: (input) => this.completeOpenAi(input, config, model.id),
+        complete: (input) =>
+          this.completeOpenAi(
+            input,
+            { ...config, modelBaseUrl: baseUrl, modelApiKey: apiKey },
+            model.id,
+            model.provider,
+          ),
       };
     }
     return mockProvider(DESK_MODEL_ID);
@@ -52,6 +84,7 @@ export class ModelService {
     input: Parameters<ModelProvider['complete']>[0],
     config: ReturnType<typeof loadConfig>,
     modelName: string,
+    providerName = 'openai',
   ) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25_000);
@@ -85,7 +118,7 @@ export class ModelService {
       }
       return {
         text,
-        provider: 'openai',
+        provider: providerName,
         model: modelName,
         ...(toolCalls.length ? { toolCalls } : {}),
       };
