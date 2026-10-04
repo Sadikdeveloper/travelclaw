@@ -24,7 +24,7 @@ export class AgentsController {
   @Post()
   @ApiOperation({
     summary:
-      'Create an agent row. Persona files stay shared until per-agent workspaces land.',
+      'Create an agent row. Its persona falls back to the shared desk files until workspace/agents/<id>/ overrides them.',
   })
   create(@Body(new ZodValidationPipe(createAgentSchema)) body: CreateAgentInput) {
     return this.agents.create(body);

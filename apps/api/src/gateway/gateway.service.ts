@@ -89,7 +89,9 @@ export class GatewayService {
     if (desks.length) return this.startDesks(session.id, input.content, desks, userId);
 
     const history = this.sessions.recentHistory(session.id).slice(0, -1);
-    const files = this.workspace.readFiles();
+    // Per-agent persona: workspace/agents/<id>/<file> when it exists, the shared
+    // desk file otherwise — per file, so a partial override keeps the rest shared.
+    const files = this.workspace.readFiles(agent.id);
     const active = this.trips.latestActive(agent.id);
     const config = loadConfig();
     const turn = await completeTurn(

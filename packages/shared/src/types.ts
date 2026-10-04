@@ -293,6 +293,23 @@ export interface WorkspaceFiles {
   memory: string;
 }
 
+/** Which physical file backed one persona slot for the agent that was asked for. */
+export interface WorkspaceFileSource {
+  /** `shared` = `workspace/<file>`, `agent` = `workspace/agents/<id>/<file>`. */
+  source: 'shared' | 'agent';
+  /** Path relative to the workspace root, e.g. `agents/marlow/SOUL.md`. */
+  path: string;
+}
+
+/**
+ * The persona files plus per-file provenance, so an override is never invisible:
+ * a reader can see whether a slot fell back to the shared desk file or came from
+ * the agent's own folder.
+ */
+export interface WorkspaceView extends WorkspaceFiles {
+  sources: Record<keyof WorkspaceFiles, WorkspaceFileSource>;
+}
+
 export interface DeskSnapshot {
   health: HealthReport;
   agent: AgentRecord;
