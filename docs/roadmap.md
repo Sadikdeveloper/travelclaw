@@ -4,7 +4,7 @@ Work in this order. Later tasks assume the earlier ones exist. Pick the first un
 
 This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, are deferred. Tools are functions we register. The traveler does not see a tool catalog.
 
-Checked on 2026-10-03, while extending live flight and stay search to multiple providers.
+Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
 
 ## Done
 
@@ -27,7 +27,7 @@ Without a search key, those desks still write the same brief. With an operator k
 - [x] **Provider connectors.** Only after built-in tools are called by the model. A connector is an operator-held key a tool resolves by name, not a new language. The traveler never provides one: provider access is the desk's job, and anything the desk needs from the traveler arrives as a turn, not a setting.
 - [x] **Flight and stay search.** One or more operator-managed compatible adapters per kind, behind `TRAVELCLAW_*_PROVIDERS_JSON` (with the original single-provider env kept as a fallback). Sources are queried in parallel, results are named and timestamped, partial failures are disclosed, and offers persist. A hold is a separate explicit request, routed to the original source and shown only after provider confirmation. No card storage. See [provider contract and global-market caveats](architecture.md#flight-and-stay-search).
 - [x] **Traveler market preferences.** Store each traveler's point-of-sale country and optional currency/language; use them for market-sensitive searches instead of the operator's single-market defaults or assumptions from the route.
-- [ ] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
+- [x] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [ ] **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.
 - [ ] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`.
 - [ ] **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
