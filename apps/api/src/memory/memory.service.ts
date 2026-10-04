@@ -27,7 +27,10 @@ export class MemoryService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.importFile(this.agents.defaultAgent().id);
+    // Import the MEMORY.md each agent actually reads: its own
+    // workspace/agents/<id>/MEMORY.md when present, the shared desk file otherwise.
+    // The import is idempotent, so restarts and agents without an override are safe.
+    for (const agent of this.agents.list()) this.importFile(agent.id);
   }
 
   list(agentId?: string): MemoryRecord[] {
@@ -71,7 +74,7 @@ export class MemoryService implements OnModuleInit {
       noteDate,
       now,
     );
-    this.workspace.appendMemory(`- [${input.kind}] ${input.body} (${noteDate})`);
+    this.workspace.appendMemory(`- [${input.kind}] ${input.body} (${noteDate})`, agentId);
     return this.mustGet(id);
   }
 
@@ -83,7 +86,7 @@ export class MemoryService implements OnModuleInit {
   }
 
   private importFile(agentId: string) {
-    const raw = this.workspace.read('MEMORY.md');
+    const raw = this.workspace.read('MEMORY.md', agentId);
     for (const match of raw.matchAll(BULLET)) {
       const kind = match[1] as MemoryKind;
       const body = match[2].trim();

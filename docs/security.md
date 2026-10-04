@@ -7,7 +7,7 @@ expose this past your own machine.
 - Bind to `127.0.0.1` if you do not trust the network. The default `0.0.0.0` is for the dev preview and Docker.
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
 - Tools cannot run shell commands. Keep it that way.
-- Workspace writes are limited to the five persona files, and paths are checked against the workspace root.
+- Workspace writes are limited to the five persona files, and paths are checked against the workspace root. A per-agent override lives under `workspace/agents/<id>/`; the agent id is one validated lowercase segment, so it cannot climb out of the workspace, and `GET /api/workspace?agentId=` reports which file backs each slot.
 - A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; an operator connector may repoint one at a compatible base URL (see Connectors).
 - Treat visa and safety text as a checklist. The desk is not an authority.
 

@@ -1,20 +1,29 @@
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   workspaceFileSchema,
   type WorkspaceFileName,
+  type WorkspaceFileSource,
   type WorkspaceFiles,
+  type WorkspaceView,
 } from '@travelclaw/shared';
 import { loadConfig } from '../config';
 
-const FILES: WorkspaceFileName[] = [
-  'SOUL.md',
-  'IDENTITY.md',
-  'USER.md',
-  'AGENTS.md',
-  'MEMORY.md',
-];
+const FILES: Record<keyof WorkspaceFiles, WorkspaceFileName> = {
+  soul: 'SOUL.md',
+  identity: 'IDENTITY.md',
+  user: 'USER.md',
+  agents: 'AGENTS.md',
+  memory: 'MEMORY.md',
+};
 
 const FALLBACK: Record<WorkspaceFileName, string> = {
   'SOUL.md': '# Soul\n\nYou are Marlow. Be specific. Never claim a booking.\n',
@@ -25,6 +34,18 @@ const FALLBACK: Record<WorkspaceFileName, string> = {
   'MEMORY.md': '# Memory\n',
 };
 
+/**
+ * An agent id doubles as a folder name under `workspace/agents/`. Ids come from the
+ * API (and from `?agentId=`), so treat them as untrusted input: one lowercase
+ * segment, no separators, no dot runs — the id can never climb out of the workspace.
+ */
+const AGENT_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+interface ResolvedFile {
+  path: string;
+  source: WorkspaceFileSource['source'];
+}
+
 @Injectable()
 export class WorkspaceService implements OnModuleInit {
   private root = '';
@@ -33,8 +54,8 @@ export class WorkspaceService implements OnModuleInit {
     this.root = loadConfig().workspacePath;
     mkdirSync(this.root, { recursive: true });
     const template = findTemplateWorkspace();
-    for (const file of FILES) {
-      const target = this.resolveFile(file);
+    for (const file of Object.values(FILES)) {
+      const target = this.resolveShared(file);
       if (existsSync(target)) continue;
       if (template && existsSync(resolve(template, file))) {
         copyFileSync(resolve(template, file), target);
@@ -49,32 +70,39 @@ export class WorkspaceService implements OnModuleInit {
     return this.root;
   }
 
-  readFiles(): WorkspaceFiles {
+  readFiles(agentId?: string): WorkspaceFiles {
     return {
-      soul: this.read('SOUL.md'),
-      identity: this.read('IDENTITY.md'),
-      user: this.read('USER.md'),
-      agents: this.read('AGENTS.md'),
-      memory: this.read('MEMORY.md'),
+      soul: this.read('SOUL.md', agentId),
+      identity: this.read('IDENTITY.md', agentId),
+      user: this.read('USER.md', agentId),
+      agents: this.read('AGENTS.md', agentId),
+      memory: this.read('MEMORY.md', agentId),
     };
   }
 
-  read(file: WorkspaceFileName): string {
-    return readFileSync(this.resolveFile(file), 'utf8');
+  /** The persona files for one agent, with the file behind each slot named. */
+  view(agentId?: string): WorkspaceView {
+    return { ...this.readFiles(agentId), sources: this.sources(agentId) };
+  }
+
+  read(file: WorkspaceFileName, agentId?: string): string {
+    return readFileSync(this.resolve(file, agentId).path, 'utf8');
   }
 
   write(file: WorkspaceFileName, content: string) {
     const parsed = workspaceFileSchema.safeParse(file);
     if (!parsed.success) throw new BadRequestException('That file is not editable');
+    // Editing stays on the shared desk files. Per-agent overrides are operator files
+    // dropped into workspace/agents/<id>/; there is no per-agent write API (issue #7).
     writeFileSync(
-      this.resolveFile(parsed.data),
+      this.resolveShared(parsed.data),
       content.endsWith('\n') ? content : `${content}\n`,
     );
-    return this.readFiles();
+    return this.view();
   }
 
-  appendMemory(line: string) {
-    const file = this.resolveFile('MEMORY.md');
+  appendMemory(line: string, agentId?: string) {
+    const file = this.resolve('MEMORY.md', agentId).path;
     const current = readFileSync(file, 'utf8');
     if (current.includes(line)) return;
     const next = current.trimEnd() + `\n${line}\n`;
@@ -85,13 +113,42 @@ export class WorkspaceService implements OnModuleInit {
     if (!existing.includes(line)) writeFileSync(daily, `${existing.trimEnd()}\n${line}\n`);
   }
 
-  identityField(label: string): string | undefined {
+  identityField(label: string, agentId?: string): string | undefined {
     return new RegExp(`^- ${label}:\\s*(.+)$`, 'm')
-      .exec(this.read('IDENTITY.md'))?.[1]
+      .exec(this.read('IDENTITY.md', agentId))?.[1]
       ?.trim();
   }
 
-  private resolveFile(file: WorkspaceFileName): string {
+  /**
+   * One file, resolved the way the agent that asked reads it: its own
+   * `workspace/agents/<id>/<file>` when that file exists, the shared desk file
+   * otherwise — per file, so a partial override keeps the rest on the shared files.
+   */
+  private resolve(file: WorkspaceFileName, agentId?: string): ResolvedFile {
+    const shared = this.resolveShared(file);
+    if (!agentId) return { path: shared, source: 'shared' };
+    const override = resolve(this.resolveAgentDir(agentId), file);
+    return isFile(override)
+      ? { path: override, source: 'agent' }
+      : { path: shared, source: 'shared' };
+  }
+
+  private sources(agentId?: string): Record<keyof WorkspaceFiles, WorkspaceFileSource> {
+    const out = {} as Record<keyof WorkspaceFiles, WorkspaceFileSource>;
+    for (const [key, file] of Object.entries(FILES) as [
+      keyof WorkspaceFiles,
+      WorkspaceFileName,
+    ][]) {
+      const resolved = this.resolve(file, agentId);
+      out[key] = {
+        source: resolved.source,
+        path: relative(this.root, resolved.path).split(sep).join('/'),
+      };
+    }
+    return out;
+  }
+
+  private resolveShared(file: WorkspaceFileName): string {
     if (file.includes('/') || file.includes('\\') || file.includes('..')) {
       throw new BadRequestException('Path escapes the workspace');
     }
@@ -101,6 +158,30 @@ export class WorkspaceService implements OnModuleInit {
       throw new BadRequestException('Path escapes the workspace');
     }
     return target;
+  }
+
+  /** `workspace/agents/<id>/`, refused outright when the id is not one safe segment. */
+  private resolveAgentDir(agentId: string): string {
+    if (!AGENT_ID.test(agentId)) {
+      throw new BadRequestException('That agent id is not a workspace folder');
+    }
+    const base = resolve(this.root, 'agents');
+    const target = resolve(base, agentId);
+    // Belt and braces: the pattern above already forbids separators and dot runs,
+    // but never build a path from an id without checking where it lands.
+    const rel = relative(base, target);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+      throw new BadRequestException('That agent id is not a workspace folder');
+    }
+    return target;
+  }
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
   }
 }
 

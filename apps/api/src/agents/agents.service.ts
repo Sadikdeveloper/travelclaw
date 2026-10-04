@@ -37,15 +37,19 @@ export class AgentsService implements OnModuleInit {
     if (this.db.get('SELECT id FROM agents WHERE id = ?', DEFAULT_AGENT_ID)) return;
     const now = nowIso();
     const config = loadConfig();
+    // Seed the default agent from the IDENTITY.md it will actually read:
+    // workspace/agents/marlow/IDENTITY.md when that override exists, the shared
+    // desk file otherwise. With no files added this is the shared file, as before.
     this.db.run(
       `INSERT INTO agents (id, name, emoji, role, description, model, is_default, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       DEFAULT_AGENT_ID,
-      this.workspace.identityField('Name') || 'Marlow',
-      this.workspace.identityField('Emoji') || 'compass',
-      this.workspace.identityField('Role') || 'Travel desk',
-      this.workspace.identityField('Description') || 'Plans from the traveler constraints.',
-      this.workspace.identityField('Model') || config.modelName,
+      this.workspace.identityField('Name', DEFAULT_AGENT_ID) || 'Marlow',
+      this.workspace.identityField('Emoji', DEFAULT_AGENT_ID) || 'compass',
+      this.workspace.identityField('Role', DEFAULT_AGENT_ID) || 'Travel desk',
+      this.workspace.identityField('Description', DEFAULT_AGENT_ID) ||
+        'Plans from the traveler constraints.',
+      this.workspace.identityField('Model', DEFAULT_AGENT_ID) || config.modelName,
       now,
       now,
     );

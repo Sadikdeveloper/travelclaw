@@ -29,7 +29,7 @@ Without a search key, those desks still write the same brief. With an operator k
 - [x] **Message-stated market context.** Read point-of-sale country, currency, and language from the message that starts a search, use them instead of the operator's single-market defaults or assumptions from the route, and store nothing on the account.
 - [x] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [ ] **SQLite FTS memory search.** Today memory is a short list injected into the prompt. Search should stay local.
-- [ ] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`.
+- [x] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`. Each file falls back to the shared one when the agent folder has no override, `GET /api/workspace?agentId=` names the file each slot reads, and an agent id that tries to climb out of the workspace is refused.
 - [ ] **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
 - [ ] **Discord extension.** Same contract as Telegram.
 - [ ] **iCal export** for a planned trip.

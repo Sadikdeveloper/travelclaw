@@ -36,14 +36,14 @@ flowchart LR
   HB["Heartbeat"] --> TRIPS
 ```
 
-| Path                  | Role                                                         |
-| --------------------- | ------------------------------------------------------------ |
-| `apps/api`            | Gateway. Owns SQLite, HTTP, WebSocket, scheduling.           |
-| `apps/web`            | Control UI. Talks to the gateway with relative `/api` URLs.  |
-| `packages/shared`     | Wire types and zod schemas. Safe to import from the browser. |
-| `packages/agent-core` | Prompt assembly, routing, tools. No Nest, no database.       |
-| `workspace/`          | Persona files the gateway reads on every turn.               |
-| `extensions/`         | Reserved. Not a workspace glob until a real package exists.  |
+| Path                  | Role                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `apps/api`            | Gateway. Owns SQLite, HTTP, WebSocket, scheduling.                                                                 |
+| `apps/web`            | Control UI. Talks to the gateway with relative `/api` URLs.                                                        |
+| `packages/shared`     | Wire types and zod schemas. Safe to import from the browser.                                                       |
+| `packages/agent-core` | Prompt assembly, routing, tools. No Nest, no database.                                                             |
+| `workspace/`          | Persona files the gateway reads on every turn. Each agent may override one per file from `workspace/agents/<id>/`. |
+| `extensions/`         | Reserved. Not a workspace glob until a real package exists.                                                        |
 
 ## Turns
 
