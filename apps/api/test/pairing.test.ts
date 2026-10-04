@@ -13,7 +13,7 @@ import { configureApp } from '../src/app.setup';
  *
  * When TRAVELCLAW_DEVICE_TOKEN is set, any caller whose IP is not loopback must present
  * the token in the X-Device-Token header (HTTP) or as a `deviceToken` handshake query
- * (WebSocket). Loopback callers (the local dev UI) never need it.
+ * (WebSocket). Direct loopback callers (not configured proxies) do not need it.
  *
  * When TRAVELCLAW_DEVICE_TOKEN is unset (the default) the gateway refuses non-loopback
  * calls entirely, rather than silently opening on 0.0.0.0 with no check.
@@ -33,7 +33,8 @@ describe('pairing auth (device token for non-loopback clients)', () => {
       TRAVELCLAW_HEARTBEAT: '0',
       TRAVELCLAW_MODEL_PROVIDER: 'mock',
       TRAVELCLAW_TASK_DELAY: '0',
-      TRAVELCLAW_TRUST_PROXY: '1', // honor X-Forwarded-For so supertest can simulate remotes
+      TRAVELCLAW_TRUST_PROXY: '1',
+      TRAVELCLAW_TRUSTED_PROXIES: '127.0.0.1/32,::1/128',
       TRAVELCLAW_DEVICE_TOKEN: DEVICE_TOKEN,
     };
     for (const [k, v] of Object.entries({ ...defaults, ...overrides })) {
@@ -54,6 +55,7 @@ describe('pairing auth (device token for non-loopback clients)', () => {
   afterEach(async () => {
     delete process.env.TRAVELCLAW_DEVICE_TOKEN;
     delete process.env.TRAVELCLAW_TRUST_PROXY;
+    delete process.env.TRAVELCLAW_TRUSTED_PROXIES;
     if (app) await app.close();
   });
 
@@ -129,19 +131,39 @@ describe('pairing auth (device token for non-loopback clients)', () => {
     expect(chat.body.error.code).toBe('pairing_required');
   });
 
-  it('recognises every common loopback form', async () => {
+  it('does not grant a loopback exemption from a forwarded address', async () => {
     const server = await boot();
-    // IPv4 loopback
-    expect(
-      (await asFrom('127.0.0.1')(request(server).get('/api/auth/config'))).status,
-    ).toBe(200);
-    // The whole 127.0.0.0/8 block is loopback
-    expect(
-      (await asFrom('127.255.255.1')(request(server).get('/api/auth/config'))).status,
-    ).toBe(200);
-    // IPv6 loopback
-    expect((await asFrom('::1')(request(server).get('/api/auth/config'))).status).toBe(200);
+    for (const ip of ['127.0.0.1', '127.255.255.1', '::1', '::ffff:127.0.0.1']) {
+      expect((await asFrom(ip)(request(server).get('/api/auth/config'))).status).toBe(401);
+    }
   });
+
+  it('requires pairing from a configured proxy even without forwarding headers', async () => {
+    const server = await boot();
+    expect((await request(server).get('/api/auth/config')).status).toBe(401);
+    expect(
+      (await request(server).get('/api/auth/config').set('X-Device-Token', DEVICE_TOKEN))
+        .status,
+    ).toBe(200);
+  });
+
+  it('preserves direct loopback development with proxy mode off', async () => {
+    const server = await boot({
+      TRAVELCLAW_TRUST_PROXY: '0',
+      TRAVELCLAW_DEVICE_TOKEN: undefined,
+    });
+    expect((await request(server).get('/api/auth/config')).status).toBe(200);
+  });
+
+  it.each(['X-Forwarded-For', 'Forwarded', 'X-Real-IP'])(
+    'does not let %s grant an exemption when proxy mode is off',
+    async (header) => {
+      const server = await boot({ TRAVELCLAW_TRUST_PROXY: '0' });
+      expect(
+        (await request(server).get('/api/auth/config').set(header, '127.0.0.1')).status,
+      ).toBe(401);
+    },
+  );
 
   it('does not confuse private LAN addresses for loopback', async () => {
     const server = await boot();
@@ -198,20 +220,20 @@ describe('pairing auth (device token for non-loopback clients)', () => {
     });
   });
 
-  it('prefers the leftmost X-Forwarded-For entry when a chain is present', async () => {
+  it('rejects a spoofed loopback prefix in a forwarded chain', async () => {
     const server = await boot();
-    // Leftmost is the real client; proxy chain appended to the right.
+    // A chain of forwarded values must never establish a pairing exemption.
     const res = await request(server)
       .get('/api/auth/config')
       .set('X-Forwarded-For', '203.0.113.5, 10.0.0.1');
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('pairing_required');
 
-    // Loopback leftmost, anything to the right is irrelevant.
+    // An attacker supplied loopback before the proxy appended the real peer.
     const ok = await request(server)
       .get('/api/auth/config')
       .set('X-Forwarded-For', '127.0.0.1, 10.0.0.1');
-    expect(ok.status).toBe(200);
+    expect(ok.status).toBe(401);
   });
 
   // ---- WebSocket pairing (critical for live UI and future channel bots) ----
@@ -266,4 +288,97 @@ describe('pairing auth (device token for non-loopback clients)', () => {
       });
     });
   });
+  it.each([
+    ['spoofed chain', '127.0.0.1, 203.0.113.5'],
+    ['spoofed IPv6', '::1'],
+    ['malformed chain', '127.0.0.1, garbage'],
+    ['missing forwarded header', undefined],
+  ])('rejects an unpaired WebSocket through a proxy: %s', async (_label, forwarded) => {
+    const server = await boot();
+    const port = (server.address() as { port: number }).port;
+    const socket = ioc(`http://127.0.0.1:${port}`, {
+      forceNew: true,
+      reconnection: false,
+      transports: ['websocket'],
+      extraHeaders: forwarded ? { 'X-Forwarded-For': forwarded } : {},
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), 3000);
+        socket.once('connect_error', (err: Error) => {
+          clearTimeout(timer);
+          if (!/device token/i.test(err.message)) return reject(err);
+          resolve();
+        });
+        socket.once('connect', () => {
+          clearTimeout(timer);
+          reject(new Error('unpaired proxy socket connected'));
+        });
+      });
+    } finally {
+      socket.disconnect();
+    }
+  });
+  it.each(['websocket', 'polling'])(
+    'preserves direct local %s connections without pairing',
+    async (transport) => {
+      const server = await boot({
+        TRAVELCLAW_TRUST_PROXY: '0',
+        TRAVELCLAW_DEVICE_TOKEN: undefined,
+      });
+      const port = (server.address() as { port: number }).port;
+      const socket = ioc(`http://127.0.0.1:${port}`, {
+        forceNew: true,
+        reconnection: false,
+        transports: [transport],
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('timeout')), 3000);
+          socket.once('connect', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          socket.once('connect_error', (error: Error) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+        });
+      } finally {
+        socket.disconnect();
+      }
+    },
+  );
+
+  it.each(['websocket', 'polling'])(
+    'accepts a paired proxy %s connection with a token header',
+    async (transport) => {
+      const server = await boot();
+      const port = (server.address() as { port: number }).port;
+      const socket = ioc(`http://127.0.0.1:${port}`, {
+        forceNew: true,
+        reconnection: false,
+        transports: [transport],
+        extraHeaders: {
+          'X-Forwarded-For': '127.0.0.1, 203.0.113.5',
+          'X-Device-Token': DEVICE_TOKEN,
+        },
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('timeout')), 3000);
+          socket.once('connect', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          socket.once('connect_error', (error: Error) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+        });
+      } finally {
+        socket.disconnect();
+      }
+    },
+  );
 });

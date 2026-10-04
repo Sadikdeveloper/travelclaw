@@ -1,3 +1,4 @@
+import type { BrowserRunRecord } from './browser';
 export type Pace = 'relaxed' | 'steady' | 'packed';
 export type BudgetStyle = 'lean' | 'comfortable' | 'splurge';
 export type TripStatus = 'draft' | 'planning' | 'booked' | 'traveling' | 'done';
@@ -261,6 +262,7 @@ export interface AgentTaskRecord {
   pass: number;
   /** Offers this desk found, when the operator set a provider key. Empty otherwise. */
   offers?: OfferRecord[];
+  browser?: BrowserRunRecord;
   createdAt: string;
   updatedAt: string;
 }

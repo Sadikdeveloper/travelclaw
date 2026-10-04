@@ -1,5 +1,6 @@
 import type { AgentTaskRecord, OfferRecord, TaskDecision } from '@travelclaw/shared';
 import { Check, Clock3, Hotel, Plane, Undo2 } from 'lucide-react';
+import { BrowserResearch } from './BrowserResearch';
 import { formatWhen } from '../format';
 
 const label: Record<AgentTaskRecord['status'], string> = {
@@ -20,12 +21,14 @@ export function AgentCard({
   holdingOfferId,
   onDecide,
   onHold,
+  onStopBrowser,
 }: {
   task: AgentTaskRecord;
   busy: boolean;
   holdingOfferId: string;
   onDecide: (decision: TaskDecision) => void;
   onHold: (offerId: string) => void;
+  onStopBrowser: () => void;
 }) {
   const Icon = task.kind === 'flight' ? Plane : Hotel;
   const offers = task.offers ?? [];
@@ -63,6 +66,7 @@ export function AgentCard({
           ))}
         </section>
       ) : null}
+      {task.browser ? <BrowserResearch run={task.browser} onStop={onStopBrowser} /> : null}
       {task.status === 'awaiting' ? (
         <div className="row agent-card-actions">
           <button

@@ -68,6 +68,16 @@ export function ChatPage() {
     loadChat(sessionId, seq).catch(() => setError('Could not open that chat'));
   }, [sessionId, revision, user]);
 
+  const hasWorkingDesk = tasks.some((task) => task.status === 'working');
+  useEffect(() => {
+    if (!sessionId || !hasWorkingDesk) return;
+    // Progress and Stop remain usable even if the live socket is unavailable.
+    const timer = setInterval(() => {
+      void loadChat(sessionId, ++generation.current).catch(() => {});
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [sessionId, hasWorkingDesk]);
+
   /** Fetch one chat's messages and desks, honoring the newest caller only. */
   async function loadChat(id: string, seq: number): Promise<MessageRecord[] | null> {
     const [opened, desks] = await Promise.all([
@@ -80,6 +90,15 @@ export function ChatPage() {
     setTasks(desks);
     if (user?.isGuest) mirrorGuestMessages(user.id, id, opened.messages);
     return opened.messages;
+  }
+
+  async function stopBrowser(taskId: string) {
+    try {
+      await api(`/api/tasks/${taskId}/browser/stop`, { method: 'POST' });
+      if (sessionId) await loadChat(sessionId, ++generation.current);
+    } catch {
+      setError('Could not stop the browser search. Please retry.');
+    }
   }
 
   async function decide(taskId: string, decision: TaskDecision) {
@@ -288,6 +307,7 @@ export function ChatPage() {
                 )}
                 {messageTasks.map((task) => (
                   <AgentCard
+                    onStopBrowser={() => void stopBrowser(task.id)}
                     key={task.id}
                     task={task}
                     busy={

@@ -2,7 +2,7 @@
 
 Work in this order. Later tasks assume the earlier ones exist. Pick the first unchecked item, and leave a note in the pull request about which box you closed.
 
-This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, are deferred. Tools are functions we register. The traveler does not see a tool catalog.
+This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, remain deferred pending the reviewed-workflow design in #25. Tools are functions we register. The traveler does not see a tool catalog.
 
 Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
 
@@ -35,6 +35,14 @@ Without a search key, those desks still write the same brief. With an operator k
 - [ ] **iCal export** for a planned trip.
 - [ ] **Map view** of itinerary anchors. Static coordinates first, no tracking.
 - [ ] **Plugin package autoload** under `extensions/*`, off by default, with a hash allowlist.
+
+## Browser fallback (#25)
+
+Browser-capable search is the next feature priority following pairing hardening.
+The [staged delivery plan](browser-agent.md) tracks the security foundation, isolated
+execution, provider-first fallback, provenance/UI, and reviewed procedures. An opt-in worker now provides browser fallback, provenance/UI, cancellation and
+reviewed finite workflows. Local Chromium fixtures pass; #25 remains open pending
+a permitted live-site demonstration and deployment validation. This work does not mark the remaining numbered roadmap items complete.
 
 ## Not in scope
 

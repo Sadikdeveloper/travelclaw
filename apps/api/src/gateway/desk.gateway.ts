@@ -9,7 +9,7 @@ import { AuthService } from '../auth/auth.service';
 import {
   PAIRING_REQUIRED_MESSAGE,
   PAIRING_REQUIRED_MESSAGE_NO_TOKEN,
-  isLoopback,
+  isDirectLoopback,
   pairingNotConfigured,
   socketAuthorized,
 } from '../auth/pairing';
@@ -49,8 +49,9 @@ export class DeskGateway implements OnGatewayInit, OnGatewayConnection {
     // Pairing gate as a socket.io Namespace middleware: rejects during the handshake so the
     // client gets connect_error instead of firing connect then immediately disconnecting.
     this.server.use((client, next) => {
-      const remote = socketRemoteIp(client);
-      if (isLoopback(remote)) return next();
+      if (isDirectLoopback(client.request.socket.remoteAddress, client.handshake.headers)) {
+        return next();
+      }
       if (pairingNotConfigured()) {
         return next(new Error(PAIRING_REQUIRED_MESSAGE_NO_TOKEN));
       }
@@ -77,20 +78,4 @@ export class DeskGateway implements OnGatewayInit, OnGatewayConnection {
 
 function roomFor(userId: string): string {
   return `user:${userId}`;
-}
-
-/**
- * Best-guess remote IP for a socket handshaking. When trust-proxy is on, honours the
- * leftmost X-Forwarded-For; otherwise falls back to the engine.io address.
- */
-function socketRemoteIp(socket: Socket): string | undefined {
-  const cfg = loadConfig();
-  if (cfg.trustProxy) {
-    const ff = socket.handshake.headers['x-forwarded-for'];
-    const first = Array.isArray(ff) ? ff[0] : ff;
-    if (first) return first.split(',')[0]?.trim() || undefined;
-  }
-  // engine.io attaches the real remoteAddress to the underlying conn.
-  const addr = (socket.conn as { remoteAddress?: string } | undefined)?.remoteAddress;
-  return addr;
 }

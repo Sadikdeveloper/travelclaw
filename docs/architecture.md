@@ -330,3 +330,18 @@ Node's built-in `node:sqlite` keeps the gateway free of native addons. The API i
 ## Control UI in production
 
 `pnpm build` emits `apps/web/dist`. The gateway serves it when that folder exists. In development, Vite proxies `/api`, `/health`, `/docs`, and `/socket.io` to port 3000. The browser never calls localhost.
+
+## Browser fallback research
+
+The flight/stay desk can use an opt-in, separately authenticated browser worker after
+provider adapters return no usable offers or cannot search. Provider success never
+starts a browser. `BrowserService` owns a bounded, cancellable browser-only model loop;
+`apps/browser-worker` owns ephemeral contexts and pinned HTTP transport. Session
+credentials remain server-side. The ordinary bundled-tool loop is unchanged.
+
+Browser state and evidence are stored in `browser_runs`, not `offers`. The task API
+and chat card show progress, Stop, source links and non-bookable page observations.
+Finite procedure candidates live in `browser_procedures`, require local operator
+review, and never enter personal memory. There is no arbitrary Markdown/code skill
+execution or existing-profile attachment. See [browser-agent.md](browser-agent.md)
+for runtime limits, source authorization, tests and remaining #25 acceptance work.

@@ -19,6 +19,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @travelclaw/shared build
       - run: pnpm --filter @travelclaw/agent-core build
+      - run: pnpm --filter @travelclaw/browser-worker exec playwright install --with-deps chromium
       - run: pnpm test
+      - run: pnpm test:browser
+      - run: pnpm --filter @travelclaw/browser-worker build
       - run: pnpm --filter @travelclaw/api build
       - run: pnpm --filter @travelclaw/web build

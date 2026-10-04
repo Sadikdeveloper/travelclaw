@@ -5,17 +5,16 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
+import proxyaddr from 'proxy-addr';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { loadConfig } from './config';
 
 export function configureApp(app: INestApplication) {
-  const { allowedOrigins, trustProxy } = loadConfig();
-  // When running behind a reverse proxy that terminates TLS or forwards requests
-  // (nginx, Caddy, Docker, a load balancer), trust X-Forwarded-For so the pairing
-  // middleware can see the real client IP instead of the proxy.
-  if (trustProxy) {
-    (app as NestExpressApplication).set('trust proxy', true);
-  }
+  const { allowedOrigins, trustedProxies } = loadConfig();
+  // Resolve identity from the TCP peer outward, stopping at the first untrusted
+  // hop. Never trust the leftmost forwarded value unconditionally. Pairing itself
+  // uses the TCP peer, not this identity (also used by guest pins and rate limits).
+  (app as NestExpressApplication).set('trust proxy', proxyaddr.compile(trustedProxies));
   app.useWebSocketAdapter(new IoAdapter(app));
   // Same-origin by default: the desk ships its own web client on the same host, and a
   // caller that presents no credential is recognised by address and user agent, so

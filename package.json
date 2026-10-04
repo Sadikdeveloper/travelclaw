@@ -13,12 +13,13 @@
     "dev": "pnpm --parallel --filter @travelclaw/api --filter @travelclaw/web dev",
     "dev:api": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build && pnpm --filter @travelclaw/api dev",
     "dev:web": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/web dev",
-    "build": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build && pnpm --filter @travelclaw/api build && pnpm --filter @travelclaw/web build",
-    "test": "pnpm --filter @travelclaw/shared test && pnpm --filter @travelclaw/agent-core test && pnpm --filter @travelclaw/api test",
+    "build": "pnpm --filter @travelclaw/shared build && pnpm --filter @travelclaw/agent-core build && pnpm --filter @travelclaw/api build && pnpm --filter @travelclaw/web build && pnpm --filter @travelclaw/browser-worker build",
+    "test": "pnpm --filter @travelclaw/shared test && pnpm --filter @travelclaw/agent-core test && pnpm --filter @travelclaw/api test && pnpm --filter @travelclaw/browser-worker test && pnpm --filter @travelclaw/web test",
     "typecheck": "pnpm -r --if-present typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:reset": "node -e \"fs.rmSync('data/travelclaw.db', { force: true })\""
+    "db:reset": "node -e \"fs.rmSync('data/travelclaw.db', { force: true })\"",
+    "test:browser": "pnpm --filter @travelclaw/browser-worker test:browser"
   },
   "devDependencies": {
     "prettier": "^3.5.3"

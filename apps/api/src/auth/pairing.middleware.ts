@@ -4,14 +4,13 @@ import {
   PAIRING_REQUIRED_CODE,
   PAIRING_REQUIRED_MESSAGE,
   PAIRING_REQUIRED_MESSAGE_NO_TOKEN,
-  clientIp,
-  isLoopback,
+  isDirectLoopback,
   pairingNotConfigured,
   requestAuthorized,
 } from './pairing';
 
 /**
- * Global middleware: every non-loopback HTTP caller must pair before any controller
+ * Global middleware: every remote or proxied HTTP caller must pair before any controller
  * (or auth guard) runs. /health is exempt so container/lb liveness checks work
  * without a token.
  *
@@ -25,10 +24,9 @@ export class PairingMiddleware implements NestMiddleware {
     const url = req.originalUrl?.split('?')[0] ?? req.path;
     if (url === '/health' || url === '/health/') return next();
 
-    const ip = clientIp(req);
-    if (isLoopback(ip)) return next();
+    if (isDirectLoopback(req.socket.remoteAddress, req.headers)) return next();
 
-    // Non-loopback: need a configured token AND a matching header.
+    // Remote/proxied: need a configured token AND a matching header.
     if (pairingNotConfigured()) {
       return res.status(401).json({
         error: {

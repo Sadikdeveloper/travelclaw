@@ -18,6 +18,8 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     modelName: DESK_MODEL_ID,
     modelNames: [],
     network: false,
+    browserWorkerUrl: null,
+    browserWorkerToken: null,
     seed: false,
     taskDelayMs: 0,
     version: 'test',
@@ -41,6 +43,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     stayApiKey: null,
     deviceTokenHash: null,
     trustProxy: false,
+    trustedProxies: [],
     ...overrides,
   };
 }

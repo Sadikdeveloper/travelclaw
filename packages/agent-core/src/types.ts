@@ -248,6 +248,7 @@ export interface ModelProvider {
     user: string;
     fallback: string;
     tools?: ModelToolSpec[];
+    signal?: AbortSignal;
   }): Promise<ModelCompletion>;
 }
 

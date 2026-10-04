@@ -6,3 +6,4 @@ export const MAX_OUTLINE_DAYS = 18;
 export * from './schemas';
 export * from './session-key';
 export * from './types';
+export * from './browser';

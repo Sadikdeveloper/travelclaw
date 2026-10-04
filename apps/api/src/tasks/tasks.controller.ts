@@ -29,6 +29,12 @@ export class TasksController {
     return this.tasks.forSession(id);
   }
 
+  @Post('tasks/:id/browser/stop')
+  async stopBrowser(@CurrentUser() user: UserRecord, @Param('id') id: string) {
+    this.sessions.get(this.tasks.sessionIdFor(id), user.id);
+    return this.tasks.stopBrowser(id);
+  }
+
   @Post('tasks/:id/decision')
   @ApiOperation({
     summary: 'Traveler answers a finished desk: complete, no, or still working',

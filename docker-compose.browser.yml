@@ -1,0 +1,27 @@
+# Optional standalone worker. The gateway connects through the loopback-published RPC.
+# Only the worker token and explicitly authorized public sources enter this container.
+services:
+  browser-worker:
+    build:
+      context: .
+      dockerfile: apps/browser-worker/Dockerfile
+    init: true
+    user: pwuser
+    environment:
+      TRAVELCLAW_BROWSER_WORKER_TOKEN: ${TRAVELCLAW_BROWSER_WORKER_TOKEN:?Set a random worker token}
+      TRAVELCLAW_BROWSER_SITES_JSON: ${TRAVELCLAW_BROWSER_SITES_JSON:?Authorize public search sites first}
+    ports:
+      - '127.0.0.1:3001:3001'
+    security_opt:
+      - seccomp=./apps/browser-worker/seccomp_profile.json
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    shm_size: 256mb
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    restart: unless-stopped
