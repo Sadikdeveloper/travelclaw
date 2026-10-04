@@ -1,26 +1,14 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Patch,
-  Post,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   googleAuthSchema,
   loginSchema,
   registerSchema,
-  updateMarketPreferencesSchema,
   type AuthConfig,
   type AuthSessionResponse,
   type GoogleAuthInput,
   type LoginInput,
   type RegisterInput,
-  type UpdateMarketPreferencesInput,
   type UserRecord,
 } from '@travelclaw/shared';
 import type { Request, Response } from 'express';
@@ -170,19 +158,6 @@ export class AuthController {
   @ApiOperation({ summary: 'The signed-in account (guest or real)' })
   me(@CurrentUser() user: UserRecord): UserRecord {
     return user;
-  }
-
-  @Patch('me/market')
-  @UseGuards(AuthGuard)
-  @ApiOperation({
-    summary: 'Update traveler point-of-sale preferences for provider searches',
-  })
-  updateMarket(
-    @CurrentUser() user: UserRecord,
-    @Body(new ZodValidationPipe(updateMarketPreferencesSchema))
-    body: UpdateMarketPreferencesInput,
-  ): UserRecord {
-    return this.auth.updateMarketPreferences(user.id, body);
   }
 }
 

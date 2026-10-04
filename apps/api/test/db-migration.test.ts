@@ -63,7 +63,7 @@ describe('accounts migration', () => {
     }
   });
 
-  it('adds market preferences to a pre-existing users table without guessing values', () => {
+  it('drops stored market columns from a pre-existing users table', () => {
     const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-market-'));
     const dbPath = join(dir, 'legacy.db');
 
@@ -76,10 +76,13 @@ describe('accounts migration', () => {
         display_name TEXT NOT NULL,
         google_id TEXT UNIQUE,
         is_guest INTEGER NOT NULL DEFAULT 0,
+        booker_country TEXT,
+        market_currency TEXT,
+        market_language TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO users VALUES ('u1', 'ada@example.com', NULL, 'Ada', NULL, 0, '2025-01-01', '2025-01-01');
+      INSERT INTO users VALUES ('u1', 'ada@example.com', NULL, 'Ada', NULL, 0, 'NG', 'NGN', 'en-NG', '2025-01-01', '2025-01-01');
     `);
     legacy.close();
 
@@ -92,19 +95,14 @@ describe('accounts migration', () => {
         const columns = service
           .all<{ name: string }>('PRAGMA table_info(users)')
           .map((c) => c.name);
-        expect(columns).toEqual(
-          expect.arrayContaining(['booker_country', 'market_currency', 'market_language']),
+        expect(columns).not.toContain('booker_country');
+        expect(columns).not.toContain('market_currency');
+        expect(columns).not.toContain('market_language');
+        const user = service.get<{ email: string }>(
+          'SELECT * FROM users WHERE id = ?',
+          'u1',
         );
-        const user = service.get<{
-          booker_country: string | null;
-          market_currency: string | null;
-          market_language: string | null;
-        }>('SELECT * FROM users WHERE id = ?', 'u1');
-        expect(user).toMatchObject({
-          booker_country: null,
-          market_currency: null,
-          market_language: null,
-        });
+        expect(user?.email).toBe('ada@example.com');
       } finally {
         service.onModuleDestroy();
       }

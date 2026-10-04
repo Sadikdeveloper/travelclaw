@@ -262,23 +262,29 @@ A flight or stay search can query up to eight compatible sources of that kind in
 
 The key belongs to the operator and stays on the server; travelers never supply one. A nonblank `*_PROVIDERS_JSON` value takes precedence over that kind's legacy `TRAVELCLAW_FLIGHT_BASE_URL` / `TRAVELCLAW_FLIGHT_API_KEY` or stay equivalents. An explicit `[]` disables that search kind. If the JSON setting is blank, the legacy pair remains supported as one source. Each URL must implement the normalized TravelClaw adapter contract below; vendor APIs have different request/response and booking flows, so this is **not** a direct Duffel, Booking.com, Expedia, or Hotelbeds integration.
 
-All configured sources receive the same search and optional market context. TravelClaw does not yet infer route/property coverage or choose providers by region: an adapter may return no offers for a market it does not cover. The UI and task brief identify each source and retrieval time. A failed source does not discard another source's valid results; it is disclosed as a partial search. If every source fails, no offer is shown. Valid offers are interleaved in each source's own order, capped at six total, and are not falsely ranked across currencies. No results from a configured source means no currently returned offers, not proof that the route or city has no inventory.
+All configured sources receive the same search and any market the message or the operator default supplied. TravelClaw does not yet infer route/property coverage or choose providers by region: an adapter may return no offers for a market it does not cover. The UI and task brief identify each source and retrieval time. A failed source does not discard another source's valid results; it is disclosed as a partial search. If every source fails, no offer is shown. Valid offers are interleaved in each source's own order, capped at six total, and are not falsely ranked across currencies. No results from a configured source means no currently returned offers, not proof that the route or city has no inventory.
 
 ### Point of sale and display context
 
-Each traveler can save a search market on their account: `bookerCountry` (ISO 3166-1 alpha-2 point-of-sale/booker country), optional `currency` (ISO 4217), and optional `language` (for example `en-NG`). Flight and stay searches use that traveler-owned market when any part of it is set. The booker country is never inferred from the route origin, destination, passport nationality, or trip currency.
+Market context travels with the request, stated in the message that starts a search — there is no saved market profile on the account and no sidebar for one. The message is read for three things and nothing else:
 
-The operator env values remain only as a fallback for a single-market/self-hosted desk when the traveler has not saved a search market:
+- **Booker country** (ISO 3166-1 alpha-2 point of sale) from a phrase that names the booker: "I'm based in Nigeria", "booking from NG", "booker country: NG", "point of sale US". A country that appears only as an origin or a destination is not a point of sale.
+- **Currency** (ISO 4217) from pricing language: "price it in NGN", "show fares in EUR", "currency: NGN", "quote in naira". A budget figure, a route, or a currency a provider returned is not read as a request.
+- **Language** (BCP-47, such as `en-NG`) only from an explicit language phrase: "content language en-NG", "language French", "show prices in Spanish".
+
+Extraction is deliberately conservative: a currency code is accepted only if it is a real ISO code and not an ordinary English word or an airport name, so `a hotel in Rio` or `a stay in Doha` adds no market, and a two-letter country code is believed only where the sentence names the booker. A message that states nothing yields no market context at all. Because nothing is stored, a market mentioned once cannot follow the traveler into the next search.
+
+The operator env values below apply only to the keys a message left unstated, for a single-market/self-hosted desk:
 
 - `TRAVELCLAW_BOOKER_COUNTRY`: fallback ISO 3166-1 alpha-2 point-of-sale/booker country.
 - `TRAVELCLAW_SEARCH_CURRENCY`: fallback requested ISO 4217 currency.
 - `TRAVELCLAW_SEARCH_LANGUAGE`: fallback requested language tag, such as `en-NG`.
 
-Blank values are omitted so an adapter can use its own configured market. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
+Blank values are omitted so an adapter can use its own configured market. The task brief names where each value came from — the traveler's message or the operator default — so a summary never implies the traveler said something they did not. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
 
 ### Search contract
 
-Flight search uses `GET {base}/search/flights` with `origin`, `destination`, `departDate`, `travelers`, and optional `returnDate`. Stay search uses `GET {base}/search/stays` with `destination`, `checkIn`, `checkOut`, and `travelers`. Either request may additionally include `bookerCountry`, `currency`, and `language`. The desk sends each key only as `Authorization: Bearer ...`; it never goes in a URL, transcript, warning, or model prompt. Redirects are refused so a credential is not forwarded to another host. If the traveler does not specify a party size, the query uses one traveler and the brief names that assumption. A flight query with no written return date is one-way; a stay query requires check-in and check-out (an explicit number of nights may supply the latter).
+Flight search uses `GET {base}/search/flights` with `origin`, `destination`, `departDate`, `travelers`, and optional `returnDate`. Stay search uses `GET {base}/search/stays` with `destination`, `checkIn`, `checkOut`, and `travelers`. Either request may additionally include `bookerCountry`, `currency`, and `language` — each only when the traveler's message stated it or the operator default supplies it. The desk sends each key only as `Authorization: Bearer ...`; it never goes in a URL, transcript, warning, or model prompt. Redirects are refused so a credential is not forwarded to another host. If the traveler does not specify a party size, the query uses one traveler and the brief names that assumption. A flight query with no written return date is one-way; a stay query requires check-in and check-out (an explicit number of nights may supply the latter).
 
 A successful adapter response is JSON with an optional provider label and an offer list:
 

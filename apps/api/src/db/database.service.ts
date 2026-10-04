@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +13,7 @@ type SqlValue = string | number | null | bigint | Uint8Array;
  */
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(DatabaseService.name);
   private db!: DatabaseSync;
 
   onModuleInit() {
@@ -23,7 +24,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateLegacyNames();
     this.migrateToAccounts();
     this.migrateToGuests();
-    this.migrateUserMarketPreferences();
+    this.migrateAwayFromStoredMarket();
     this.migrateToAttachments();
     this.db.exec(SCHEMA);
     this.migrateOfferProviderIds();
@@ -97,27 +98,30 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Provider searches need traveler-owned point-of-sale preferences, not one
-   * install-wide market guessed from a route. Existing accounts start unset;
-   * adapters then receive no traveler market unless the account saves one.
+   * Search market is read from the message that states it (see `searchMarketFrom`),
+   * so the per-account point-of-sale columns are dropped rather than left to rot as
+   * a profile nobody updates. `DROP COLUMN` needs SQLite 3.35+; an install too old
+   * for it keeps three unused columns and logs it instead of failing to start.
    */
-  private migrateUserMarketPreferences() {
+  private migrateAwayFromStoredMarket() {
     const tables = new Set(
       this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
         (row) => row.name,
       ),
     );
     if (!tables.has('users')) return;
-    const columns = this.all<{ name: string }>('PRAGMA table_info(users)');
-    const names = new Set(columns.map((column) => column.name));
-    if (!names.has('booker_country')) {
-      this.db.exec('ALTER TABLE users ADD COLUMN booker_country TEXT');
-    }
-    if (!names.has('market_currency')) {
-      this.db.exec('ALTER TABLE users ADD COLUMN market_currency TEXT');
-    }
-    if (!names.has('market_language')) {
-      this.db.exec('ALTER TABLE users ADD COLUMN market_language TEXT');
+    const names = new Set(
+      this.all<{ name: string }>('PRAGMA table_info(users)').map((column) => column.name),
+    );
+    for (const column of ['booker_country', 'market_currency', 'market_language']) {
+      if (!names.has(column)) continue;
+      try {
+        this.db.exec(`ALTER TABLE users DROP COLUMN ${column}`);
+      } catch {
+        this.logger.warn(
+          `Left unused users.${column} in place: this SQLite cannot drop it.`,
+        );
+      }
     }
   }
 

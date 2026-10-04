@@ -3,14 +3,17 @@ import {
   deskName,
   extractHints,
   flightQueryFrom,
+  mergeSearchMarket,
   requestProviderHold,
   searchFlights,
+  searchMarketFrom,
   searchStays,
   stayQueryFrom,
   type DeskKind,
   type FlightQuery,
   type ProviderSearchFound,
   type ProviderSearchResult,
+  type SearchMarket,
   type StayQuery,
   type ToolContext,
 } from '@travelclaw/agent-core';
@@ -20,9 +23,7 @@ import type {
   HoldAttempt,
   OfferRecord,
   TaskDecision,
-  TravelerMarketPreferences,
 } from '@travelclaw/shared';
-import { AuthService } from '../auth/auth.service';
 import { newId, nowIso } from '../common/util';
 import { loadConfig } from '../config';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -81,7 +82,6 @@ export class TasksService {
     private readonly events: EventsService,
     private readonly sessions: SessionsService,
     private readonly connectors: ConnectorsService,
-    private readonly auth: AuthService,
   ) {}
 
   /** Used by the controller to check chat ownership before a decision touches a task. */
@@ -315,10 +315,15 @@ export class TasksService {
     }
 
     const config = loadConfig();
-    const market = searchMarket(
-      config,
-      this.auth.marketForUser(this.sessions.ownerOf(task.session_id)),
-    );
+    // Market context comes from the message that states it; the operator's
+    // single-market default fills only the keys the traveler left out. Nothing is
+    // stored on the account, so a casually mentioned market cannot become a profile.
+    const statedMarket = searchMarketFrom(task.request);
+    const market = mergeSearchMarket(statedMarket, {
+      bookerCountry: config.searchBookerCountry ?? undefined,
+      currency: config.searchCurrency ?? undefined,
+      language: config.searchLanguage ?? undefined,
+    });
     const ctx: ToolContext = {
       now: new Date(),
       network: config.network,
@@ -337,7 +342,7 @@ export class TasksService {
           return `${lead} Provider search needs ${draft.missing.join(', ')}; no provider call was made. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
         }
         const query = { ...draft.query, ...market };
-        searchLead = `${flightSearchLead(query, task.pass, hints.travelers)}${marketNote(query)}`;
+        searchLead = `${flightSearchLead(query, task.pass, hints.travelers)}${marketNote(query, statedMarket)}`;
         result = await searchFlights(query, ctx);
       } else {
         const draft = stayQueryFrom(task.request, hints);
@@ -345,7 +350,7 @@ export class TasksService {
           return `${lead} Provider search needs ${draft.missing.join(', ')}; no provider call was made. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
         }
         const query = { ...draft.query, ...market };
-        searchLead = `${staySearchLead(query, task.pass, hints.travelers)}${marketNote(query)}`;
+        searchLead = `${staySearchLead(query, task.pass, hints.travelers)}${marketNote(query, statedMarket)}`;
         result = await searchStays(query, ctx);
       }
     } catch {
@@ -528,39 +533,40 @@ function staySearchLead(
   return `Stay desk finished a brief for ${query.destination} from ${query.checkIn} to ${query.checkOut}.${passNote} ${party}`;
 }
 
-type SearchMarket = { bookerCountry?: string; currency?: string; language?: string };
-
-function searchMarket(
-  config: ReturnType<typeof loadConfig>,
-  travelerMarket: TravelerMarketPreferences,
-): SearchMarket {
-  if (hasTravelerMarket(travelerMarket)) {
-    return {
-      ...(travelerMarket.bookerCountry
-        ? { bookerCountry: travelerMarket.bookerCountry }
-        : {}),
-      ...(travelerMarket.currency ? { currency: travelerMarket.currency } : {}),
-      ...(travelerMarket.language ? { language: travelerMarket.language } : {}),
-    };
+/**
+ * The brief says where each piece of pricing context came from, so a traveler reading
+ * the summary can tell their own words from the operator's standing default.
+ */
+function marketNote(market: SearchMarket, stated: SearchMarket): string {
+  const entries = [
+    market.bookerCountry
+      ? {
+          text: `booker country ${market.bookerCountry}`,
+          stated: stated.bookerCountry === market.bookerCountry,
+        }
+      : null,
+    market.currency
+      ? {
+          text: `requested currency ${market.currency}`,
+          stated: stated.currency === market.currency,
+        }
+      : null,
+    market.language
+      ? {
+          text: `content language ${market.language}`,
+          stated: stated.language === market.language,
+        }
+      : null,
+  ].filter((entry): entry is { text: string; stated: boolean } => entry !== null);
+  if (entries.length === 0) return '';
+  const sources = new Set(entries.map((entry) => entry.stated));
+  if (sources.size === 1) {
+    const source = entries[0].stated ? 'from your message' : 'from the operator default';
+    return ` Pricing context ${source}: ${entries.map((entry) => entry.text).join(', ')}.`;
   }
-  return {
-    ...(config.searchBookerCountry ? { bookerCountry: config.searchBookerCountry } : {}),
-    ...(config.searchCurrency ? { currency: config.searchCurrency } : {}),
-    ...(config.searchLanguage ? { language: config.searchLanguage } : {}),
-  };
-}
-
-function hasTravelerMarket(market: TravelerMarketPreferences): boolean {
-  return Boolean(market.bookerCountry || market.currency || market.language);
-}
-
-function marketNote(market: SearchMarket): string {
-  const values = [
-    market.bookerCountry ? `booker country ${market.bookerCountry}` : null,
-    market.currency ? `requested currency ${market.currency}` : null,
-    market.language ? `content language ${market.language}` : null,
-  ].filter(Boolean);
-  return values.length ? ` Pricing context: ${values.join(', ')}.` : '';
+  return ` Pricing context: ${entries
+    .map((entry) => `${entry.text} (${entry.stated ? 'your message' : 'operator default'})`)
+    .join(', ')}.`;
 }
 
 function holdStatus(kind: DeskKind, confirmed: boolean): string {

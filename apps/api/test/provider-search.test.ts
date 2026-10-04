@@ -238,34 +238,56 @@ describe('flight and stay provider search', () => {
     );
   });
 
-  it('uses the traveler market preference ahead of install-wide defaults', async () => {
+  it('uses the market the message states, with the operator default only for keys it omits', async () => {
     process.env.TRAVELCLAW_FLIGHT_BASE_URL = 'https://fares.example.test';
     process.env.TRAVELCLAW_FLIGHT_API_KEY = 'key';
     process.env.TRAVELCLAW_BOOKER_COUNTRY = 'US';
     process.env.TRAVELCLAW_SEARCH_CURRENCY = 'USD';
     process.env.TRAVELCLAW_SEARCH_LANGUAGE = 'en-US';
     const agent = await guestAgent();
-    const prefs = await agent.patch('/api/auth/me/market').send({
-      bookerCountry: 'ng',
-      currency: 'ngn',
-      language: 'en-NG',
-    });
-    expect(prefs.status).toBe(200);
 
-    const response = await searchFlight(agent);
+    const response = await agent.post('/api/chat').send({
+      content:
+        'Find a flight from Lagos to Lisbon on 2026-11-02. I am based in Nigeria, price it in NGN',
+    });
+    expect(response.status).toBe(201);
     const task = await taskFor(agent, response.body.session.id);
 
+    // The traveler's own words win; the operator default still fills the key they left out.
     expect(task.summary).toContain(
-      'Pricing context: booker country NG, requested currency NGN, content language en-NG.',
+      'Pricing context: booker country NG (your message), requested currency NGN (your message), content language en-US (operator default).',
     );
     expect(seen).toHaveLength(1);
     const url = seen[0].url;
     expect(url).toContain('bookerCountry=NG');
     expect(url).toContain('currency=NGN');
-    expect(url).toContain('language=en-NG');
+    expect(url).toContain('language=en-US');
     expect(url).not.toContain('bookerCountry=US');
     expect(url).not.toContain('currency=USD');
-    expect(url).not.toContain('language=en-US');
+  });
+
+  it('stores no market profile: the next search uses only the context it states', async () => {
+    process.env.TRAVELCLAW_FLIGHT_BASE_URL = 'https://fares.example.test';
+    process.env.TRAVELCLAW_FLIGHT_API_KEY = 'key';
+    const agent = await guestAgent();
+
+    const first = await agent.post('/api/chat').send({
+      content: 'Find a flight from Lagos to Lisbon on 2026-11-02, price it in NGN',
+    });
+    expect(first.status).toBe(201);
+    const priced = await taskFor(agent, first.body.session.id);
+    expect(priced.summary).toContain(
+      'Pricing context from your message: requested currency NGN.',
+    );
+    expect(seen[0].url).toContain('currency=NGN');
+
+    const me = await agent.get('/api/auth/me');
+    expect(me.body).not.toHaveProperty('market');
+
+    const plain = await searchFlight(agent);
+    const unpriced = await taskFor(agent, plain.body.session.id);
+    expect(unpriced.summary).not.toContain('Pricing context');
+    expect(seen.at(-1)?.url).not.toContain('currency=');
   });
 
   it('fans out globally, passes the configured point of sale, and holds through the source that returned the offer', async () => {
@@ -295,7 +317,7 @@ describe('flight and stay provider search', () => {
     const task = await taskFor(agent, response.body.session.id);
 
     expect(task.summary).toContain(
-      'Pricing context: booker country NG, requested currency NGN',
+      'Pricing context from the operator default: booker country NG, requested currency NGN, content language en-NG.',
     );
     expect(task.offers).toHaveLength(2);
     expect(

@@ -3,6 +3,7 @@ export { DESTINATIONS, findDestination, findDestinationByName } from './destinat
 export { deskName, planAgentDesks } from './desks';
 export type { DeskKind } from './desks';
 export { extractHints } from './extract';
+export { hasSearchMarket, mergeSearchMarket, searchMarketFrom } from './market';
 export {
   MAX_OFFERS_PER_SEARCH,
   flightQueryFrom,
@@ -65,6 +66,7 @@ export type {
   PersonaBundle,
   PlacesData,
   RememberData,
+  SearchMarket,
   ToolConnectors,
   ToolContext,
   ToolInput,

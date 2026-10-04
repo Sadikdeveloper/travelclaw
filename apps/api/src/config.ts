@@ -53,7 +53,10 @@ export interface AppConfig {
   /** `null` means use the legacy single-provider env; an empty array disables search. */
   flightProviders: SearchProviderConfig[] | null;
   stayProviders: SearchProviderConfig[] | null;
-  /** Optional single-install pricing/content market; never inferred from the route. */
+  /**
+   * Optional single-install market passed to adapters only for keys the traveler's
+   * own message left unstated; never inferred from the route.
+   */
   searchBookerCountry: string | null;
   searchCurrency: string | null;
   searchLanguage: string | null;
