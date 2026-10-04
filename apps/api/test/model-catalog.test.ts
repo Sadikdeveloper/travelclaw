@@ -44,6 +44,14 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     deviceTokenHash: null,
     trustProxy: false,
     trustedProxies: [],
+    googleApiKey: null,
+    googleBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    xaiApiKey: null,
+    xaiBaseUrl: 'https://api.x.ai/v1',
+    deepseekApiKey: null,
+    deepseekBaseUrl: 'https://api.deepseek.com/v1',
+    kimiApiKey: null,
+    kimiBaseUrl: 'https://api.moonshot.ai/v1',
     ...overrides,
   };
 }
@@ -121,5 +129,66 @@ describe('model catalog', () => {
     expect(big.account).toBeGreaterThan(big.guest);
     // A priced model the catalog has never heard of is paced conservatively, not left open.
     expect(limitsFor('some-new-model-2027')!.guest).toBeLessThanOrEqual(mini.guest);
+  });
+
+  it('supports Google Gemini and xAI Grok models with provider-specific API keys', () => {
+    const googleCfg = config({
+      modelName: 'gemini-2.5-pro',
+      modelNames: ['gemini-2.5-flash'],
+      googleApiKey: 'g-key-test',
+      modelApiKey: '',
+    });
+    const googleCat = modelCatalog(googleCfg);
+    expect(googleCat.current).toBe('gemini-2.5-pro');
+    expect(googleCat.models.find((m) => m.id === 'gemini-2.5-pro')?.available).toBe(true);
+    expect(googleCat.models.find((m) => m.id === 'gemini-2.5-pro')?.provider).toBe('google');
+
+    const xaiCfg = config({
+      modelName: 'grok-2',
+      modelNames: ['grok-beta'],
+      xaiApiKey: 'xai-key-test',
+      modelApiKey: '',
+    });
+    const xaiCat = modelCatalog(xaiCfg);
+    expect(xaiCat.current).toBe('grok-2');
+    expect(xaiCat.models.find((m) => m.id === 'grok-2')?.available).toBe(true);
+    expect(xaiCat.models.find((m) => m.id === 'grok-2')?.provider).toBe('xai');
+  });
+
+  it('supports DeepSeek and Moonshot Kimi models with provider-specific API keys', () => {
+    const deepseekCfg = config({
+      modelName: 'deepseek-reasoner',
+      modelNames: ['deepseek-chat'],
+      deepseekApiKey: 'ds-key-test',
+      modelApiKey: '',
+    });
+    const dsCat = modelCatalog(deepseekCfg);
+    expect(dsCat.current).toBe('deepseek-reasoner');
+    expect(dsCat.models.find((m) => m.id === 'deepseek-reasoner')?.available).toBe(true);
+    expect(dsCat.models.find((m) => m.id === 'deepseek-reasoner')?.provider).toBe('deepseek');
+
+    const kimiCfg = config({
+      modelName: 'kimi-k3',
+      modelNames: ['moonshot-v1-32k'],
+      kimiApiKey: 'kimi-key-test',
+      modelApiKey: '',
+    });
+    const kimiCat = modelCatalog(kimiCfg);
+    expect(kimiCat.current).toBe('kimi-k3');
+    expect(kimiCat.models.find((m) => m.id === 'kimi-k3')?.available).toBe(true);
+    expect(kimiCat.models.find((m) => m.id === 'kimi-k3')?.provider).toBe('kimi');
+  });
+
+  it('supports tier preference routing (fast tier for basic, strong tier for reasoning)', () => {
+    const multiCfg = config({
+      ...live,
+      modelName: 'gpt-4o',
+      modelNames: ['gpt-4o', 'gpt-4o-mini'],
+    });
+    // Default / strong
+    expect(bestModelId(multiCfg)).toBe('gpt-4o');
+    expect(bestModelId(multiCfg, 'strong')).toBe('gpt-4o');
+    // Fast tier preference selects the fast model
+    expect(bestModelId(multiCfg, 'fast')).toBe('gpt-4o-mini');
   });
 });

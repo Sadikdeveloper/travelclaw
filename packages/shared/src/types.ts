@@ -63,11 +63,15 @@ export interface ModelLimits {
   account: number;
 }
 
+export type ModelProviderType = 'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi';
+
 /** One model this desk can run, with the pace it runs at. `limits: null` means no pace. */
 export interface ModelRecord {
   id: string;
   label: string;
-  provider: 'mock' | 'openai';
+  provider: ModelProviderType;
+  /** 'fast' for quick conversational turns; 'strong' for reasoning/tool use. */
+  tier?: 'fast' | 'strong';
   /** `null` when this model is not paced. */
   limits: ModelLimits | null;
   /** True for the desk's own renderer: no provider call, no key, no per-turn cost. */
