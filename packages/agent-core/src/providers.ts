@@ -8,7 +8,7 @@ import {
   providerHost,
 } from './http';
 import { addDays, parseIsoDate } from './dates';
-import type { ConnectorCredentials, ToolContext, TripHints } from './types';
+import type { ConnectorCredentials, SearchMarket, ToolContext, TripHints } from './types';
 
 /**
  * Flight and stay search behind operator-held provider keys. A search can fan
@@ -37,27 +37,19 @@ export const MAX_OFFERS_PER_SEARCH = 6;
 const FLIGHT_SLOT = 'flight';
 const STAY_SLOT = 'stay';
 
-export interface FlightQuery {
+export interface FlightQuery extends SearchMarket {
   origin: string;
   destination: string;
   departDate: string;
   returnDate?: string;
   travelers: number;
-  /** Optional point-of-sale/content hints; not inferred from the route. */
-  bookerCountry?: string;
-  currency?: string;
-  language?: string;
 }
 
-export interface StayQuery {
+export interface StayQuery extends SearchMarket {
   destination: string;
   checkIn: string;
   checkOut: string;
   travelers: number;
-  /** Optional point-of-sale/content hints; not inferred from the destination. */
-  bookerCountry?: string;
-  currency?: string;
-  language?: string;
 }
 
 /** One offer exactly as the provider reported it, normalized but never padded. */
@@ -325,10 +317,7 @@ export async function searchStays(
   return search(STAY_SLOT, '/search/stays', params, ctx);
 }
 
-function addMarketParams(
-  params: URLSearchParams,
-  market: { bookerCountry?: string; currency?: string; language?: string },
-): void {
+function addMarketParams(params: URLSearchParams, market: SearchMarket): void {
   if (market.bookerCountry) params.set('bookerCountry', market.bookerCountry);
   if (market.currency) params.set('currency', market.currency);
   if (market.language) params.set('language', market.language);

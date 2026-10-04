@@ -41,18 +41,11 @@ export const googleAuthSchema = z.object({
   credential: z.string().trim().min(1, 'Missing Google credential'),
 });
 
-function optionalNormalizedCode(
-  pattern: RegExp,
-  message: string,
-  normalize: (value: string) => string,
-) {
-  return z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
-    z.string().trim().regex(pattern, message).transform(normalize).nullable().optional(),
-  );
-}
-
-function normalizeLanguageTag(value: string): string {
+/**
+ * Language tags are kept readable (`EN-ng` -> `en-NG`) wherever one is normalized:
+ * a message-stated market and any operator env value pass through the same rules.
+ */
+export function normalizeLanguageTag(value: string): string {
   return value
     .split('-')
     .map((part, index) => {
@@ -65,24 +58,6 @@ function normalizeLanguageTag(value: string): string {
     })
     .join('-');
 }
-
-export const updateMarketPreferencesSchema = z.object({
-  bookerCountry: optionalNormalizedCode(
-    /^[A-Za-z]{2}$/,
-    'Use a two-letter point-of-sale country code',
-    (value) => value.toUpperCase(),
-  ),
-  currency: optionalNormalizedCode(
-    /^[A-Za-z]{3}$/,
-    'Use a three-letter currency code',
-    (value) => value.toUpperCase(),
-  ),
-  language: optionalNormalizedCode(
-    /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/,
-    'Use a language tag such as en or en-NG',
-    normalizeLanguageTag,
-  ),
-});
 
 export const createAgentSchema = z.object({
   id: z
@@ -229,7 +204,6 @@ export type RequestOfferHoldInput = z.infer<typeof requestOfferHoldSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
-export type UpdateMarketPreferencesInput = z.infer<typeof updateMarketPreferencesSchema>;
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;

@@ -135,49 +135,9 @@ describe('auth', () => {
     const me = await agent.get('/api/auth/me');
     expect(me.status).toBe(200);
     expect(me.body.email).toBe('me@example.com');
-    expect(me.body.market).toEqual({
-      bookerCountry: null,
-      currency: null,
-      language: null,
-    });
-  });
-
-  it('lets a traveler save and clear provider search market preferences', async () => {
-    const agent = request.agent(app.getHttpServer());
-    await agent.post('/api/auth/register').send({
-      email: 'market@example.com',
-      password: 'a very good passphrase',
-    });
-
-    const saved = await agent.patch('/api/auth/me/market').send({
-      bookerCountry: 'ng',
-      currency: 'ngn',
-      language: 'EN-ng',
-    });
-
-    expect(saved.status).toBe(200);
-    expect(saved.body.market).toEqual({
-      bookerCountry: 'NG',
-      currency: 'NGN',
-      language: 'en-NG',
-    });
-
-    const me = await agent.get('/api/auth/me');
-    expect(me.body.market).toEqual(saved.body.market);
-
-    const cleared = await agent.patch('/api/auth/me/market').send({ currency: null });
-    expect(cleared.status).toBe(200);
-    expect(cleared.body.market).toEqual({
-      bookerCountry: 'NG',
-      currency: null,
-      language: 'en-NG',
-    });
-
-    const invalid = await agent.patch('/api/auth/me/market').send({
-      bookerCountry: 'Nigeria',
-    });
-    expect(invalid.status).toBe(400);
-    expect(invalid.body.error.code).toBe('validation_error');
+    // Search market is read from each message that states it, so the account
+    // carries no stored point-of-sale profile to go stale.
+    expect(me.body).not.toHaveProperty('market');
   });
 
   it('ends the session on logout so the old cookie no longer works', async () => {

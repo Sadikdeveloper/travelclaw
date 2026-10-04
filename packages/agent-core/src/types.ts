@@ -25,6 +25,20 @@ export interface DestinationProfile {
 /** Who asked for a tool: the model, or the deterministic router standing in for it. */
 export type ToolSource = 'model' | 'router';
 
+/**
+ * Point-of-sale/display context for a provider search. Read from the message that
+ * states it (see `searchMarketFrom`), or from the operator's configured default —
+ * never inferred from a route, a destination, or a passport.
+ */
+export interface SearchMarket {
+  /** ISO 3166-1 alpha-2 booker/point-of-sale country. */
+  bookerCountry?: string;
+  /** ISO 4217 display/request currency. */
+  currency?: string;
+  /** BCP-47-style content language, such as `en-NG`. */
+  language?: string;
+}
+
 export interface ToolTrace {
   name: string;
   ok: boolean;

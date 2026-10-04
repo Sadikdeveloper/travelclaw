@@ -5,11 +5,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type {
-  TravelerMarketPreferences,
-  UpdateMarketPreferencesInput,
-  UserRecord,
-} from '@travelclaw/shared';
+import type { UserRecord } from '@travelclaw/shared';
 import { newId, nowIso } from '../common/util';
 import { loadConfig } from '../config';
 import { DatabaseService } from '../db/database.service';
@@ -25,9 +21,6 @@ interface UserRow {
   display_name: string;
   google_id: string | null;
   is_guest: number;
-  booker_country: string | null;
-  market_currency: string | null;
-  market_language: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -324,30 +317,6 @@ export class AuthService {
     return row ? mapUser(row) : null;
   }
 
-  /** The market profile a provider search should use for this traveler, if any. */
-  marketForUser(userId: string | null | undefined): TravelerMarketPreferences {
-    if (!userId) return emptyMarket();
-    const row = this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', userId);
-    return row ? marketFromRow(row) : emptyMarket();
-  }
-
-  /** Save point-of-sale preferences owned by the traveler, not by the operator. */
-  updateMarketPreferences(userId: string, input: UpdateMarketPreferencesInput): UserRecord {
-    const current = this.getRowById(userId);
-    const now = nowIso();
-    this.db.run(
-      `UPDATE users
-       SET booker_country = ?, market_currency = ?, market_language = ?, updated_at = ?
-       WHERE id = ?`,
-      input.bookerCountry === undefined ? current.booker_country : input.bookerCountry,
-      input.currency === undefined ? current.market_currency : input.currency,
-      input.language === undefined ? current.market_language : input.language,
-      now,
-      userId,
-    );
-    return mapUser(this.getRowById(userId));
-  }
-
   private sweepGuestPins(): void {
     const now = Date.now();
     for (const [key, pin] of this.guestPins) {
@@ -402,21 +371,6 @@ export class AuthService {
         targetUserId,
         guestId,
       );
-      // If the visitor set a market while browsing as a guest, do not throw it
-      // away when they sign into an existing account that has not set one yet.
-      this.db.run(
-        `UPDATE users
-         SET booker_country = COALESCE(booker_country, ?),
-             market_currency = COALESCE(market_currency, ?),
-             market_language = COALESCE(market_language, ?),
-             updated_at = ?
-         WHERE id = ?`,
-        guest.booker_country,
-        guest.market_currency,
-        guest.market_language,
-        nowIso(),
-        targetUserId,
-      );
     } catch (error) {
       this.logger.warn(`Could not fold guest ${guestId} chats into ${targetUserId}`, error);
       return;
@@ -445,18 +399,6 @@ export class AuthService {
   }
 }
 
-function emptyMarket(): TravelerMarketPreferences {
-  return { bookerCountry: null, currency: null, language: null };
-}
-
-function marketFromRow(row: UserRow): TravelerMarketPreferences {
-  return {
-    bookerCountry: row.booker_country ?? null,
-    currency: row.market_currency ?? null,
-    language: row.market_language ?? null,
-  };
-}
-
 export function mapUser(row: UserRow): UserRecord {
   return {
     id: row.id,
@@ -465,7 +407,6 @@ export function mapUser(row: UserRow): UserRecord {
     hasPassword: Boolean(row.password_hash),
     hasGoogle: Boolean(row.google_id),
     isGuest: Boolean(row.is_guest),
-    market: marketFromRow(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
