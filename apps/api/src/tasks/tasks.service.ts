@@ -25,6 +25,7 @@ import type {
   TaskDecision,
 } from '@travelclaw/shared';
 import { newId, nowIso } from '../common/util';
+import { BrowserService } from '../browser/browser.service';
 import { loadConfig } from '../config';
 import { ConnectorsService } from '../connectors/connectors.service';
 import { DatabaseService } from '../db/database.service';
@@ -82,6 +83,7 @@ export class TasksService {
     private readonly events: EventsService,
     private readonly sessions: SessionsService,
     private readonly connectors: ConnectorsService,
+    private readonly browser: BrowserService,
   ) {}
 
   /** Used by the controller to check chat ownership before a decision touches a task. */
@@ -101,7 +103,10 @@ export class TasksService {
         'SELECT * FROM agent_tasks WHERE session_id = ? ORDER BY created_at ASC',
         sessionId,
       )
-      .map((row) => mapTask(row, this.offersFor(row.id)));
+      .map((row) => ({
+        ...mapTask(row, this.offersFor(row.id)),
+        ...(this.browser.state(row.id) ? { browser: this.browser.state(row.id) } : {}),
+      }));
   }
 
   open(input: {
@@ -307,11 +312,26 @@ export class TasksService {
     this.patch(id, { status: 'awaiting', summary });
   }
 
-  /** No key means the old desk exactly: a short brief and nothing that looks like an offer. */
+  async stopBrowser(id: string): Promise<AgentTaskRecord> {
+    await this.browser.stop(id);
+    const task = this.get(id);
+    return this.forSession(task.session_id).find((item) => item.id === id)!;
+  }
+
+  private async browserFallback(task: TaskRow, summary: string): Promise<string> {
+    if (!this.browser.enabled()) return summary;
+    const result = await this.browser.research(task);
+    return `${summary} Browser fallback: ${result}`;
+  }
+
+  /** Prefer configured providers. Browser observations never enter the offers table. */
   private async searchIfConfigured(task: TaskRow, lead: string): Promise<string> {
     const credentials = this.connectors.credentialsFor(task.kind);
     if (!credentials?.apiKey) {
-      return `${lead} ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
+      return this.browserFallback(
+        task,
+        `${lead} ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`,
+      );
     }
 
     const config = loadConfig();
@@ -358,15 +378,27 @@ export class TasksService {
       // returning its regular brief. Never include an exception that could carry
       // request headers or the configured key.
       this.logger.warn(`${task.kind} search failed before it returned a result`);
-      return `${searchLead} Provider search could not complete. No current offers were returned. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
+      return this.browserFallback(
+        task,
+        `${searchLead} Provider search could not complete. No current offers were returned. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`,
+      );
     }
     if (!result.ok) {
       this.logger.warn(`${task.kind} search: ${result.detail}`);
-      return `${searchLead} Provider search was not completed: ${result.detail} No prices or availability are confirmed. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`;
+      return this.browserFallback(
+        task,
+        `${searchLead} Provider search was not completed: ${result.detail} No prices or availability are confirmed. ${holdStatus(task.kind, this.hasConfirmedHold(task.id))}`,
+      );
     }
 
     const offers = this.storeOffers(task, result);
-    return providerBrief(searchLead, result, offers, this.hasConfirmedHold(task.id));
+    const summary = providerBrief(
+      searchLead,
+      result,
+      offers,
+      this.hasConfirmedHold(task.id),
+    );
+    return offers.length ? summary : this.browserFallback(task, summary);
   }
 
   private storeOffers(task: TaskRow, result: ProviderSearchFound): OfferRecord[] {
@@ -465,7 +497,10 @@ export class TasksService {
       now,
       id,
     );
-    const task = mapTask(this.get(id), this.offersFor(id));
+    const task = {
+      ...mapTask(this.get(id), this.offersFor(id)),
+      ...(this.browser.state(id) ? { browser: this.browser.state(id) } : {}),
+    };
     this.events.emit('task.updated', {
       sessionId: task.sessionId,
       taskId: task.id,

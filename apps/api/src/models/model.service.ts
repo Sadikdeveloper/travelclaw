@@ -58,7 +58,9 @@ export class ModelService {
     try {
       const response = await fetch(`${config.modelBaseUrl}/chat/completions`, {
         method: 'POST',
-        signal: controller.signal,
+        signal: input.signal
+          ? AbortSignal.any([input.signal, controller.signal])
+          : controller.signal,
         headers: {
           Authorization: `Bearer ${config.modelApiKey}`,
           'Content-Type': 'application/json',

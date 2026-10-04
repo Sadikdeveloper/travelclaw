@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import { isIP } from 'node:net';
+import proxyaddr from 'proxy-addr';
 import { GATEWAY_VERSION } from '@travelclaw/shared';
 
 export interface SearchProviderConfig {
@@ -24,6 +26,8 @@ export interface AppConfig {
   /** Other models the desk offers, from TRAVELCLAW_MODELS. The chosen one is always first. */
   modelNames: string[];
   network: boolean;
+  browserWorkerUrl: string | null;
+  browserWorkerToken: string | null;
   seed: boolean;
   taskDelayMs: number;
   version: string;
@@ -41,10 +45,11 @@ export interface AppConfig {
    */
   deviceTokenHash: string | null;
   /**
-   * Trust X-Forwarded-For when set to '1' (so a reverse proxy can identify the
-   * real client). Test suites set this so supertest can simulate remote peers.
+   * Proxy mode requires an explicit trusted proxy IP/CIDR list. Forwarded client
+   * identity is for pacing only; a proxy connection never gets a pairing exemption.
    */
   trustProxy: boolean;
+  trustedProxies: string[];
   /** Operator-held provider keys that built-in tools resolve by connector name. */
   currencyBaseUrl: string | null;
   currencyApiKey: string | null;
@@ -112,6 +117,7 @@ export function loadConfig(
       .map((name) => name.trim())
       .filter(Boolean),
     network: env.TRAVELCLAW_NETWORK !== '0',
+    ...browserConfig(env),
     seed: env.TRAVELCLAW_SEED !== '0',
     taskDelayMs:
       env.TRAVELCLAW_TASK_DELAY === '0' ? 0 : Number(env.TRAVELCLAW_TASK_DELAY || 1100),
@@ -128,6 +134,7 @@ export function loadConfig(
       ? createHash('sha256').update(env.TRAVELCLAW_DEVICE_TOKEN.trim()).digest('hex')
       : null,
     trustProxy: env.TRAVELCLAW_TRUST_PROXY === '1',
+    trustedProxies: parseTrustedProxies(env),
     currencyBaseUrl: env.TRAVELCLAW_CURRENCY_BASE_URL?.trim() || null,
     currencyApiKey: env.TRAVELCLAW_CURRENCY_API_KEY?.trim() || null,
     weatherBaseUrl: env.TRAVELCLAW_WEATHER_BASE_URL?.trim() || null,
@@ -217,4 +224,66 @@ function parseSearchProviders(
     ids.add(id);
     return { id, ...(name ? { name } : {}), baseUrl, apiKey };
   });
+}
+
+/** Fail startup closed instead of trusting arbitrary caller-supplied forwarding headers. */
+function parseTrustedProxies(env: NodeJS.ProcessEnv): string[] {
+  if (env.TRAVELCLAW_TRUST_PROXY !== '1') return [];
+  const entries = (env.TRAVELCLAW_TRUSTED_PROXIES || '').split(',').map((s) => s.trim());
+  const error = () =>
+    new Error(
+      'TRAVELCLAW_TRUST_PROXY=1 requires TRAVELCLAW_TRUSTED_PROXIES with explicit proxy IPs/CIDRs (no /0 or aliases).',
+    );
+  if (!entries.length || entries.length > 32) throw error();
+  for (const entry of entries) {
+    const [ip, prefix, ...extra] = entry.split('/');
+    const family = isIP(ip || '');
+    if (
+      !family ||
+      extra.length ||
+      (prefix !== undefined &&
+        (!/^\d+$/.test(prefix) ||
+          Number(prefix) < 1 ||
+          Number(prefix) > (family === 4 ? 32 : 128)))
+    ) {
+      throw error();
+    }
+  }
+  try {
+    for (const entry of entries) {
+      const trusts = proxyaddr.compile([entry]);
+      // IPv4-mapped IPv6 /96 can otherwise disguise an effective IPv4 /0.
+      if (trusts('0.0.0.0', 0) && trusts('255.255.255.255', 0)) throw error();
+    }
+  } catch {
+    throw error();
+  }
+  return entries;
+}
+
+function browserConfig(
+  env: NodeJS.ProcessEnv,
+): Pick<AppConfig, 'browserWorkerUrl' | 'browserWorkerToken'> {
+  const raw = env.TRAVELCLAW_BROWSER_WORKER_URL?.trim();
+  const token = env.TRAVELCLAW_BROWSER_WORKER_TOKEN?.trim();
+  if (!raw && !token) return { browserWorkerUrl: null, browserWorkerToken: null };
+  try {
+    const url = new URL(raw || '');
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/' ||
+      !token ||
+      token.length < 32
+    )
+      throw new Error();
+    return { browserWorkerUrl: url.origin, browserWorkerToken: token };
+  } catch {
+    throw new Error(
+      'Browser worker requires an HTTP(S) origin and a token of at least 32 characters.',
+    );
+  }
 }

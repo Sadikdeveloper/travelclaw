@@ -115,3 +115,14 @@ cookie session, password hashing, guest promotion, and Google linking work.
 ## License
 
 [MIT](LICENSE). Copyright (c) 2026 Sadikdeveloper.
+
+### Optional browser research fallback
+
+When provider search is unavailable or returns no usable offers, an explicitly
+configured isolated browser worker can research authorized public search sites.
+Chat shows progress/Stop, page-observed evidence and an honest source-link handoff;
+page prices are never provider offers or holdable bookings. It is **off by default**.
+See [setup and limitations](docs/browser-agent.md) and the
+[Hermes/OpenClaw implementation research](docs/browser-research.md).
+The real-browser fixtures pass; a permitted live travel-site demonstration is still
+required before issue #25 is complete.

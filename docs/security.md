@@ -1,8 +1,8 @@
 # Security
 
 TravelClaw 0.1 authenticates the control UI with an email/password (and optional
-Google) account, or a no-signup guest identity, but it still does not authenticate
-arbitrary API clients — see Pairing below before you expose this past your own machine.
+Google) account, or a no-signup guest identity, and gates remote API clients with device pairing. Read Pairing below before you
+expose this past your own machine.
 
 - Bind to `127.0.0.1` if you do not trust the network. The default `0.0.0.0` is for the dev preview and Docker.
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
@@ -45,8 +45,8 @@ Cookie sign-in secures the control UI in a browser, and the **device token** bel
 gates non-loopback listeners. They are separate layers and do not replace each other.
 
 - `TRAVELCLAW_DEVICE_TOKEN` sets a shared secret that any non-loopback caller must
-  present on every request. Loopback callers (a browser on the same machine, the dev
-  preview on `localhost`) never need it.
+  present on every HTTP request and WebSocket connection. Only **direct** loopback
+  peers with no forwarding headers and not listed as trusted proxies are exempt.
   - HTTP clients send it in the `X-Device-Token` header.
   - WebSocket clients send it as the `deviceToken` query parameter on the handshake
     (or as the same header, when using a long-polling path that carries custom headers).
@@ -61,13 +61,59 @@ gates non-loopback listeners. They are separate layers and do not replace each o
   never echoed back.
 - `/health` is exempt from pairing so container / load-balancer liveness probes work
   without a token.
-- Set `TRAVELCLAW_TRUST_PROXY=1` behind a reverse proxy (nginx, Caddy, a Kubernetes
-  ingress, Docker published ports) so the gateway honours `X-Forwarded-For` for the
-  loopback check. Without it, every proxied request looks like it came from the proxy
-  itself.
+- Set `TRAVELCLAW_TRUST_PROXY=1` **and** `TRAVELCLAW_TRUSTED_PROXIES` to a comma-separated
+  list of the proxy IPs/CIDRs you operate. For a same-host proxy, for example:
+  `TRAVELCLAW_TRUSTED_PROXIES=127.0.0.1/32,::1/128`. Use exact addresses where possible;
+  never trust client networks. An empty list, invalid address, `/0`, or named alias
+  refuses startup in proxy mode. Docker port publication alone does not justify
+  trusting forwarded headers; list only an actual HTTP reverse proxy.
+- Express resolves the caller right-to-left from the TCP peer, stopping at the first
+  untrusted hop. This identity is used for rate limits and guest pins. Headers from
+  an untrusted peer cannot override its identity.
+- Pairing **does not use forwarded client identity**. A configured proxy must always
+  pair, even if it sends no `X-Forwarded-For` or claims its client was `127.0.0.1`.
+  Forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) also remove the
+  direct-loopback exemption. HTTP and WebSocket use the same policy.
+- Your ingress must overwrite untrusted forwarding headers or append the actual
+  connecting peer, and restrict direct access to the gateway. If a proxy strips all
+  forwarding headers and is not listed, a same-host proxy is indistinguishable from
+  a local caller; no application can infer that missing topology.
+- **Migration:** deployments that previously used only `TRAVELCLAW_TRUST_PROXY=1`
+  must now add the explicit proxy list. Configure clients to send the device token
+  on both HTTP and WebSocket; do not publish the operator token in frontend code.
+  A proxy that injects it is itself a paired client and must authenticate/restrict
+  downstream callers, not turn a publicly reachable ingress into an open gateway.
+  Restart after changing these settings.
+- WebSocket query tokens can be captured by reverse-proxy access logs. Redact query
+  strings on `/socket.io` (including failed handshakes), or use a header-capable
+  client. Application errors never echo the token.
 - Deploy TLS termination in front of the gateway. The device token is a bearer secret
   and must travel over HTTPS — the gateway itself speaks plain HTTP, on purpose.
 
 A channel bot, a CLI, or a second box is a paired client first, and may then
 authenticate a user session inside that pairing. The pairing gate runs before
 account/guest auth and before any route handler, on both HTTP and WebSocket.
+
+## Browser research (opt-in)
+
+- The public-search browser is a separate worker, never the gateway's process or a
+  traveler's existing profile. Keep its RPC private, authenticate the gateway with
+  a dedicated worker token, and run it without gateway files or provider/model keys.
+- Chromium sandboxing is mandatory in production. No automatic sandbox bypass,
+  stealth/CAPTCHA solving, password entry, arbitrary evaluate, shell, upload or
+  checkout tool is exposed. Blockers produce a handoff instead of an evasion attempt.
+- Context-wide HTTP interception uses an origin/method policy and a DNS-pinned Node
+  transport; native browser network traffic is directed to a dead proxy. DNS checks
+  alone are not enough to secure Chromium navigation. Add infrastructure-level
+  isolation from private networks; application checks are not a browser-exploit sandbox.
+- Snapshot text remains untrusted. The browser-only model loop has no memory, connector
+  or general tool access. Actions/bytes/time/contexts are bounded outside the model.
+- Price observations are stored separately from offers, are not holdable, and carry
+  visible evidence and source/time labels. Exact text matching is not an assurance
+  of checkout availability or complete conditions.
+- Reusable procedures accept only finite step names and travel-field slots, start
+  pending, and require an operator's local review before reuse. No search values,
+  page text, cookies or credentials can fit the procedure schema.
+- See [setup, threat boundaries and outstanding validation](browser-agent.md) and the
+  [Hermes/OpenClaw research decisions](browser-research.md). Do not interpret the
+  fixture test results as a production audit or a demonstrated live airline search.
