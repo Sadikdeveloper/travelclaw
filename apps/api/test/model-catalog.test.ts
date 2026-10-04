@@ -39,6 +39,8 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     flightApiKey: null,
     stayBaseUrl: null,
     stayApiKey: null,
+    deviceTokenHash: null,
+    trustProxy: false,
     ...overrides,
   };
 }

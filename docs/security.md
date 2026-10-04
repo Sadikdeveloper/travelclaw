@@ -39,9 +39,35 @@ arbitrary API clients — see Pairing below before you expose this past your own
 - The secret is never logged, never persisted into a chat message or tool trace, and never placed in the model prompt. Tools send it only as an `Authorization: Bearer` header to the connector's own base URL — never as a query parameter, where it would land in logs. A rejection warning names the connector, never the key.
 - A connector cannot introduce new code, new tool definitions, new prompt text, or new destinations beyond its own base URL — the path and parameters stay the tool's. Non-http base URLs are ignored at call time.
 
-## Pairing (still open)
+## Pairing
 
-Cookie sign-in secures the control UI in a browser. It does **not** replace a device
-token for other, non-browser clients (a channel bot, a CLI, a second box) — that is
-still the pairing-auth roadmap item. Do not expose this gateway to the internet before
-that exists.
+Cookie sign-in secures the control UI in a browser, and the **device token** below
+gates non-loopback listeners. They are separate layers and do not replace each other.
+
+- `TRAVELCLAW_DEVICE_TOKEN` sets a shared secret that any non-loopback caller must
+  present on every request. Loopback callers (a browser on the same machine, the dev
+  preview on `localhost`) never need it.
+  - HTTP clients send it in the `X-Device-Token` header.
+  - WebSocket clients send it as the `deviceToken` query parameter on the handshake
+    (or as the same header, when using a long-polling path that carries custom headers).
+- When `TRAVELCLAW_DEVICE_TOKEN` is _unset_ and a non-loopback request arrives, the
+  gateway answers `401 pairing_required` with a message that names the env var and
+  points at `HOST=127.0.0.1` for local-only use — rather than silently opening on
+  `0.0.0.0` with no gate. This is the safe default while the gateway binds all
+  interfaces for the dev preview and Docker.
+- The raw token is hashed with SHA-256 at boot; only the hash is kept in memory, and
+  incoming tokens are compared with `crypto.timingSafeEqual` against that hash. The
+  token never appears in error bodies or logs, and a caller-presented wrong token is
+  never echoed back.
+- `/health` is exempt from pairing so container / load-balancer liveness probes work
+  without a token.
+- Set `TRAVELCLAW_TRUST_PROXY=1` behind a reverse proxy (nginx, Caddy, a Kubernetes
+  ingress, Docker published ports) so the gateway honours `X-Forwarded-For` for the
+  loopback check. Without it, every proxied request looks like it came from the proxy
+  itself.
+- Deploy TLS termination in front of the gateway. The device token is a bearer secret
+  and must travel over HTTPS — the gateway itself speaks plain HTTP, on purpose.
+
+A channel bot, a CLI, or a second box is a paired client first, and may then
+authenticate a user session inside that pairing. The pairing gate runs before
+account/guest auth and before any route handler, on both HTTP and WebSocket.

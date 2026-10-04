@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
+import { PairingMiddleware } from './auth/pairing.middleware';
 import { ChannelsModule } from './channels/channels.module';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { DatabaseModule } from './db/database.module';
@@ -40,4 +41,11 @@ import { WorkspaceModule } from './workspace/workspace.module';
     DeskModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Pairing gate runs for every HTTP route except /health (which the middleware
+    // exempts internally). WebSocket is enforced separately in DeskGateway because
+    // Socket.io connections do not flow through Express middleware.
+    consumer.apply(PairingMiddleware).forRoutes('*');
+  }
+}

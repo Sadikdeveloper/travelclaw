@@ -9,12 +9,18 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 import { loadConfig } from './config';
 
 export function configureApp(app: INestApplication) {
+  const { allowedOrigins, trustProxy } = loadConfig();
+  // When running behind a reverse proxy that terminates TLS or forwards requests
+  // (nginx, Caddy, Docker, a load balancer), trust X-Forwarded-For so the pairing
+  // middleware can see the real client IP instead of the proxy.
+  if (trustProxy) {
+    (app as NestExpressApplication).set('trust proxy', true);
+  }
   app.useWebSocketAdapter(new IoAdapter(app));
   // Same-origin by default: the desk ships its own web client on the same host, and a
   // caller that presents no credential is recognised by address and user agent, so
   // reflecting arbitrary origins with credentials would let another site read a guest's
   // chats. Name extra origins in TRAVELCLAW_ALLOWED_ORIGINS if something else must call in.
-  const { allowedOrigins } = loadConfig();
   app.enableCors({
     origin: allowedOrigins.length ? allowedOrigins : false,
     credentials: true,
@@ -29,10 +35,10 @@ export function configureApp(app: INestApplication) {
 
   const webDist = resolve(process.cwd(), '../web/dist');
   if (!existsSync(join(webDist, 'index.html'))) return;
+  (app as NestExpressApplication).useStaticAssets(webDist);
   const expressApp = app.getHttpAdapter().getInstance() as {
     use: (handler: (req: Request, res: Response, next: NextFunction) => void) => void;
   };
-  (app as NestExpressApplication).useStaticAssets(webDist);
   expressApp.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     const path = req.path || '/';

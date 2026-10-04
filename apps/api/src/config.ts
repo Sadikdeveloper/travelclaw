@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { GATEWAY_VERSION } from '@travelclaw/shared';
 
@@ -32,6 +33,18 @@ export interface AppConfig {
   /** Extra origins allowed to call the gateway. Empty means same-origin only. */
   allowedOrigins: string[];
   sessionTtlDays: number;
+  /**
+   * Device token that non-loopback HTTP and WebSocket clients must present.
+   * When unset, the gateway refuses any non-loopback call — the safe default while
+   * binding 0.0.0.0 in dev/Docker. The raw token is kept in memory only; only its
+   * hash is ever compared against requests.
+   */
+  deviceTokenHash: string | null;
+  /**
+   * Trust X-Forwarded-For when set to '1' (so a reverse proxy can identify the
+   * real client). Test suites set this so supertest can simulate remote peers.
+   */
+  trustProxy: boolean;
   /** Operator-held provider keys that built-in tools resolve by connector name. */
   currencyBaseUrl: string | null;
   currencyApiKey: string | null;
@@ -108,6 +121,10 @@ export function loadConfig(
       .map((origin) => origin.trim())
       .filter(Boolean),
     sessionTtlDays: Number(env.TRAVELCLAW_SESSION_TTL_DAYS || 30),
+    deviceTokenHash: env.TRAVELCLAW_DEVICE_TOKEN?.trim()
+      ? createHash('sha256').update(env.TRAVELCLAW_DEVICE_TOKEN.trim()).digest('hex')
+      : null,
+    trustProxy: env.TRAVELCLAW_TRUST_PROXY === '1',
     currencyBaseUrl: env.TRAVELCLAW_CURRENCY_BASE_URL?.trim() || null,
     currencyApiKey: env.TRAVELCLAW_CURRENCY_API_KEY?.trim() || null,
     weatherBaseUrl: env.TRAVELCLAW_WEATHER_BASE_URL?.trim() || null,
