@@ -1,8 +1,11 @@
 import {
   DESK_MODEL_ID,
   bestModelId,
+  isLegacyGeminiModel,
+  labelFor,
   limitsFor,
   modelCatalog,
+  modelDefFor,
 } from '../src/models/model-catalog';
 import type { AppConfig } from '../src/config';
 
@@ -133,15 +136,19 @@ describe('model catalog', () => {
 
   it('supports Google Gemini and xAI Grok models with provider-specific API keys', () => {
     const googleCfg = config({
-      modelName: 'gemini-2.5-pro',
-      modelNames: ['gemini-2.5-flash'],
+      modelName: 'gemini-3.1-pro-preview',
+      modelNames: ['gemini-3.8-flash'],
       googleApiKey: 'g-key-test',
       modelApiKey: '',
     });
     const googleCat = modelCatalog(googleCfg);
-    expect(googleCat.current).toBe('gemini-2.5-pro');
-    expect(googleCat.models.find((m) => m.id === 'gemini-2.5-pro')?.available).toBe(true);
-    expect(googleCat.models.find((m) => m.id === 'gemini-2.5-pro')?.provider).toBe('google');
+    expect(googleCat.current).toBe('gemini-3.1-pro-preview');
+    expect(googleCat.models.find((m) => m.id === 'gemini-3.1-pro-preview')?.available).toBe(
+      true,
+    );
+    expect(googleCat.models.find((m) => m.id === 'gemini-3.1-pro-preview')?.provider).toBe(
+      'google',
+    );
 
     const xaiCfg = config({
       modelName: 'grok-2',
@@ -153,6 +160,25 @@ describe('model catalog', () => {
     expect(xaiCat.current).toBe('grok-2');
     expect(xaiCat.models.find((m) => m.id === 'grok-2')?.available).toBe(true);
     expect(xaiCat.models.find((m) => m.id === 'grok-2')?.provider).toBe('xai');
+  });
+
+  it('ranks the current Gemini generation above a legacy 2.5 id', () => {
+    // New keys answer 404 for 2.5 ids, so a deployment that names both must never have
+    // the desk reach for the legacy one.
+    const cfg = config({
+      modelName: 'gemini-2.5-pro',
+      modelNames: ['gemini-3.8-flash'],
+      googleApiKey: 'g-key-test',
+      modelApiKey: '',
+    });
+    expect(bestModelId(cfg)).toBe('gemini-3.8-flash');
+    expect(bestModelId(cfg, 'fast')).toBe('gemini-3.8-flash');
+    // A legacy id an older key still serves keeps its label and its pace.
+    expect(labelFor('gemini-2.5-pro')).toBe('Gemini 2.5 Pro (legacy)');
+    expect(isLegacyGeminiModel('gemini-2.5-pro')).toBe(true);
+    expect(isLegacyGeminiModel('gemini-3.8-flash')).toBe(false);
+    // Ids Google has shut down are no longer policy the desk carries.
+    expect(modelDefFor('gemini-1.5-flash')).toBeUndefined();
   });
 
   it('supports DeepSeek and Moonshot Kimi models with provider-specific API keys', () => {

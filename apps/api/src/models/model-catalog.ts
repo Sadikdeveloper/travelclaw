@@ -53,29 +53,58 @@ export const KNOWN_MODELS: KnownModelDef[] = [
     limits: { guest: 5, account: 30 },
   },
 
-  // Google Gemini models (OpenAI-compatible endpoint)
+  // Google Gemini models (OpenAI-compatible endpoint).
+  // Current generation first: a Gemini API key created now gets a 404 for the 2.5 ids
+  // ("no longer available to new users"), so the desk never prefers one over a 3.x model
+  // a deployment also configured. See `isLegacyGeminiModel`.
   {
-    id: 'gemini-2.5-pro',
-    label: 'Gemini 2.5 Pro',
+    id: 'gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro (preview)',
     provider: 'google',
     tier: 'strong',
-    rank: 32,
+    rank: 33,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'gemini-3.8-flash',
+    label: 'Gemini 3.8 Flash',
+    provider: 'google',
+    tier: 'fast',
+    rank: 16,
+    limits: { guest: 5, account: 30 },
+  },
+  {
+    id: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    provider: 'google',
+    tier: 'fast',
+    rank: 14,
+    limits: { guest: 5, account: 30 },
+  },
+  {
+    id: 'gemini-3.5-flash-lite',
+    label: 'Gemini 3.5 Flash-Lite',
+    provider: 'google',
+    tier: 'fast',
+    rank: 11,
+    limits: { guest: 5, account: 30 },
+  },
+  // Legacy ids. An older key still answers on these, so they keep a label and a pace;
+  // they just never win against a model of the current generation.
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro (legacy)',
+    provider: 'google',
+    tier: 'strong',
+    rank: 6,
     limits: { guest: 2, account: 15 },
   },
   {
     id: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
+    label: 'Gemini 2.5 Flash (legacy)',
     provider: 'google',
     tier: 'fast',
-    rank: 12,
-    limits: { guest: 5, account: 30 },
-  },
-  {
-    id: 'gemini-1.5-flash',
-    label: 'Gemini 1.5 Flash',
-    provider: 'google',
-    tier: 'fast',
-    rank: 11,
+    rank: 5,
     limits: { guest: 5, account: 30 },
   },
 
@@ -184,6 +213,15 @@ export function providerForModelId(id: string): ModelProviderType {
 
 export function tierForModelId(id: string): 'fast' | 'strong' {
   return modelDefFor(id)?.tier ?? 'strong';
+}
+
+/**
+ * Gemini 1.x/2.x ids. Google still serves some of them to older keys, but a key created
+ * after the Gemini 3 rollout answers `404` — "no longer available to new users" — so naming
+ * one is worth a boot-time warning rather than a silent fallback to the desk renderer.
+ */
+export function isLegacyGeminiModel(id: string): boolean {
+  return /^gemini-[12](?:$|[.-])/.test(id);
 }
 
 function rankFor(id: string): number {
