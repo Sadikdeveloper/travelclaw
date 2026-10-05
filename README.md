@@ -63,17 +63,36 @@ with the following (the key itself stays only on the server):
 
 ```dotenv
 TRAVELCLAW_MODEL_PROVIDER=google
-TRAVELCLAW_MODEL_NAME=gemini-2.5-flash
-TRAVELCLAW_MODELS=gemini-2.5-flash
+TRAVELCLAW_MODEL_NAME=gemini-3.8-flash
+TRAVELCLAW_MODELS=gemini-3.8-flash
 TRAVELCLAW_GOOGLE_API_KEY=your-key
 # Optional: omit this to use the default. A root ending in /v1beta is also accepted.
 TRAVELCLAW_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 ```
 
-Restart the API and check `GET /api/models`: `gemini-2.5-flash` should be `available: true`
-and `current`. `GEMINI_API_KEY` is accepted as an alias, and `gemini-flash` is normalized to
-the canonical Flash id. A 404 now identifies the provider/model in the API log and explains the
-expected endpoint shape; it falls back safely to the local desk renderer.
+Restart the API and check `GET /api/models`: `gemini-3.8-flash` should be `available: true`
+and `current`. `GEMINI_API_KEY` is accepted as an alias, `gemini-flash` is normalized to the
+current Flash id, and `gemini-pro` to `gemini-3.1-pro-preview` — the desk offers
+`gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and
+`gemini-3.1-pro-preview`, and a model list entry it does not know still runs, at a
+conservative pace.
+
+Use a current generation. A Gemini API key created after the Gemini 3 rollout answers 404
+("no longer available to new users") for `gemini-2.5-*` and for everything older, so a
+deployment pinned to `gemini-2.5-pro` runs every turn on the desk renderer. TravelClaw warns
+about a legacy id on boot, and any 404 from a live provider is followed in the log by the
+ids the key can actually run — fetched from the documented `GET {base_url}/models`, never
+from a provider error body:
+
+```bash
+curl https://generativelanguage.googleapis.com/v1beta/openai/models \
+  -H "Authorization: Bearer $GEMINI_API_KEY"
+```
+
+TravelClaw speaks the OpenAI-compatible chat completions shape on every provider path —
+Google, xAI, DeepSeek, and Kimi — so one request builder, one tool-call parser, and one
+fallback serve them all. Google's newer Interactions API is SDK-first and would add a second
+shape for no travel-desk feature this version uses.
 
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 

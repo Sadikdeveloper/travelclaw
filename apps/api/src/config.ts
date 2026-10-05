@@ -237,18 +237,20 @@ function configuredModelProvider(value: string | undefined): ConfigModelProvider
 }
 
 /**
- * A couple of human-friendly Gemini aliases are common in copied setup guides.
- * The API needs the canonical id; normalizing it here means `gemini-flash` does
- * not become a request for a model Google cannot find.
+ * Human-friendly Gemini aliases are common in copied setup guides. The API needs the
+ * canonical id, and the canonical id has to be a current one: `gemini-2.5-*` answers 404
+ * ("no longer available to new users") for a key created after the Gemini 3 rollout, so the
+ * aliases point at the Gemini 3 generation instead. Google's current ids are listed by
+ * `GET https://generativelanguage.googleapis.com/v1beta/openai/models`.
  */
 function normalizeModelName(value: string): string {
   const name = value.trim();
   const normalized = name.toLowerCase().replace(/[ _]+/g, '-');
   if (normalized === 'gemini-flash' || normalized === 'gemini-flash-latest') {
-    return 'gemini-2.5-flash';
+    return 'gemini-3.8-flash';
   }
   if (normalized === 'gemini-pro' || normalized === 'gemini-pro-latest') {
-    return 'gemini-2.5-pro';
+    return 'gemini-3.1-pro-preview';
   }
   return name;
 }
@@ -263,7 +265,7 @@ function modelNameFrom(
     case 'openai':
       return 'gpt-4o-mini';
     case 'google':
-      return 'gemini-2.5-flash';
+      return 'gemini-3.8-flash';
     case 'xai':
       return 'grok-beta';
     case 'deepseek':
@@ -271,9 +273,9 @@ function modelNameFrom(
     case 'kimi':
       return 'moonshot-v1-32k';
     case 'mock':
-      // A bare Gemini key is a complete local configuration: use Flash rather
-      // than making an operator also discover a second model-id setting.
-      return googleApiKey ? 'gemini-2.5-flash' : 'travelclaw-local';
+      // A bare Gemini key is a complete local configuration: use the current Flash
+      // rather than making an operator also discover a second model-id setting.
+      return googleApiKey ? 'gemini-3.8-flash' : 'travelclaw-local';
   }
 }
 

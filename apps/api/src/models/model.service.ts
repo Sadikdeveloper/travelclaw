@@ -1,10 +1,17 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { mockProvider, type ModelProvider } from '@travelclaw/agent-core';
 import type { ModelCatalogRecord, ModelRecord } from '@travelclaw/shared';
 import { loadConfig } from '../config';
-import { DESK_MODEL_ID, bestModelId, modelCatalog } from './model-catalog';
+import {
+  DESK_MODEL_ID,
+  bestModelId,
+  isLegacyGeminiModel,
+  modelCatalog,
+} from './model-catalog';
 import { openAiRequestBody, parseOpenAiMessage } from './openai';
 import { ModelCacheService } from './model-cache.service';
+import { formatModelList, listProviderModels } from './model-list';
 
 /** What the desk rendering says when the live model is unavailable. */
 const DESK = { provider: 'mock', model: DESK_MODEL_ID } as const;
@@ -13,6 +20,25 @@ const DESK = { provider: 'mock', model: DESK_MODEL_ID } as const;
 export class ModelService {
   private readonly logger = new Logger(ModelService.name);
   readonly cache = new ModelCacheService();
+  /**
+   * One model-list lookup per base URL and key. A 404 is a configuration fact, not a
+   * per-turn one, so a broken deployment pays for a single probe.
+   */
+  private readonly modelListCache = new Map<string, string>();
+
+  constructor() {
+    // A deployment still naming a Gemini 1.x/2.x model turns every live turn into a desk
+    // rendering once its key stops serving that model. Say so at boot, once, rather than
+    // only in the warning a failed turn leaves behind.
+    const config = loadConfig();
+    for (const id of new Set([config.modelName, ...config.modelNames])) {
+      if (isLegacyGeminiModel(id)) {
+        this.logger.warn(
+          `Model ${id} is a legacy Gemini id: a key created after the Gemini 3 rollout answers HTTP 404 for it ("no longer available to new users"). Prefer gemini-3.8-flash or gemini-3.1-pro-preview; GET /v1beta/openai/models lists what a key can run.`,
+        );
+      }
+    }
+  }
 
   /** Every model on offer, the pace on each, and which one a turn runs on by default. */
   catalog(): ModelCatalogRecord {
@@ -111,7 +137,7 @@ export class ModelService {
       if (!response.ok) {
         const hint =
           providerName === 'google' && response.status === 404
-            ? ' Gemini could not find the configured endpoint or model; use the OpenAI-compatible `/v1beta/openai` base URL and a current model id such as `gemini-2.5-flash`.'
+            ? ' Gemini could not find the configured endpoint or model; use the OpenAI-compatible `/v1beta/openai` base URL and a current model id such as `gemini-3.8-flash`.'
             : '';
         // Do not log an upstream response body: providers can echo request details
         // there. The provider/model/status is enough for an operator to diagnose a
@@ -119,6 +145,15 @@ export class ModelService {
         this.logger.warn(
           `Model ${providerName}/${modelName} HTTP ${response.status}; using desk rendering.${hint}`,
         );
+        if (response.status === 404) {
+          this.logger.warn(
+            await this.modelListNotice(
+              providerName,
+              config.modelBaseUrl,
+              config.modelApiKey,
+            ),
+          );
+        }
         return { text: input.fallback, ...DESK };
       }
       const { text, toolCalls } = parseOpenAiMessage(await response.json());
@@ -139,5 +174,27 @@ export class ModelService {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * What a 404 cannot say. `GET /models` succeeds exactly when the base URL is right, and
+   * names the ids when the model is the stale part — the difference between "retired model"
+   * and "wrong endpoint" without logging a provider error body.
+   */
+  private async modelListNotice(
+    provider: string,
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<string> {
+    const cacheKey = `${baseUrl}\u0000${createHash('sha256').update(apiKey).digest('hex')}`;
+    const cached = this.modelListCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const ids = await listProviderModels({ baseUrl, apiKey });
+    const notice = ids
+      ? `${provider} lists these models for this key: ${formatModelList(ids)}`
+      : `${provider} model list unavailable; check the base URL and key.`;
+    this.modelListCache.set(cacheKey, notice);
+    return notice;
   }
 }
