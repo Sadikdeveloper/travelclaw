@@ -1,4 +1,9 @@
-import type { ModelCatalogRecord, ModelLimits, ModelRecord, ModelProviderType } from '@travelclaw/shared';
+import type {
+  ModelCatalogRecord,
+  ModelLimits,
+  ModelRecord,
+  ModelProviderType,
+} from '@travelclaw/shared';
 import type { AppConfig } from '../config';
 
 /** Every turn limit on this desk is measured over this window. */
@@ -162,6 +167,51 @@ export const KNOWN_MODELS: KnownModelDef[] = [
     limits: { guest: 5, account: 30 },
   },
 
+  // CodeCraft (OpenAI-compatible aggregator). One key reaches model families this desk has
+  // no connector of its own for: Anthropic's Claude, Alibaba's Qwen, Zhipu's GLM. Ids in a
+  // family that already has a connector keep that connector's entry above, so naming a
+  // native key never silently reroutes a model through an aggregator.
+  {
+    id: 'claude-opus-5',
+    label: 'Claude Opus 5',
+    provider: 'codecraft',
+    tier: 'strong',
+    rank: 40,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'claude-opus-4.8',
+    label: 'Claude Opus 4.8',
+    provider: 'codecraft',
+    tier: 'strong',
+    rank: 39,
+    limits: { guest: 2, account: 15 },
+  },
+  {
+    id: 'claude-sonnet-5',
+    label: 'Claude Sonnet 5',
+    provider: 'codecraft',
+    tier: 'strong',
+    rank: 32,
+    limits: { guest: 3, account: 20 },
+  },
+  {
+    id: 'glm-5.3',
+    label: 'GLM-5.3',
+    provider: 'codecraft',
+    tier: 'strong',
+    rank: 27,
+    limits: { guest: 3, account: 20 },
+  },
+  {
+    id: 'qwen3.8-max',
+    label: 'Qwen3.8 Max',
+    provider: 'codecraft',
+    tier: 'strong',
+    rank: 26,
+    limits: { guest: 3, account: 20 },
+  },
+
   // Desk model
   {
     id: DESK_MODEL_ID,
@@ -200,6 +250,12 @@ export function labelFor(id: string): string {
   return modelDefFor(id)?.label ?? id;
 }
 
+/**
+ * Which connector an id belongs to, by name shape. This is a guess, not a statement: the
+ * desk states a provider only in a catalog entry above. The families an aggregator is the
+ * only way to reach — Anthropic's `claude-*`, Alibaba's `qwen*`, Zhipu's `glm-*`, and the
+ * `seed-*`/`muse-*` models — belong to CodeCraft.
+ */
 export function providerForModelId(id: string): ModelProviderType {
   if (id === DESK_MODEL_ID) return 'mock';
   const known = modelDefFor(id);
@@ -208,6 +264,80 @@ export function providerForModelId(id: string): ModelProviderType {
   if (id.startsWith('grok')) return 'xai';
   if (id.startsWith('deepseek')) return 'deepseek';
   if (id.startsWith('kimi') || id.startsWith('moonshot')) return 'kimi';
+  if (/^(?:claude|qwen|glm|seed|muse)/.test(id)) return 'codecraft';
+  return 'openai';
+}
+
+/**
+ * The base URL and key a provider runs on here; `apiKey` is empty when this deployment has
+ * no key for it.
+ *
+ * The generic slot (`TRAVELCLAW_MODEL_BASE_URL` / `TRAVELCLAW_MODEL_API_KEY`) serves the
+ * OpenAI-compatible default, and it stands in for CodeCraft when no dedicated key is set —
+ * pointing that one slot at an aggregator is a complete configuration, which is the option
+ * an operator already has without learning a second set of variables.
+ */
+export function credentialsFor(
+  config: AppConfig,
+  provider: ModelProviderType,
+): { baseUrl: string; apiKey: string } {
+  switch (provider) {
+    case 'google':
+      return {
+        baseUrl: config.googleBaseUrl,
+        apiKey: config.googleApiKey || config.modelApiKey,
+      };
+    case 'xai':
+      return { baseUrl: config.xaiBaseUrl, apiKey: config.xaiApiKey || config.modelApiKey };
+    case 'deepseek':
+      return {
+        baseUrl: config.deepseekBaseUrl,
+        apiKey: config.deepseekApiKey || config.modelApiKey,
+      };
+    case 'kimi':
+      return {
+        baseUrl: config.kimiBaseUrl,
+        apiKey: config.kimiApiKey || config.modelApiKey,
+      };
+    case 'codecraft':
+      return config.codecraftApiKey
+        ? { baseUrl: config.codecraftBaseUrl, apiKey: config.codecraftApiKey }
+        : { baseUrl: config.modelBaseUrl, apiKey: config.modelApiKey };
+    case 'mock':
+      return { baseUrl: '', apiKey: '' };
+    case 'openai':
+    default:
+      return { baseUrl: config.modelBaseUrl, apiKey: config.modelApiKey };
+  }
+}
+
+function hasProviderKey(config: AppConfig, provider: ModelProviderType): boolean {
+  return Boolean(credentialsFor(config, provider).apiKey);
+}
+
+/**
+ * The provider a configured model id actually runs on.
+ *
+ * A catalog entry decides outright. Otherwise the name shape is only a guess, so a family
+ * whose own connector has no key here is served through an aggregator when one is
+ * configured: one CodeCraft key reaches the Gemini, Grok, Kimi, and DeepSeek families too.
+ * With no aggregator key, the guess stands and the generic OpenAI-compatible slot serves it,
+ * exactly as before this existed.
+ */
+export function resolveProvider(config: AppConfig, id: string): ModelProviderType {
+  if (id === DESK_MODEL_ID) return 'mock';
+  const known = modelDefFor(id);
+  if (known) return known.provider;
+  const guessed = providerForModelId(id);
+  if (guessed === 'codecraft') {
+    // A claude/qwen/glm id the catalog has never heard of still runs on the aggregator
+    // when there is one; without a key it falls to the generic slot like any unknown id.
+    return hasProviderKey(config, 'codecraft') ? 'codecraft' : 'openai';
+  }
+  if (hasProviderKey(config, guessed)) return guessed;
+  if (config.modelProvider === 'codecraft' && hasProviderKey(config, 'codecraft')) {
+    return 'codecraft';
+  }
   return 'openai';
 }
 
@@ -230,20 +360,7 @@ function rankFor(id: string): number {
 
 export function isModelAvailable(config: AppConfig, id: string): boolean {
   if (id === DESK_MODEL_ID) return true;
-  const provider = providerForModelId(id);
-  switch (provider) {
-    case 'google':
-      return Boolean(config.googleApiKey || config.modelApiKey);
-    case 'xai':
-      return Boolean(config.xaiApiKey || config.modelApiKey);
-    case 'deepseek':
-      return Boolean(config.deepseekApiKey || config.modelApiKey);
-    case 'kimi':
-      return Boolean(config.kimiApiKey || config.modelApiKey);
-    case 'openai':
-    default:
-      return Boolean(config.modelApiKey);
-  }
+  return hasProviderKey(config, resolveProvider(config, id));
 }
 
 /**
@@ -260,7 +377,9 @@ function configuredIds(config: AppConfig): string[] {
 
 function entryFor(config: AppConfig, id: string): ModelRecord {
   const offline = id === DESK_MODEL_ID;
-  const provider = providerForModelId(id);
+  // The provider a turn would actually use, so the catalog cannot advertise one connector
+  // and run on another.
+  const provider = resolveProvider(config, id);
   return {
     id,
     label: labelFor(id),
@@ -280,10 +399,7 @@ function entryFor(config: AppConfig, id: string): ModelRecord {
  * one model's pace never moves a traveler onto another model; it only stops them, with a
  * message saying which model ran out.
  */
-export function bestModelId(
-  config: AppConfig,
-  tierPreference?: 'fast' | 'strong',
-): string {
+export function bestModelId(config: AppConfig, tierPreference?: 'fast' | 'strong'): string {
   const usable = configuredIds(config)
     .map((id) => entryFor(config, id))
     .filter((model) => model.available);

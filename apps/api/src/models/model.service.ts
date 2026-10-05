@@ -6,8 +6,10 @@ import { loadConfig } from '../config';
 import {
   DESK_MODEL_ID,
   bestModelId,
+  credentialsFor,
   isLegacyGeminiModel,
   modelCatalog,
+  resolveProvider,
 } from './model-catalog';
 import { openAiRequestBody, parseOpenAiMessage } from './openai';
 import { ModelCacheService } from './model-cache.service';
@@ -71,26 +73,14 @@ export class ModelService {
       return mockProvider(DESK_MODEL_ID);
     }
 
-    let baseUrl = config.modelBaseUrl;
-    let apiKey = config.modelApiKey;
-
-    if (model.provider === 'google') {
-      baseUrl = config.googleBaseUrl;
-      apiKey = config.googleApiKey || config.modelApiKey;
-    } else if (model.provider === 'xai') {
-      baseUrl = config.xaiBaseUrl;
-      apiKey = config.xaiApiKey || config.modelApiKey;
-    } else if (model.provider === 'deepseek') {
-      baseUrl = config.deepseekBaseUrl;
-      apiKey = config.deepseekApiKey || config.modelApiKey;
-    } else if (model.provider === 'kimi') {
-      baseUrl = config.kimiBaseUrl;
-      apiKey = config.kimiApiKey || config.modelApiKey;
-    }
+    // The catalog says which provider a model runs on; resolve it again here so a record
+    // built by hand (or by an older catalog) cannot send an id to the wrong endpoint.
+    const provider = resolveProvider(config, model.id);
+    const { baseUrl, apiKey } = credentialsFor(config, provider);
 
     if (apiKey) {
       return {
-        id: model.provider,
+        id: provider,
         model: model.id,
         // The live model may ask for tools. The mock cannot, so it keeps the router.
         usesTools: true,
@@ -99,7 +89,7 @@ export class ModelService {
             input,
             { ...config, modelBaseUrl: baseUrl, modelApiKey: apiKey },
             model.id,
-            model.provider,
+            provider,
           ),
       };
     }

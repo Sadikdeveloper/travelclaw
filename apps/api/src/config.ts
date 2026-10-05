@@ -24,7 +24,7 @@ export interface AppConfig {
    * when `TRAVELCLAW_MODEL_NAME` is omitted; the configured model id selects the
    * provider for every actual request.
    */
-  modelProvider: 'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi';
+  modelProvider: 'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi' | 'codecraft';
   modelBaseUrl: string;
   modelApiKey: string;
   modelName: string;
@@ -42,6 +42,14 @@ export interface AppConfig {
   /** Moonshot Kimi API key and optional base URL (OpenAI-compatible endpoint). */
   kimiApiKey: string | null;
   kimiBaseUrl: string;
+  /**
+   * CodeCraft and any other model aggregator that speaks the OpenAI-compatible chat
+   * completions shape on one base URL. It has no model family of its own, so unknown ids
+   * the desk cannot attribute to a connector above run here — Anthropic's `claude-*`,
+   * Alibaba's `qwen*`, Zhipu's `glm-*`, and the like.
+   */
+  codecraftApiKey: string | null;
+  codecraftBaseUrl: string;
   network: boolean;
   browserWorkerUrl: string | null;
   browserWorkerToken: string | null;
@@ -125,6 +133,8 @@ export function loadConfig(
   const provider = configuredModelProvider(env.TRAVELCLAW_MODEL_PROVIDER);
   const googleApiKey =
     env.TRAVELCLAW_GOOGLE_API_KEY?.trim() || env.GEMINI_API_KEY?.trim() || null;
+  const codecraftApiKey =
+    env.TRAVELCLAW_CODECRAFT_API_KEY?.trim() || env.CODECRAFT_API_KEY?.trim() || null;
   return {
     host: env.HOST || '0.0.0.0',
     port: Number(env.PORT || 3000),
@@ -136,7 +146,12 @@ export function loadConfig(
       '',
     ),
     modelApiKey: env.TRAVELCLAW_MODEL_API_KEY || '',
-    modelName: modelNameFrom(env.TRAVELCLAW_MODEL_NAME, provider, googleApiKey),
+    modelName: modelNameFrom(
+      env.TRAVELCLAW_MODEL_NAME,
+      provider,
+      googleApiKey,
+      codecraftApiKey,
+    ),
     modelNames: (env.TRAVELCLAW_MODELS || '')
       .split(',')
       .map(normalizeModelName)
@@ -172,6 +187,13 @@ export function loadConfig(
       env.MOONSHOT_BASE_URL ||
       env.KIMI_BASE_URL ||
       'https://api.moonshot.ai/v1'
+    ).replace(/\/$/, ''),
+    codecraftApiKey:
+      env.TRAVELCLAW_CODECRAFT_API_KEY?.trim() || env.CODECRAFT_API_KEY?.trim() || null,
+    codecraftBaseUrl: (
+      env.TRAVELCLAW_CODECRAFT_BASE_URL ||
+      env.CODECRAFT_BASE_URL ||
+      'https://codecraftapi.com/v1'
     ).replace(/\/$/, ''),
     network: env.TRAVELCLAW_NETWORK !== '0',
     ...browserConfig(env),
@@ -226,7 +248,14 @@ export function loadConfig(
   };
 }
 
-const LIVE_MODEL_PROVIDERS = ['openai', 'google', 'xai', 'deepseek', 'kimi'] as const;
+const LIVE_MODEL_PROVIDERS = [
+  'openai',
+  'google',
+  'xai',
+  'deepseek',
+  'kimi',
+  'codecraft',
+] as const;
 type ConfigModelProvider = AppConfig['modelProvider'];
 
 function configuredModelProvider(value: string | undefined): ConfigModelProvider {
@@ -259,6 +288,7 @@ function modelNameFrom(
   raw: string | undefined,
   provider: ConfigModelProvider,
   googleApiKey: string | null,
+  codecraftApiKey: string | null,
 ): string {
   if (raw?.trim()) return normalizeModelName(raw);
   switch (provider) {
@@ -272,10 +302,16 @@ function modelNameFrom(
       return 'deepseek-chat';
     case 'kimi':
       return 'moonshot-v1-32k';
+    case 'codecraft':
+      // The balanced Anthropic id, not the priciest one: like the Gemini default, a bare
+      // key gets a current, capable model the operator can then raise or lower in
+      // TRAVELCLAW_MODELS.
+      return 'claude-sonnet-5';
     case 'mock':
-      // A bare Gemini key is a complete local configuration: use the current Flash
-      // rather than making an operator also discover a second model-id setting.
-      return googleApiKey ? 'gemini-3.8-flash' : 'travelclaw-local';
+      // A bare Gemini or CodeCraft key is a complete local configuration: use a current
+      // model rather than making an operator also discover a second model-id setting.
+      if (googleApiKey) return 'gemini-3.8-flash';
+      return codecraftApiKey ? 'claude-sonnet-5' : 'travelclaw-local';
   }
 }
 

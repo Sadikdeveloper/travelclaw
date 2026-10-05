@@ -63,7 +63,8 @@ export interface ModelLimits {
   account: number;
 }
 
-export type ModelProviderType = 'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi';
+export type ModelProviderType =
+  'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi' | 'codecraft';
 
 /** One model this desk can run, with the pace it runs at. `limits: null` means no pace. */
 export interface ModelRecord {
