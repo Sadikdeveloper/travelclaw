@@ -105,7 +105,9 @@ export class GatewayService {
           user: files.user,
           agents: files.agents,
         },
-        memory: this.memory.recentLines(agent.id),
+        // Relevant notes, not just the last few: the traveler's message is the
+        // query, and the prompt budget in agent-core keeps the turn the same size.
+        memory: this.memory.promptLines(agent.id, input.content),
         history,
         activeTrip: active
           ? {

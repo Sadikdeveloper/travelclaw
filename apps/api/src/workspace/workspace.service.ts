@@ -16,6 +16,7 @@ import {
   type WorkspaceView,
 } from '@travelclaw/shared';
 import { loadConfig } from '../config';
+import { parseMemoryBullet } from '../memory/bullet';
 
 const FILES: Record<keyof WorkspaceFiles, WorkspaceFileName> = {
   soul: 'SOUL.md',
@@ -111,6 +112,24 @@ export class WorkspaceService implements OnModuleInit {
     const daily = resolve(this.root, 'memory', `${day}.md`);
     const existing = existsSync(daily) ? readFileSync(daily, 'utf8') : `# ${day}\n`;
     if (!existing.includes(line)) writeFileSync(daily, `${existing.trimEnd()}\n${line}\n`);
+  }
+
+  /**
+   * Drop a forgotten note's bullet from the `MEMORY.md` that agent reads. The file
+   * is imported on boot, so a line left behind would put the row straight back.
+   * The daily journal under `memory/<day>.md` is an append-only log of what the
+   * desk wrote and keeps its line.
+   */
+  removeMemory(body: string, agentId?: string): boolean {
+    const file = this.resolve('MEMORY.md', agentId).path;
+    const current = readFileSync(file, 'utf8');
+    const kept = current
+      .split('\n')
+      .filter((line) => parseMemoryBullet(line)?.body !== body)
+      .join('\n');
+    if (kept === current) return false;
+    writeFileSync(file, kept.endsWith('\n') ? kept : `${kept}\n`);
+    return true;
   }
 
   identityField(label: string, agentId?: string): string | undefined {
