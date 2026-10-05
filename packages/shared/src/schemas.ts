@@ -134,6 +134,17 @@ export const createMemorySchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
 });
 
+/**
+ * `GET /api/memory`. Without `q` the desk lists notes, newest first; with `q` it
+ * searches them and scores each hit. `limit` arrives as a query string.
+ */
+export const memoryQuerySchema = z.object({
+  agentId: z.string().trim().min(1).max(40).optional(),
+  q: z.string().trim().max(400).optional(),
+  kind: memoryKindSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
 export const workspaceFileSchema = z.enum([
   'SOUL.md',
   'IDENTITY.md',
@@ -210,6 +221,7 @@ export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 export type ChatInput = z.infer<typeof chatSchema>;
 export type AttachmentInput = z.infer<typeof attachmentSchema>;
 export type CreateMemoryInput = z.infer<typeof createMemorySchema>;
+export type MemoryQueryInput = z.infer<typeof memoryQuerySchema>;
 export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceSchema>;
 export type CreateTripInput = z.infer<typeof createTripSchema>;
 export type UpdateTripInput = z.infer<typeof updateTripSchema>;

@@ -168,6 +168,15 @@ export interface MemoryRecord {
   createdAt: string;
 }
 
+/**
+ * A note plus how well it answered one search: BM25 over title and body times a
+ * bounded recency factor. Higher is better, and scores are comparable within a
+ * single search only — they are not a stable absolute across queries.
+ */
+export interface MemorySearchResult extends MemoryRecord {
+  score: number;
+}
+
 export interface HeartbeatRecord {
   id: string;
   agentId: string;

@@ -17,7 +17,7 @@ Shared packages hold the contracts and the tool engine so both can be tested wit
 | **Keys, not code**               | Provider keys are the operator's env, resolved by connector name — `currency`, `weather`, `flight`, and `stay`. Multiple compatible flight or stay adapters can be configured; with none, the desk brief is unchanged. Keys add no traveler setting, prompt text, or model tool.                                                                                                                   |
 | **A pace per model**             | The desk runs the strongest model it can run — nobody picks one, guests least of all. A turn limit belongs to a _model_, not the desk: the desk's own model runs here and costs nothing, so it is not paced, while a model with a provider bill carries a per-tier allowance in `apps/api/src/models/model-catalog.ts`. `GET /api/models` publishes both and the model in use.                     |
 | **What the traveler sees**       | A chat and a sidebar of their chats, with a process trail under each reply: which tools ran and who asked for them, which desks woke, which model answered. The composer carries an `Agent mode` tag, a stop button while a turn runs, and image/document attach (metadata and thumbnails only — files stay on the device). Tools are functions we register, called by the model or by the router. |
-| **Memory you can read**          | `MEMORY.md` is the human-readable copy. SQLite is the index. Kinds are `preference`, `fact`, and `decision`.                                                                                                                                                                                                                                                                                       |
+| **Memory you can search**        | `MEMORY.md` is the human-readable copy; SQLite holds the notes and a local FTS5 index over them. Kinds are `preference`, `fact`, and `decision`. `GET /api/memory?q=` ranks by title, body, and recency — no embeddings, no network.                                                                                                                                                               |
 | **Heartbeat**                    | A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips starting within 14 days. It does not send a chat message. `NO_REPLY` means nothing needed attention.                                                                                                                                                                                                              |
 | **Channels as an explicit slot** | Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed.                                                                                                                                      |
 
@@ -48,7 +48,7 @@ flowchart LR
 ## Turns
 
 1. Persist the traveler message.
-2. Load persona files, recent memory, and the active trip.
+2. Load persona files, the memory that answers the message, and the active trip.
 3. Offer the tool catalog to the model, and read the message with the router (triggers on each tool definition, plus a few structured patterns: city + dates, currency pair, "remember").
 4. Run at most three tools, model calls and router picks together. A tool both picked runs once. Arguments that do not validate are rejected, not coerced.
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
@@ -68,7 +68,9 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 
 ## Memory
 
-On boot, new bullets in `MEMORY.md` are imported. Remembering from chat appends a bullet and a row.
+On boot, new bullets in `MEMORY.md` are imported. Remembering from chat appends a bullet and a row; forgetting a note removes both, so the next start cannot bring it back.
+
+Search is local: an FTS5 index over the notes, ranked by `bm25()` with the title weighted above the body, times a bounded recency factor, so an old note that answers the question beats a fresh one that does not. A turn gets the notes that answer it instead of the last twelve, inside the budget it always had. No embeddings, no provider, no network — see [Memory](docs/architecture.md#memory).
 
 ## Heartbeat
 

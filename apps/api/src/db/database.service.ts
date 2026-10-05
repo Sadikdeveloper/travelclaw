@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from '../config';
+import { ensureMemoryFts } from './memory-search-schema';
 import { SCHEMA } from './schema';
 
 type SqlValue = string | number | null | bigint | Uint8Array;
@@ -15,6 +16,7 @@ type SqlValue = string | number | null | bigint | Uint8Array;
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
   private db!: DatabaseSync;
+  private memoryFts = false;
 
   onModuleInit() {
     const { databasePath } = loadConfig();
@@ -28,6 +30,28 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateToAttachments();
     this.db.exec(SCHEMA);
     this.migrateOfferProviderIds();
+    this.ensureMemorySearch();
+  }
+
+  /**
+   * The memory search index is derived from `memory_notes`, so every boot
+   * reconciles it instead of trusting it. It is created after `SCHEMA` because it
+   * shadows a table `SCHEMA` owns, and a SQLite without FTS5 leaves search on its
+   * `LIKE` scan rather than failing the start.
+   */
+  private ensureMemorySearch() {
+    const status = ensureMemoryFts(this);
+    this.memoryFts = status.available;
+    if (!status.available) {
+      this.logger.warn(`Memory search has no FTS5 index: ${status.reason}`);
+    } else if (status.rebuilt) {
+      this.logger.log('Rebuilt the memory search index from memory_notes.');
+    }
+  }
+
+  /** False when this SQLite has no usable FTS5 index; search scans instead. */
+  hasMemoryFts(): boolean {
+    return this.memoryFts;
   }
 
   /** Old installs used a skill catalog. Rename before CREATE so history is kept. */
@@ -165,6 +189,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   all<T>(sql: string, ...params: SqlValue[]): T[] {
     return this.db.prepare(sql).all(...params) as T[];
+  }
+
+  /** Statements with no parameters and no result, such as DDL. */
+  exec(sql: string) {
+    this.db.exec(sql);
   }
 
   get<T>(sql: string, ...params: SqlValue[]): T | undefined {

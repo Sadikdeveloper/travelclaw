@@ -2,6 +2,37 @@ import type { ToolResult, TurnRequest } from './types';
 
 const EMPTY = /^\s*$/;
 
+/**
+ * The memory budget for one turn. Twelve lines is what the desk has always
+ * injected; the byte cap makes the budget explicit now that search can surface a
+ * long note from months ago instead of the last twelve bullets. Both are enforced
+ * here, at assembly, so no caller can balloon a turn by passing more.
+ */
+export const MEMORY_MAX_LINES = 12;
+export const MEMORY_MAX_BYTES = 2000;
+
+const encoder = new TextEncoder();
+
+/**
+ * Keep the lines that fit the budget, in the order they were given, so the most
+ * relevant note is dropped last. A single line too long to fit is skipped rather
+ * than truncated — a half note is worse than the next whole one.
+ */
+export function fitMemoryLines(lines: readonly string[]): string[] {
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const line of lines) {
+    if (kept.length >= MEMORY_MAX_LINES) break;
+    const text = line.trim();
+    if (!text) continue;
+    const cost = encoder.encode(text).length + 1; // plus the newline it is joined with
+    if (bytes + cost > MEMORY_MAX_BYTES) continue;
+    bytes += cost;
+    kept.push(text);
+  }
+  return kept;
+}
+
 export function assemblePrompt(
   input: TurnRequest,
   tools: ToolResult[],
@@ -13,7 +44,7 @@ export function assemblePrompt(
     section('Traveler', input.persona.user),
     section('Desk rules', input.persona.agents),
   ].filter(Boolean);
-  const memory = input.memory.filter((line) => line.trim()).slice(0, 12);
+  const memory = fitMemoryLines(input.memory);
   const trip = input.activeTrip
     ? `Active trip: ${input.activeTrip.title} in ${input.activeTrip.destination}, ${input.activeTrip.startDate} to ${input.activeTrip.endDate}, status ${input.activeTrip.status}.`
     : 'No active trip is open.';

@@ -182,7 +182,7 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 ## Turns
 
 1. Persist the traveler message.
-2. Load persona files, recent memory, and the active trip.
+2. Load persona files, the memory that answers the message, and the active trip.
 3. Send the tool catalog to the model and let it ask for the tools it wants. The router also reads the message from triggers on each tool definition, plus a few structured patterns (city + dates, currency pair, "remember").
 4. Run at most three tools, counting model calls and router picks together. A tool both picked runs once. They are TypeScript functions, not markdown.
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
@@ -317,7 +317,56 @@ A hold exists only when the source explicitly confirms it with a reference. A se
 
 ## Memory
 
-`MEMORY.md` is the human-readable copy. SQLite is the index the UI lists. On boot, new bullets in the file are imported. Remembering from chat appends a bullet and a row. Kinds are `preference`, `fact`, and `decision`.
+`MEMORY.md` is the human-readable copy. `memory_notes` is the note, and the UI
+lists what is in that table. On boot, new bullets in the file are imported.
+Remembering from chat appends a bullet and a row; forgetting a note removes the
+row **and** its bullet, or the next boot would import it straight back. Kinds are
+`preference`, `fact`, and `decision`.
+
+### Search
+
+Search is local: the same SQLite file, no embeddings, no provider call, no
+network. `memory_notes_fts` is a derived FTS5 index over the notes — a shadow,
+never a second source of truth. Three triggers keep it in step (`AFTER INSERT`,
+`AFTER UPDATE OF` the columns it stores, `AFTER DELETE`), and every boot
+reconciles it, because `CREATE VIRTUAL TABLE IF NOT EXISTS` silently keeps an
+index an older version defined:
+
+- the persisted DDL is compared with the one this build expects, and a mismatch —
+  a different tokenizer, say — is dropped, recreated, and re-copied;
+- a name that belongs to an ordinary table is left alone rather than dropped;
+- the notes are re-copied whenever the index cannot be shown to agree with the
+  table, which covers a missing row and a trigger somebody dropped.
+
+`GET /api/memory?q=…&kind=…&limit=…` scores each hit `relevance × recency`:
+`bm25()` over title and body with the title weighted three to one, times an
+exponential decay with a 90-day half-life that stops at 0.6, so an old preference
+is still a preference. Scores are comparable within one search only. Equal scores
+fall back to title, then id, so one query has one order. Without `q` the same
+route lists notes, newest first, as before.
+
+Two properties of FTS5 shape the query builder, and both cost other agents
+several rounds of bug reports:
+
+- **Traveler text is never query syntax.** Terms are extracted as runs of letters,
+  digits, and `_`, then sent as quoted literals joined by `AND`. Unquoted, `AND OR
+NOT` or an unclosed quote is a syntax error, and `NEAR/3`, `*`, `^`, or `:`
+  would change what is asked for. A query with no words in it yields no search at
+  all, rather than every note the desk has.
+- **`AND` between terms is too strict, and unicode61 cannot segment every
+  script.** An empty strict search is retried with the terms `OR`-joined, so a
+  question worded differently from the note it is about still lands. A query
+  holding a script with no word delimiters — Chinese, Japanese, Korean, Thai — is
+  answered by an escaped `LIKE` scan, because unicode61 keeps a run of ideographs
+  as a single token and a substring of a token can never match. That same scan is
+  the fallback when the SQLite has no FTS5: search degrades, the gateway does not
+  fail to start.
+
+The prompt takes the notes a turn is about instead of the last twelve: the
+traveler's message is the query, the most relevant notes come first, and the most
+recent notes fill the rest. The budget is what it always was — twelve lines — and
+is now explicit about bytes too (2000), enforced in `assemblePrompt` so no caller
+can balloon a turn.
 
 ## Heartbeat
 
@@ -326,6 +375,12 @@ A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips
 ## Data
 
 Node's built-in `node:sqlite` keeps the gateway free of native addons. The API is still marked experimental by Node, so the start script silences that warning. Schema is applied on boot from `apps/api/src/db/schema.ts`. There is no migration framework yet. If you change columns, delete `data/travelclaw.db` or write a small versioned statement.
+
+The memory search index is the one piece of schema deliberately kept out of
+`SCHEMA`: FTS5 is a compile-time option, and a SQLite built without it must not
+stop the gateway from starting. It is created after `SCHEMA` by
+`apps/api/src/db/memory-search-schema.ts`, which probes, reconciles, and reports
+why it declined.
 
 ## Control UI in production
 
