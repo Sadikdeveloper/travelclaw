@@ -19,7 +19,7 @@ Shared packages hold the contracts and the tool engine so both can be tested wit
 | **What the traveler sees**       | A chat and a sidebar of their chats, with a process trail under each reply: which tools ran and who asked for them, which desks woke, which model answered. The composer carries an `Agent mode` tag, a stop button while a turn runs, and image/document attach (metadata and thumbnails only — files stay on the device). Tools are functions we register, called by the model or by the router. |
 | **Memory you can search**        | `MEMORY.md` is the human-readable copy; SQLite holds the notes and a local FTS5 index over them. Kinds are `preference`, `fact`, and `decision`. `GET /api/memory?q=` ranks by title, body, and recency — no embeddings, no network.                                                                                                                                                               |
 | **Heartbeat**                    | A one-minute cron looks for due jobs. The seeded job is `departure-watch`: trips starting within 14 days. It does not send a chat message. `NO_REPLY` means nothing needed attention.                                                                                                                                                                                                              |
-| **Channels as an explicit slot** | Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed.                                                                                                                                      |
+| **Channels as an explicit slot** | Webchat is built in. Telegram is ready behind `TELEGRAM_BOT_TOKEN` (polling, no public URL needed); Discord remains `not_configured` until its adapter is written. Registration is explicit. Autoload is later, because scanning a folder for code is an easy way to run something nobody reviewed. |
 
 ## How it fits together
 
@@ -64,7 +64,7 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 
 ## Channels
 
-`ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram and Discord stay `not_configured` until an adapter is written. Registration lives in `ChannelsService`.
+`ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram is implemented behind `TELEGRAM_BOT_TOKEN` (polling adapter in `apps/api/src/channels/telegram/`); Discord stays `not_configured` until its adapter is written. Registration lives in `ChannelsService`.
 
 ## Memory
 

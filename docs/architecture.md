@@ -210,7 +210,7 @@ Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, ar
 
 ## Channels
 
-`ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram and Discord are registered as `not_configured` until a token exists and an adapter is written. Registration is explicit in `ChannelsService`. Autoload is a later task because scanning a folder for code is an easy way to run something nobody reviewed.
+`ChannelPlugin` in `@travelclaw/shared` is the extension contract. Webchat is built in. Telegram is implemented behind `TELEGRAM_BOT_TOKEN` as a polling adapter in `apps/api/src/channels/telegram/` — inbound updates become ordinary turns via `GatewayService`, outbound replies (including desk completion prompts) go back to the originating chat, token is never logged, and session keys use the room id as peer so group histories do not collapse. Discord remains `not_configured` until its adapter is written. Registration is explicit in `ChannelsService`. Autoload is a later task because scanning a folder for code is an easy way to run something nobody reviewed.
 
 ## Connectors
 

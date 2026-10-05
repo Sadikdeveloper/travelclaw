@@ -4,7 +4,7 @@ Work in this order. Later tasks assume the earlier ones exist. Pick the first un
 
 This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, remain deferred pending the reviewed-workflow design in #25. Tools are functions we register. The traveler does not see a tool catalog.
 
-Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
+Checked on 2026-10-05, while adding Telegram extension behind TELEGRAM_BOT_TOKEN.
 
 ## Done
 
@@ -30,7 +30,7 @@ Without a search key, those desks still write the same brief. With an operator k
 - [x] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [x] **SQLite FTS memory search.** An FTS5 index over `memory_notes`, kept in step by triggers and reconciled on boot. Ranking is `bm25()` with the title weighted three to one, times a bounded recency factor; the kind filter stays. The prompt searches with the traveler's message instead of taking the last twelve notes, inside the same budget. Search stays local: no embeddings, no network. See [Memory](architecture.md#memory).
 - [x] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`. Each file falls back to the shared one when the agent folder has no override, `GET /api/workspace?agentId=` names the file each slot reads, and an agent id that tries to climb out of the workspace is refused.
-- [ ] **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
+- [x] **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Polling adapter, explicit registration, inbound turns via gateway, outbound replies including desk completions, token never logged. See `apps/api/src/channels/telegram/`.
 - [ ] **Discord extension.** Same contract as Telegram.
 - [ ] **iCal export** for a planned trip.
 - [ ] **Map view** of itinerary anchors. Static coordinates first, no tracking.
