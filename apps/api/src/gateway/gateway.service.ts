@@ -3,7 +3,10 @@ import {
   completeTurn,
   deskName,
   extractHints,
+  flightQueryFrom,
   planAgentDesks,
+  stayQueryFrom,
+  type DeskKind,
   type OutlineData,
 } from '@travelclaw/agent-core';
 import {
@@ -85,7 +88,12 @@ export class GatewayService {
     // Desk routing reads the traveler's own words: a file named "hotel-list.pdf" is
     // not itself a hotel request. The model, which can reason about what a file is,
     // gets the attachment note as part of its turn text.
-    const desks = planAgentDesks(input.content);
+    // A desk is a live search, not a generic flight/hotel-shaped reply. It starts
+    // only when the traveler gave the fields its source requires *and* this install
+    // has a real search path. Incomplete requests stay in the normal conversation,
+    // where the model can ask a useful follow-up instead of creating a fake "Ready"
+    // card that merely repeats the missing fields.
+    const desks = this.searchableDesks(input.content);
     if (desks.length) return this.startDesks(session.id, input.content, desks, userId);
 
     const history = this.sessions.recentHistory(session.id).slice(0, -1);
@@ -182,6 +190,24 @@ export class GatewayService {
     };
   }
 
+  /**
+   * Keep the automatic desk hand-off honest: a provider/browser has work to do
+   * only after the request can form a valid query. The normal model turn handles
+   * the conversational part (clarifying, suggesting alternatives, and so on).
+   */
+  private searchableDesks(content: string): DeskKind[] {
+    const hints = extractHints(content);
+    return planAgentDesks(content).filter((kind) => {
+      const configured = this.connectors
+        .searchProvidersFor(kind)
+        .some((source) => Boolean(source.baseUrl && source.apiKey));
+      if (!configured && !this.tasks.canResearchWithBrowser()) return false;
+      return kind === 'flight'
+        ? Boolean(flightQueryFrom(content, hints).query)
+        : Boolean(stayQueryFrom(content, hints).query);
+    });
+  }
+
   private async startDesks(
     sessionId: string,
     content: string,
@@ -191,8 +217,8 @@ export class GatewayService {
     const names = desks.map((kind) => deskName(kind));
     const reply =
       names.length === 2
-        ? 'Flight desk and Stay desk are on this. I will ask when each one finishes. Nothing is booked.'
-        : `${names[0]} is on this. I will ask when it finishes. Nothing is booked.`;
+        ? 'Flight desk and Stay desk are searching the configured sources. I will show verified results when each finishes. Nothing is booked.'
+        : `${names[0]} is searching the configured sources. I will show verified results when it finishes. Nothing is booked.`;
     const message = this.sessions.append(sessionId, 'assistant', reply, [], {
       provider: 'desk',
       model: 'agents',

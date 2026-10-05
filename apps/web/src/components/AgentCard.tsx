@@ -1,11 +1,12 @@
-import type { AgentTaskRecord, OfferRecord, TaskDecision } from '@travelclaw/shared';
-import { Check, Clock3, Hotel, Plane, Undo2 } from 'lucide-react';
+import type { AgentTaskRecord, OfferRecord } from '@travelclaw/shared';
+import { Clock3, Hotel, Plane } from 'lucide-react';
 import { BrowserResearch } from './BrowserResearch';
 import { formatWhen } from '../format';
 
 const label: Record<AgentTaskRecord['status'], string> = {
-  working: 'Working',
-  awaiting: 'Ready for you',
+  working: 'Searching',
+  awaiting: 'Needs your input',
+  completed: 'Search finished',
   accepted: 'Complete',
   rejected: 'Sent back',
 };
@@ -17,16 +18,12 @@ const label: Record<AgentTaskRecord['status'], string> = {
  */
 export function AgentCard({
   task,
-  busy,
   holdingOfferId,
-  onDecide,
   onHold,
   onStopBrowser,
 }: {
   task: AgentTaskRecord;
-  busy: boolean;
   holdingOfferId: string;
-  onDecide: (decision: TaskDecision) => void;
   onHold: (offerId: string) => void;
   onStopBrowser: () => void;
 }) {
@@ -68,34 +65,10 @@ export function AgentCard({
       ) : null}
       {task.browser ? <BrowserResearch run={task.browser} onStop={onStopBrowser} /> : null}
       {task.status === 'awaiting' ? (
-        <div className="row agent-card-actions">
-          <button
-            className="btn copper"
-            type="button"
-            disabled={busy}
-            onClick={() => onDecide('complete')}
-          >
-            <Check size={15} aria-hidden="true" />
-            Yes, complete
-          </button>
-          <button
-            className="btn-ghost"
-            type="button"
-            disabled={busy}
-            onClick={() => onDecide('no')}
-          >
-            No
-          </button>
-          <button
-            className="btn-ghost"
-            type="button"
-            disabled={busy}
-            onClick={() => onDecide('still_working')}
-          >
-            <Undo2 size={14} aria-hidden="true" />
-            Still working
-          </button>
-        </div>
+        <p className="agent-card-followup">
+          Reply in chat with the requested detail or a change. The desk will not repeat this
+          search until there is a new request to run.
+        </p>
       ) : null}
     </article>
   );

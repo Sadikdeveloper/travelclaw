@@ -15,12 +15,12 @@ Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
 - [x] Vite UI, CI, and Docker
 - [x] Skill catalog removed. Tools stay in code.
 - [x] Traveler surface is a chat plus a sidebar of chats
-- [x] A flight request, a hotel request, or both wakes one or two desks in parallel
-- [x] When a desk finishes, the traveler can answer yes complete, no, or still working
+- [x] A complete flight or hotel search with a configured source wakes one or two desks in parallel; incomplete requests stay in chat for clarification
+- [x] A desk card says search finished only after a source actually finishes, then offers a dismissible Yes / No / Keep working task-success prompt; Keep working leaves the composer open and does not replay the stale query
 - [x] **Accounts.** Email register and sign-in, cookie session, and Google sign-in behind `TRAVELCLAW_GOOGLE_CLIENT_ID`. Chats belong to the signed-in account.
 - [x] **Model-called tools.** The tool catalog goes to the provider as callable tools. A malformed call is rejected, not coerced. The router stays the fallback when the provider is `mock`, has no key, or asks for nothing, and a tool both picked runs once.
 
-Without a search key, those desks still write the same brief. With an operator key, they can show provider offers. A hold is separate, explicit, and reported only after provider confirmation; nothing is purchased.
+Without a configured search source, flight and stay requests remain ordinary chat turns, so the model can clarify the request. With an operator key, complete search requests can show provider offers. A hold is separate, explicit, and reported only after provider confirmation; nothing is purchased.
 
 ## Next, in this order
 

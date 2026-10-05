@@ -298,12 +298,24 @@ describe('browser fallback through the authenticated gateway', () => {
     expect(task.browser.reason).toBe('worker_unavailable');
     expect(JSON.stringify(task)).not.toContain(token);
   });
-  it('does not start any browser or model call in offline mode', async () => {
+  it('does not start browser research in offline mode, and keeps the request in normal chat', async () => {
     process.env.TRAVELCLAW_NETWORK = '0';
-    const task = await search(await traveler());
-    expect(task.browser).toBeUndefined();
+    const agent = await traveler();
+    const chat = await agent
+      .post('/api/chat')
+      .send({ content: 'Find a flight from Lagos to Dubai on 2026-11-02 for one adult' });
+    expect(chat.status).toBe(201);
+    const tasks = await agent.get(`/api/sessions/${chat.body.session.id}/tasks`);
+    expect(tasks.body).toEqual([]);
     expect(seen).toHaveLength(0);
-    expect(modelCalls).toHaveLength(0);
+    // The model is allowed to answer the normal chat turn; it must never be given
+    // browser actions while no browser source is allowed to run.
+    expect(modelCalls.length).toBeGreaterThan(0);
+    expect(
+      modelCalls.every(
+        (call) => !call.tools?.some((tool) => tool.name.startsWith('browser_')),
+      ),
+    ).toBe(true);
   });
   it('cancels in-flight model work, releases the worker, and prevents later actions', async () => {
     blockModel = true;

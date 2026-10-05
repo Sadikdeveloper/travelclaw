@@ -196,7 +196,7 @@ weather, availability, or a booking. The router is also the fallback when a live
 returns no tool call. Either way the tool result is what the model narrates; a runtime
 error inside a tool becomes a failed result with the desk still speaking, not a dead turn.
 
-A flight or hotel request does not go through that tool list. It wakes one or two desks, Flight and Stay, and the traveler sees those working. When a desk finishes, the chat asks: yes complete, no, or still working. That answer does not purchase anything. When a provider key is configured, the desk may show real offers; asking the provider to hold one is a separate traveler action, and the desk reports a hold only after confirmation.
+A complete flight or hotel search does not go through that tool list. When this install has a configured provider source (or an authorized browser fallback) and the traveler supplied every field needed for the query, it wakes one or two desks, Flight and Stay. Incomplete requests remain ordinary model turns so the traveler gets a useful follow-up instead of a fake completion card. A desk is marked **Search finished** only after its source returns, then the traveler can dismiss or answer the task-success prompt: **Yes**, **No**, or **Keep working**. Keep working does not replay a stale query; it leaves the composer available for the next instruction. An authorized browser handoff is the exception and says what input is needed. A provider offer is not a booking. Asking its provider to hold it is a separate traveler action, and the desk reports a hold only after confirmation.
 
 ## What the traveler sees
 

@@ -109,7 +109,16 @@ export class ModelService {
         ),
       });
       if (!response.ok) {
-        this.logger.warn(`Model HTTP ${response.status}; using desk rendering`);
+        const hint =
+          providerName === 'google' && response.status === 404
+            ? ' Gemini could not find the configured endpoint or model; use the OpenAI-compatible `/v1beta/openai` base URL and a current model id such as `gemini-2.5-flash`.'
+            : '';
+        // Do not log an upstream response body: providers can echo request details
+        // there. The provider/model/status is enough for an operator to diagnose a
+        // bad base URL or retired model without exposing a key.
+        this.logger.warn(
+          `Model ${providerName}/${modelName} HTTP ${response.status}; using desk rendering.${hint}`,
+        );
         return { text: input.fallback, ...DESK };
       }
       const { text, toolCalls } = parseOpenAiMessage(await response.json());
