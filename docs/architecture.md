@@ -125,6 +125,16 @@ usable with a provider key — without one it still appears in `GET /api/models`
 `available: false`, so the control UI can show what a key would unlock rather than pretending
 the model is not there. The offline desk model is always available and never needs a key.
 
+An id is attributed to a provider by its catalog entry, or failing that by its name shape —
+and a shape is a guess, so a family whose own connector has no key here falls to an
+OpenAI-compatible aggregator when one is configured (`TRAVELCLAW_CODECRAFT_API_KEY`, or the
+generic `TRAVELCLAW_MODEL_BASE_URL`/`_API_KEY` slot), and otherwise to the generic slot. One
+aggregator key therefore reaches Claude, Qwen, and GLM ids outright and the Gemini, Grok,
+Kimi, and DeepSeek families when this deployment has no key of its own for them, while a
+native key always keeps its own family. `GET /api/models` reports the provider a turn would
+actually use, so the catalog cannot advertise one connector and run on another; an id no
+provider here can serve still appears with `available: false`.
+
 **Nobody chooses a model.** A guest cannot, a signed-in account does not have to, and a turn
 cannot: neither `POST /api/chat` nor `POST /api/sessions/:id/messages` accepts a `model` field
 any more, and a request that sends one is refused with `400 model_selection_unsupported`

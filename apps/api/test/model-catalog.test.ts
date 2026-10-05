@@ -55,6 +55,8 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     deepseekBaseUrl: 'https://api.deepseek.com/v1',
     kimiApiKey: null,
     kimiBaseUrl: 'https://api.moonshot.ai/v1',
+    codecraftApiKey: null,
+    codecraftBaseUrl: 'https://codecraftapi.com/v1',
     ...overrides,
   };
 }
@@ -191,7 +193,9 @@ describe('model catalog', () => {
     const dsCat = modelCatalog(deepseekCfg);
     expect(dsCat.current).toBe('deepseek-reasoner');
     expect(dsCat.models.find((m) => m.id === 'deepseek-reasoner')?.available).toBe(true);
-    expect(dsCat.models.find((m) => m.id === 'deepseek-reasoner')?.provider).toBe('deepseek');
+    expect(dsCat.models.find((m) => m.id === 'deepseek-reasoner')?.provider).toBe(
+      'deepseek',
+    );
 
     const kimiCfg = config({
       modelName: 'kimi-k3',

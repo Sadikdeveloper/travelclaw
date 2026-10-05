@@ -94,6 +94,50 @@ Google, xAI, DeepSeek, and Kimi — so one request builder, one tool-call parser
 fallback serve them all. Google's newer Interactions API is SDK-first and would add a second
 shape for no travel-desk feature this version uses.
 
+## CodeCraft and other aggregators
+
+CodeCraft exposes the same OpenAI-compatible shape on one base URL, so it plugs into that
+same path — and it is how this desk reaches model families it has no connector of its own
+for: Anthropic's Claude, Alibaba's Qwen, Zhipu's GLM.
+
+```dotenv
+TRAVELCLAW_MODEL_PROVIDER=codecraft
+TRAVELCLAW_MODEL_NAME=claude-sonnet-5
+TRAVELCLAW_MODELS=claude-sonnet-5,claude-opus-5
+TRAVELCLAW_CODECRAFT_API_KEY=cc_your-key
+# Optional: omit this to use the default.
+TRAVELCLAW_CODECRAFT_BASE_URL=https://codecraftapi.com/v1
+```
+
+`CODECRAFT_API_KEY` is accepted as an alias. Restart the API and check `GET /api/models`:
+`claude-opus-5` should be `available: true` and `current`, with a tighter pace than
+`claude-sonnet-5`, because it costs more to run. Keys look like `cc_` followed by 48
+characters and go only in the server env — the control UI never sees one.
+
+The aggregator is a fallback, never an override. A catalog entry decides where an id runs;
+for anything else the desk reads the id's name shape, and only when that family has no key
+here does it fall to CodeCraft — so one CodeCraft key can also reach `gemini-3.7-flash`,
+`grok-4.5`, or `deepseek-v4-flash-0731` if this deployment has no key of its own for them.
+Naming a native key keeps that family native.
+
+Any other OpenAI-compatible provider fits the same slot, with or without a dedicated key:
+
+```dotenv
+# Use the generic slot — no new key or provider name needed.
+TRAVELCLAW_MODEL_PROVIDER=openai
+TRAVELCLAW_MODEL_BASE_URL=https://codecraftapi.com/v1
+TRAVELCLAW_MODEL_API_KEY=cc_your-key
+TRAVELCLAW_MODEL_NAME=claude-opus-4.8
+TRAVELCLAW_MODELS=claude-opus-4.8,claude-sonnet-5
+```
+
+Verify what a key can run with the documented `GET {base_url}/models`, which the desk also
+probes after a 404 so the log names real ids instead of a provider error body:
+
+```bash
+curl https://codecraftapi.com/v1/models -H "Authorization: Bearer $CODECRAFT_API_KEY"
+```
+
 Skills, in the OpenClaw sense of a `SKILL.md` procedure loaded beside a tool, are not in this version. The desk has a fixed tool list. Add skills later only if a non-code change should alter when a tool runs.
 
 ## Sessions
