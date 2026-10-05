@@ -104,32 +104,18 @@ describe('gateway', () => {
     ).toBe(true);
   });
 
-  it('spins flight and stay desks, then accepts a decision', async () => {
+  it('keeps an incomplete flight and hotel request in the chat when no live source exists', async () => {
     const agent = await signedInAgent();
     const res = await agent.post('/api/chat').send({
       content: 'Book a flight and a hotel in Lisbon from Lagos on 2026-11-02',
     });
     expect(res.status).toBe(201);
-    expect(res.body.message.content).toMatch(/Nothing is booked/);
+    expect(res.body.message.content).toMatch(/need a city and dates/i);
     const tasks = await agent.get(`/api/sessions/${res.body.session.id}/tasks`);
     expect(tasks.status).toBe(200);
-    expect(tasks.body).toHaveLength(2);
-    expect(tasks.body.map((task: { agentName: string }) => task.agentName).sort()).toEqual([
-      'Flight desk',
-      'Stay desk',
-    ]);
-    expect(tasks.body.every((task: { status: string }) => task.status === 'awaiting')).toBe(
-      true,
-    );
-    expect(JSON.stringify(tasks.body)).toMatch(/Nothing was purchased/);
-    expect(JSON.stringify(tasks.body)).not.toMatch(/ticket is booked|room is booked/i);
-
-    const decision = await agent
-      .post(`/api/tasks/${tasks.body[0].id}/decision`)
-      .send({ decision: 'complete' });
-    expect(decision.status).toBe(201);
-    expect(decision.body.status).toBe('accepted');
-    expect(decision.body.summary).toMatch(/Nothing was purchased/);
+    // A card represents an actual configured search, not a generic request that
+    // has no checkout date and nowhere live to search.
+    expect(tasks.body).toEqual([]);
   });
 
   it('keeps chats scoped to the account that opened them', async () => {

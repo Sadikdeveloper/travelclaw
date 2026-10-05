@@ -625,6 +625,94 @@ h3 {
 .agent-card p {
   margin: 0;
 }
+.agent-card-followup {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+/* Completion feedback is an explicit, dismissible close-out — never an overlay
+   for an in-progress desk or a normal chat response. */
+.task-feedback-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(36, 31, 24, 0.24);
+  backdrop-filter: blur(2px);
+}
+.task-feedback-dialog {
+  width: min(100%, 720px);
+  overflow: hidden;
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 20px 70px rgba(42, 31, 19, 0.24);
+}
+.task-feedback-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 19px 20px 15px;
+}
+.task-feedback-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.task-feedback-head p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.task-feedback-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px;
+  font-size: 0.8rem;
+}
+.task-feedback-close:hover:not(:disabled) {
+  color: var(--ink);
+}
+.task-feedback-options {
+  margin: 0 18px 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.task-feedback-options button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 66px;
+  padding: 15px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fffdf9;
+  color: var(--ink);
+  text-align: left;
+  font-size: 1rem;
+}
+.task-feedback-options button:last-child {
+  border-bottom: 0;
+}
+.task-feedback-options button:hover:not(:disabled) {
+  background: #faf5ed;
+}
+.task-feedback-options button:disabled,
+.task-feedback-close:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
 .provider-offers {
   border-top: 1px solid var(--line);
   padding-top: 10px;

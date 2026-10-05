@@ -163,6 +163,7 @@ describe('flight and stay provider search', () => {
     expect(response.status).toBe(201);
     const task = await taskFor(agent, response.body.session.id);
 
+    expect(task.status).toBe('completed');
     expect(task.summary).toContain('Provider: Fare Shop. Retrieved ');
     expect(task.summary).toContain('182.4 EUR');
     expect(task.summary).toContain('offer only; no hold confirmed');
@@ -186,6 +187,33 @@ describe('flight and stay provider search', () => {
     expect(seen[0].url).not.toContain('operator-secret-1902');
     expect(JSON.stringify(task)).not.toContain('operator-secret-1902');
     expect(JSON.stringify(task)).not.toContain('fares.example.test/v1');
+  });
+
+  it('accepts completion feedback only after a real search, without re-running on Keep working', async () => {
+    process.env.TRAVELCLAW_FLIGHT_BASE_URL = 'https://fares.example.test';
+    process.env.TRAVELCLAW_FLIGHT_API_KEY = 'key';
+    searchBody = { provider: 'Fare Shop', offers: [flightOffer()] };
+    const agent = await guestAgent();
+
+    const response = await searchFlight(agent);
+    const task = await taskFor(agent, response.body.session.id);
+    expect(task.status).toBe('completed');
+    expect(seen).toHaveLength(1);
+
+    const keepWorking = await agent
+      .post(`/api/tasks/${task.id}/decision`)
+      .send({ decision: 'still_working' });
+    expect(keepWorking.status).toBe(201);
+    expect(keepWorking.body.status).toBe('awaiting');
+    expect(keepWorking.body.pass).toBe(1);
+    expect(keepWorking.body.summary).toMatch(/no duplicate search was started/i);
+    expect(seen).toHaveLength(1);
+
+    const accepted = await agent
+      .post(`/api/tasks/${task.id}/decision`)
+      .send({ decision: 'complete' });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.status).toBe('accepted');
   });
 
   it('searches and stores one flight and one stay provider in the same chat', async () => {
@@ -362,7 +390,7 @@ describe('flight and stay provider search', () => {
     expect(task.offers).toEqual([]);
   });
 
-  it('does not query a stay provider until check-out is known', async () => {
+  it('asks in chat for a stay check-out date instead of creating a completed-looking task', async () => {
     process.env.TRAVELCLAW_STAY_BASE_URL = 'https://beds.example.test';
     process.env.TRAVELCLAW_STAY_API_KEY = 'stay-key';
     const agent = await signedInAgent();
@@ -370,11 +398,12 @@ describe('flight and stay provider search', () => {
     const response = await agent.post('/api/chat').send({
       content: 'Find a hotel in Lisbon on 2026-11-02',
     });
-    const task = await taskFor(agent, response.body.session.id);
+    expect(response.status).toBe(201);
+    const tasks = await agent.get(`/api/sessions/${response.body.session.id}/tasks`);
 
-    expect(task.summary).toContain('Provider search needs a check-out date after check-in');
-    expect(task.offers).toEqual([]);
+    expect(tasks.body).toEqual([]);
     expect(seen).toHaveLength(0);
+    expect(response.body.message.content).toMatch(/need a city and dates/i);
   });
 
   it('reports provider errors without turning them into offers', async () => {
@@ -392,16 +421,15 @@ describe('flight and stay provider search', () => {
     expect(task.offers).toEqual([]);
   });
 
-  it('keeps the old brief and makes no provider call when the key is absent', async () => {
+  it('keeps a flight request in the normal chat when no source is configured', async () => {
     const agent = await signedInAgent();
 
     const response = await searchFlight(agent);
-    const task = await taskFor(agent, response.body.session.id);
+    expect(response.status).toBe(201);
+    const tasks = await agent.get(`/api/sessions/${response.body.session.id}/tasks`);
 
-    expect(task.summary).toBe(
-      'Flight desk finished a brief for Lagos to Lisbon on 2026-11-02. No seat is held. Nothing was purchased.',
-    );
-    expect(task.offers).toEqual([]);
+    expect(tasks.body).toEqual([]);
+    expect(response.body.message.content).toMatch(/need a city and dates/i);
     expect(seen).toHaveLength(0);
   });
 

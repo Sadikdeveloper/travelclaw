@@ -86,6 +86,11 @@ export class TasksService {
     private readonly browser: BrowserService,
   ) {}
 
+  /** Whether an authorized browser source can perform a live search without an adapter. */
+  canResearchWithBrowser(): boolean {
+    return this.browser.enabled();
+  }
+
   /** Used by the controller to check chat ownership before a decision touches a task. */
   sessionIdFor(taskId: string): string {
     return this.get(taskId).session_id;
@@ -165,8 +170,11 @@ export class TasksService {
 
   async decide(id: string, decision: TaskDecision): Promise<AgentTaskRecord> {
     const task = this.get(id);
-    if (task.status !== 'awaiting') {
-      throw new ConflictException('That desk is not waiting for a decision');
+    // `completed` is a source-backed terminal search result. The feedback dialog
+    // may acknowledge it, reject it, or ask for another message without pretending
+    // the search is still running. `awaiting` remains for a browser handoff.
+    if (task.status !== 'awaiting' && task.status !== 'completed') {
+      throw new ConflictException('That desk is not ready for feedback');
     }
     if (decision === 'still_working' && this.desksWithHoldRequests.has(id)) {
       throw new ConflictException('Wait for the provider hold request to finish first');
@@ -183,17 +191,14 @@ export class TasksService {
         summary: `${task.summary} You sent it back. Say what to change in the chat.`,
       });
     }
-    const again = this.patch(id, {
-      status: 'working',
-      pass: task.pass + 1,
-      summary: 'Still working.',
+    // Do not re-run the same request just because a person pressed "still
+    // working". It produced stale cards that immediately asked the same question
+    // again. A new chat message carries the correction or extra requirement and
+    // starts a new, traceable search when it is ready.
+    return this.patch(id, {
+      status: 'awaiting',
+      summary: `${task.summary} Continue in chat with any change or missing detail; no duplicate search was started.`,
     });
-    if (loadConfig().taskDelayMs > 0) {
-      void this.schedule([again]).catch((err) => this.logger.error(err));
-      return again;
-    }
-    await this.schedule([again]);
-    return mapTask(this.get(id), this.offersFor(id));
   }
 
   /**
@@ -309,7 +314,12 @@ export class TasksService {
     if (task.status !== 'working') return;
     const lead = briefLead(task.kind, task.request, task.pass);
     const summary = await this.searchIfConfigured(task, lead);
-    this.patch(id, { status: 'awaiting', summary });
+    // Finishing a source query is a real result even when it found no offers.
+    // Only an explicit browser handoff needs input from the traveler; the desk
+    // must not turn every completed brief into a "Ready for you" confirmation.
+    const browser = this.browser.state(id);
+    const status = browser?.status === 'handoff' ? 'awaiting' : 'completed';
+    this.patch(id, { status, summary });
   }
 
   async stopBrowser(id: string): Promise<AgentTaskRecord> {

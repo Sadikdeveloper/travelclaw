@@ -38,8 +38,9 @@ const TOOL_META: Record<string, { label: string; icon: LucideIcon }> = {
 };
 
 const TASK_STATUS: Record<AgentTaskRecord['status'], string> = {
-  working: 'on it now',
-  awaiting: 'waiting for your call',
+  working: 'searching now',
+  awaiting: 'needs a detail from you',
+  completed: 'finished with a real search result',
   accepted: 'you marked it complete',
   rejected: 'you sent it back',
 };

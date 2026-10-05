@@ -218,7 +218,13 @@ export interface ToolRunRecord {
 }
 
 export type DeskKind = 'flight' | 'stay';
-export type AgentTaskStatus = 'working' | 'awaiting' | 'accepted' | 'rejected';
+/**
+ * `completed` means the desk actually finished its search. `awaiting` is reserved
+ * for a genuine handoff (for example an authorized browser source needing input),
+ * not the old generic "is this done?" prompt.
+ */
+export type AgentTaskStatus =
+  'working' | 'awaiting' | 'completed' | 'accepted' | 'rejected';
 export type TaskDecision = 'complete' | 'no' | 'still_working';
 
 /**

@@ -19,7 +19,12 @@ export interface AppConfig {
   port: number;
   databasePath: string;
   workspacePath: string;
-  modelProvider: 'mock' | 'openai';
+  /**
+   * Kept for compatibility with existing installs. It selects the default model
+   * when `TRAVELCLAW_MODEL_NAME` is omitted; the configured model id selects the
+   * provider for every actual request.
+   */
+  modelProvider: 'mock' | 'openai' | 'google' | 'xai' | 'deepseek' | 'kimi';
   modelBaseUrl: string;
   modelApiKey: string;
   modelName: string;
@@ -87,6 +92,11 @@ export interface AppConfig {
 export function loadEnvFiles(cwd = process.cwd()): void {
   for (const file of [resolve(cwd, '.env'), resolve(cwd, '../../.env')]) {
     if (!existsSync(file)) continue;
+    // Resolve duplicate keys inside one file before touching process.env. This
+    // makes an intentional later override (for example replacing the mock model
+    // example with Gemini) work, while environment variables supplied by the
+    // process and the more-specific first .env file still win.
+    const entries = new Map<string, string>();
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -100,6 +110,9 @@ export function loadEnvFiles(cwd = process.cwd()): void {
       ) {
         value = value.slice(1, -1);
       }
+      entries.set(key, value);
+    }
+    for (const [key, value] of entries) {
       if (process.env[key] === undefined) process.env[key] = value;
     }
   }
@@ -109,7 +122,9 @@ export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
 ): AppConfig {
-  const provider = env.TRAVELCLAW_MODEL_PROVIDER === 'openai' ? 'openai' : 'mock';
+  const provider = configuredModelProvider(env.TRAVELCLAW_MODEL_PROVIDER);
+  const googleApiKey =
+    env.TRAVELCLAW_GOOGLE_API_KEY?.trim() || env.GEMINI_API_KEY?.trim() || null;
   return {
     host: env.HOST || '0.0.0.0',
     port: Number(env.PORT || 3000),
@@ -121,32 +136,37 @@ export function loadConfig(
       '',
     ),
     modelApiKey: env.TRAVELCLAW_MODEL_API_KEY || '',
-    modelName:
-      env.TRAVELCLAW_MODEL_NAME ||
-      (provider === 'openai' ? 'gpt-4o-mini' : 'travelclaw-local'),
+    modelName: modelNameFrom(env.TRAVELCLAW_MODEL_NAME, provider, googleApiKey),
     modelNames: (env.TRAVELCLAW_MODELS || '')
       .split(',')
-      .map((name) => name.trim())
+      .map(normalizeModelName)
       .filter(Boolean),
-    googleApiKey: env.TRAVELCLAW_GOOGLE_API_KEY?.trim() || env.GEMINI_API_KEY?.trim() || null,
-    googleBaseUrl: (
+    googleApiKey,
+    // Gemini's OpenAI-compatible endpoint requires the `/openai` segment. Accept
+    // either its full endpoint or the common API-root form to avoid a silent 404.
+    googleBaseUrl: googleOpenAiBaseUrl(
       env.TRAVELCLAW_GOOGLE_BASE_URL ||
-      env.GEMINI_BASE_URL ||
-      'https://generativelanguage.googleapis.com/v1beta/openai'
-    ).replace(/\/$/, ''),
+        env.GEMINI_BASE_URL ||
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+    ),
     xaiApiKey: env.TRAVELCLAW_XAI_API_KEY?.trim() || env.XAI_API_KEY?.trim() || null,
     xaiBaseUrl: (
       env.TRAVELCLAW_XAI_BASE_URL ||
       env.XAI_BASE_URL ||
       'https://api.x.ai/v1'
     ).replace(/\/$/, ''),
-    deepseekApiKey: env.TRAVELCLAW_DEEPSEEK_API_KEY?.trim() || env.DEEPSEEK_API_KEY?.trim() || null,
+    deepseekApiKey:
+      env.TRAVELCLAW_DEEPSEEK_API_KEY?.trim() || env.DEEPSEEK_API_KEY?.trim() || null,
     deepseekBaseUrl: (
       env.TRAVELCLAW_DEEPSEEK_BASE_URL ||
       env.DEEPSEEK_BASE_URL ||
       'https://api.deepseek.com/v1'
     ).replace(/\/$/, ''),
-    kimiApiKey: env.TRAVELCLAW_KIMI_API_KEY?.trim() || env.MOONSHOT_API_KEY?.trim() || env.KIMI_API_KEY?.trim() || null,
+    kimiApiKey:
+      env.TRAVELCLAW_KIMI_API_KEY?.trim() ||
+      env.MOONSHOT_API_KEY?.trim() ||
+      env.KIMI_API_KEY?.trim() ||
+      null,
     kimiBaseUrl: (
       env.TRAVELCLAW_KIMI_BASE_URL ||
       env.MOONSHOT_BASE_URL ||
@@ -204,6 +224,64 @@ export function loadConfig(
     stayBaseUrl: env.TRAVELCLAW_STAY_BASE_URL?.trim() || null,
     stayApiKey: env.TRAVELCLAW_STAY_API_KEY?.trim() || null,
   };
+}
+
+const LIVE_MODEL_PROVIDERS = ['openai', 'google', 'xai', 'deepseek', 'kimi'] as const;
+type ConfigModelProvider = AppConfig['modelProvider'];
+
+function configuredModelProvider(value: string | undefined): ConfigModelProvider {
+  const requested = value?.trim().toLowerCase();
+  return LIVE_MODEL_PROVIDERS.includes(requested as (typeof LIVE_MODEL_PROVIDERS)[number])
+    ? (requested as ConfigModelProvider)
+    : 'mock';
+}
+
+/**
+ * A couple of human-friendly Gemini aliases are common in copied setup guides.
+ * The API needs the canonical id; normalizing it here means `gemini-flash` does
+ * not become a request for a model Google cannot find.
+ */
+function normalizeModelName(value: string): string {
+  const name = value.trim();
+  const normalized = name.toLowerCase().replace(/[ _]+/g, '-');
+  if (normalized === 'gemini-flash' || normalized === 'gemini-flash-latest') {
+    return 'gemini-2.5-flash';
+  }
+  if (normalized === 'gemini-pro' || normalized === 'gemini-pro-latest') {
+    return 'gemini-2.5-pro';
+  }
+  return name;
+}
+
+function modelNameFrom(
+  raw: string | undefined,
+  provider: ConfigModelProvider,
+  googleApiKey: string | null,
+): string {
+  if (raw?.trim()) return normalizeModelName(raw);
+  switch (provider) {
+    case 'openai':
+      return 'gpt-4o-mini';
+    case 'google':
+      return 'gemini-2.5-flash';
+    case 'xai':
+      return 'grok-beta';
+    case 'deepseek':
+      return 'deepseek-chat';
+    case 'kimi':
+      return 'moonshot-v1-32k';
+    case 'mock':
+      // A bare Gemini key is a complete local configuration: use Flash rather
+      // than making an operator also discover a second model-id setting.
+      return googleApiKey ? 'gemini-2.5-flash' : 'travelclaw-local';
+  }
+}
+
+/** Exported for a narrow config test and for operator tooling. */
+export function googleOpenAiBaseUrl(raw: string): string {
+  const base = raw.trim().replace(/\/+$/, '');
+  if (/\/chat\/completions$/i.test(base)) return base.replace(/\/chat\/completions$/i, '');
+  return /\/v1(?:beta)?$/i.test(base) ? `${base}/openai` : base;
 }
 
 const MAX_SEARCH_PROVIDERS_PER_KIND = 8;

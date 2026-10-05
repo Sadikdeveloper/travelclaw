@@ -1,5 +1,6 @@
 import type {
   AgentTaskRecord,
+  ChatResponse,
   HoldAttempt,
   MessageAttachment,
   MessageRecord,
@@ -17,6 +18,7 @@ import { Composer } from '../components/Composer';
 import { ProcessTrail } from '../components/ProcessTrail';
 import { RichText } from '../components/RichText';
 import { Banner } from '../components/Status';
+import { TaskFeedbackDialog } from '../components/TaskFeedbackDialog';
 import { useAuth } from '../auth';
 import { mirrorGuestMessages } from '../guestChatCache';
 
@@ -34,6 +36,15 @@ export function ChatPage() {
   const { user } = useAuth();
   const generation = useRef(0);
   const abort = useRef<AbortController | null>(null);
+  // A task can update through polling or the live socket. Track its last state so
+  // feedback opens only when a search *changes* from working to completed, never
+  // just because someone reopened an old chat.
+  const taskStatuses = useRef(new Map<string, AgentTaskRecord['status']>());
+  const feedbackHandled = useRef(new Set<string>());
+  const feedbackQueue = useRef<AgentTaskRecord[]>([]);
+  // Set immediately after this tab starts a desk. It covers an operator setting
+  // TRAVELCLAW_TASK_DELAY=0, where the first task read may already be completed.
+  const feedbackExpectedForSession = useRef<string | null>(null);
   const [title, setTitle] = useState('New chat');
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [tasks, setTasks] = useState<AgentTaskRecord[]>([]);
@@ -41,14 +52,30 @@ export function ChatPage() {
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  const [deciding, setDeciding] = useState('');
   const [holdingOfferId, setHoldingOfferId] = useState('');
+  const [feedbackTask, setFeedbackTask] = useState<AgentTaskRecord | null>(null);
+  const [givingFeedback, setGivingFeedback] = useState(false);
   const transcript = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
   // The hero landing view only applies to a brand-new, not-yet-opened chat — once a
   // specific chat id is in the URL, it always gets the normal thread, even mid-send.
   const isLanding = !sessionId;
+
+  useEffect(() => {
+    // A different chat should not inherit a completion prompt or status history
+    // from the previous one. Preserve only the one freshly created desk response
+    // that is navigating from /chat into its new session.
+    const keepExpected = Boolean(
+      sessionId && feedbackExpectedForSession.current === sessionId,
+    );
+    taskStatuses.current.clear();
+    feedbackHandled.current.clear();
+    feedbackQueue.current = [];
+    if (!keepExpected) feedbackExpectedForSession.current = null;
+    setFeedbackTask(null);
+    setGivingFeedback(false);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -78,6 +105,29 @@ export function ChatPage() {
     return () => clearInterval(timer);
   }, [sessionId, hasWorkingDesk]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    const firstReadOfOurNewDesk = feedbackExpectedForSession.current === sessionId;
+    for (const task of tasks) {
+      const previous = taskStatuses.current.get(task.id);
+      taskStatuses.current.set(task.id, task.status);
+      if (
+        task.status === 'completed' &&
+        (previous === 'working' || (firstReadOfOurNewDesk && previous === undefined)) &&
+        !feedbackHandled.current.has(task.id)
+      ) {
+        feedbackHandled.current.add(task.id);
+        feedbackQueue.current.push(task);
+      }
+    }
+    // A regular first read records a working task. A zero-delay first read may
+    // queue a completed one. Either way it has served its purpose now.
+    if (firstReadOfOurNewDesk) feedbackExpectedForSession.current = null;
+    if (!feedbackTask && feedbackQueue.current.length) {
+      setFeedbackTask(feedbackQueue.current.shift() ?? null);
+    }
+  }, [sessionId, tasks, feedbackTask]);
+
   /** Fetch one chat's messages and desks, honoring the newest caller only. */
   async function loadChat(id: string, seq: number): Promise<MessageRecord[] | null> {
     const [opened, desks] = await Promise.all([
@@ -101,19 +151,27 @@ export function ChatPage() {
     }
   }
 
-  async function decide(taskId: string, decision: TaskDecision) {
-    setDeciding(taskId);
+  function dismissFeedback() {
+    if (givingFeedback) return;
+    setFeedbackTask(null);
+  }
+
+  async function giveTaskFeedback(decision: TaskDecision) {
+    const task = feedbackTask;
+    if (!task || givingFeedback) return;
+    setGivingFeedback(true);
     setError('');
     try {
-      const next = await api<AgentTaskRecord>(`/api/tasks/${taskId}/decision`, {
+      const next = await api<AgentTaskRecord>(`/api/tasks/${task.id}/decision`, {
         method: 'POST',
         body: JSON.stringify({ decision }),
       });
-      setTasks((current) => current.map((task) => (task.id === next.id ? next : task)));
+      setTasks((current) => current.map((item) => (item.id === next.id ? next : item)));
+      setFeedbackTask(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save that answer');
     } finally {
-      setDeciding('');
+      setGivingFeedback(false);
     }
   }
 
@@ -161,11 +219,12 @@ export function ChatPage() {
         });
         id = session.id;
       }
-      await api(`/api/sessions/${id}/messages`, {
+      const response = await api<ChatResponse>(`/api/sessions/${id}/messages`, {
         method: 'POST',
         body: JSON.stringify({ content, attachments: files }),
         signal: controller.signal,
       });
+      if (response.model === 'agents') feedbackExpectedForSession.current = id;
       await loadChat(id, ++generation.current);
       if (!sessionId) navigate(`/chat/${id}`);
     } catch (err) {
@@ -310,12 +369,7 @@ export function ChatPage() {
                     onStopBrowser={() => void stopBrowser(task.id)}
                     key={task.id}
                     task={task}
-                    busy={
-                      deciding === task.id ||
-                      Boolean(task.offers?.some((offer) => offer.id === holdingOfferId))
-                    }
                     holdingOfferId={holdingOfferId}
-                    onDecide={(decision) => void decide(task.id, decision)}
                     onHold={(offerId) => void askProviderToHold(task.id, offerId)}
                   />
                 ))}
@@ -341,6 +395,14 @@ export function ChatPage() {
         </div>
         {composer}
       </section>
+      {feedbackTask ? (
+        <TaskFeedbackDialog
+          task={feedbackTask}
+          busy={givingFeedback}
+          onDismiss={dismissFeedback}
+          onDecision={(decision) => void giveTaskFeedback(decision)}
+        />
+      ) : null}
     </div>
   );
 }

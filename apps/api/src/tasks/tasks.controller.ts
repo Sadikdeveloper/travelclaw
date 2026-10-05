@@ -37,7 +37,7 @@ export class TasksController {
 
   @Post('tasks/:id/decision')
   @ApiOperation({
-    summary: 'Traveler answers a finished desk: complete, no, or still working',
+    summary: 'Traveler gives feedback on a finished desk: yes, no, or keep working',
   })
   async decide(
     @CurrentUser() user: UserRecord,
