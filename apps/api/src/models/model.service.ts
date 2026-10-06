@@ -203,7 +203,9 @@ export class ModelService {
    * A stream that dies mid-answer is not silently completed by the desk
    * rendering: the traveler keeps the words that actually arrived, with a line
    * saying the answer was cut off, because a half answer plus an honest note is
-   * worth more than a plausible-looking substitution.
+   * worth more than a plausible-looking substitution. An upstream that names its
+   * own failure in an `error` frame is treated the same way — it closes cleanly,
+   * so only reading that frame distinguishes it from a model that finished.
    */
   private async readOpenAiStream(
     input: Parameters<ModelProvider['complete']>[0],
@@ -218,6 +220,7 @@ export class ModelService {
     let buffer = '';
     let text = '';
     let sawDelta = false;
+    let failure: string | null = null;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -229,6 +232,7 @@ export class ModelService {
           const frame = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
           const delta = parser.push(streamPayload(lastDataLine(frame)));
+          if (delta.error) failure = delta.error;
           if (delta.text) {
             text += delta.text;
             sawDelta = true;
@@ -242,12 +246,30 @@ export class ModelService {
         }
       }
       const delta = parser.push(streamPayload(lastDataLine(buffer)));
+      if (delta.error) failure = delta.error;
       if (delta.text) {
         text += delta.text;
         input.onDelta?.({ text: delta.text });
       }
       if (delta.reasoning) input.onDelta?.({ reasoning: delta.reasoning });
       const toolCalls = parser.toolCalls();
+      // An upstream that named its own failure after opening the stream. The
+      // words that did arrive are kept — with a line saying the answer stopped
+      // there — because a provider error mid-sentence is not a finished answer,
+      // and quietly returning the stub would read as one.
+      if (failure && text.trim()) {
+        this.logger.warn(
+          `Model ${providerName}/${modelName} stream failed upstream (${failure}); keeping the partial answer`,
+        );
+        input.onDelta?.({ text: `\n\n(That answer was cut off — ${failure}.)` });
+        return { text, provider: providerName, model: modelName };
+      }
+      if (failure) {
+        this.logger.warn(
+          `Model ${providerName}/${modelName} stream failed upstream (${failure}); using desk rendering.`,
+        );
+        return { text: input.fallback, ...DESK };
+      }
       // Nothing at all came back — a provider that accepted `stream` and then
       // said nothing is the same failure as an empty completion.
       if (!text && !toolCalls.length && !sawDelta) return { text: input.fallback, ...DESK };

@@ -72,7 +72,12 @@ export function parseOpenAiMessage(body: unknown): {
 export function createOpenAiStreamParser() {
   const calls = new Map<number, { id: string; name: string; args: string }>();
   return {
-    push(payload: unknown): { text?: string; reasoning?: string } {
+    push(payload: unknown): { text?: string; reasoning?: string; error?: string } {
+      // A frame can be a failure instead of a chunk; it is read before anything
+      // else, because an error frame carries no `choices` at all and would
+      // otherwise parse as "nothing happened yet".
+      const failure = streamError(payload);
+      if (failure) return { error: failure };
       const choice = (
         payload as {
           choices?: Array<{
@@ -128,6 +133,33 @@ export function createOpenAiStreamParser() {
         );
     },
   };
+}
+
+/**
+ * An upstream that fails *after* the stream has opened cannot answer with a
+ * status code: the response is already `200 text/event-stream` and half the
+ * answer may be on the wire. OpenAI-compatible aggregators — CodeCraft included
+ * — send one frame holding `error`, then `data: [DONE]`, and close cleanly. So
+ * every chunk has to be read for that key, or a failed upstream is
+ * indistinguishable from a model that simply stopped talking early.
+ *
+ * Returns a sentence an operator can read. The message is the provider's own
+ * wording; nothing else in the frame is echoed, since a provider may repeat
+ * request details there.
+ */
+export function streamError(payload: unknown): string | null {
+  const error = (payload as { error?: { message?: unknown; code?: unknown } } | null)
+    ?.error;
+  if (!error || typeof error !== 'object') return null;
+  const message =
+    typeof error.message === 'string' && error.message.trim()
+      ? error.message.trim()
+      : 'upstream provider error';
+  const code =
+    typeof error.code === 'number' || typeof error.code === 'string'
+      ? ` (code ${error.code})`
+      : '';
+  return `${message}${code}`;
 }
 
 /** One `data:` line's payload, or null for the keep-alive/`[DONE]` frames. */

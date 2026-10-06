@@ -235,4 +235,114 @@ describe('the CodeCraft wire', () => {
     expect(failed).toMatchObject({ text: 'Desk fallback.', provider: 'mock' });
     expect(warnings.join('\n')).toContain('codecraft/claude-opus-5 HTTP 404');
   });
+
+  // The documented shape of a CodeCraft stream: one `data:` line per chunk,
+  // usage in the last one, then `data: [DONE]`.
+  const chunk = (content: string) =>
+    JSON.stringify({
+      id: 'chatcmpl-abc',
+      object: 'chat.completion.chunk',
+      model: 'claude-opus-5',
+      choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    });
+  const sse = (frames: string[]) =>
+    new Response(
+      `${frames.map((frame) => `data: ${frame}\n\n`).join('')}data: [DONE]\n\n`,
+      {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      },
+    );
+  const aggregator = () => {
+    Object.assign(process.env, {
+      TRAVELCLAW_MODEL_PROVIDER: 'codecraft',
+      TRAVELCLAW_CODECRAFT_API_KEY: 'cc_test_key',
+      TRAVELCLAW_MODEL_NAME: 'claude-opus-5',
+    });
+    const warnings: string[] = [];
+    jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation((message: unknown) => void warnings.push(String(message)));
+    return { provider: new ModelService().providerFor(opus5), warnings };
+  };
+
+  it('hands each streamed chunk over as it arrives', async () => {
+    global.fetch = (async () => sse([chunk('One'), chunk(', two')])) as typeof fetch;
+    const { provider } = aggregator();
+    const seen: string[] = [];
+    const completion = await provider.complete({
+      system: 'System.',
+      history: [],
+      user: 'Count to three',
+      fallback: 'Desk fallback.',
+      onDelta: (delta) => void (delta.text ? seen.push(delta.text) : undefined),
+    });
+
+    expect(seen).toEqual(['One', ', two']);
+    expect(completion).toMatchObject({ text: 'One, two', provider: 'codecraft' });
+  });
+
+  it('keeps the words that arrived when the upstream fails mid-stream', async () => {
+    global.fetch = (async () =>
+      sse([
+        chunk('Lisbon in '),
+        chunk('April is mild'),
+        // The documented mid-stream failure: one error frame, then a clean close.
+        JSON.stringify({
+          error: {
+            message: 'Upstream provider unavailable',
+            type: 'provider_error',
+            code: 502,
+          },
+        }),
+      ])) as typeof fetch;
+    const { provider, warnings } = aggregator();
+    const seen: string[] = [];
+    const completion = await provider.complete({
+      system: 'System.',
+      history: [],
+      user: 'When should I go to Lisbon?',
+      fallback: 'Desk fallback.',
+      onDelta: (delta) => void (delta.text ? seen.push(delta.text) : undefined),
+    });
+
+    // The partial answer stands, is attributed to the model that wrote it, and
+    // carries a line saying it stopped there — never the desk rendering.
+    expect(completion).toMatchObject({
+      text: 'Lisbon in April is mild',
+      provider: 'codecraft',
+    });
+    expect(seen.join('')).toContain(
+      '(That answer was cut off — Upstream provider unavailable (code 502).)',
+    );
+    expect(warnings.join('\n')).toContain('stream failed upstream');
+  });
+
+  it('uses the desk rendering when the upstream fails before writing anything', async () => {
+    global.fetch = (async () =>
+      sse([
+        JSON.stringify({
+          error: {
+            message: 'Upstream provider unavailable',
+            type: 'provider_error',
+            code: 502,
+          },
+        }),
+      ])) as typeof fetch;
+    const { provider, warnings } = aggregator();
+    const seen: string[] = [];
+    // `onDelta` is what makes this a streamed request at all, so the error frame
+    // is read rather than a JSON body parsed.
+    const completion = await provider.complete({
+      system: 'System.',
+      history: [],
+      user: 'When should I go to Lisbon?',
+      fallback: 'Desk fallback.',
+      onDelta: (delta) => void (delta.text ? seen.push(delta.text) : undefined),
+    });
+
+    expect(seen).toEqual([]);
+    expect(completion).toMatchObject({ text: 'Desk fallback.', provider: 'mock' });
+    expect(warnings.join('\n')).toContain('Upstream provider unavailable');
+  });
 });

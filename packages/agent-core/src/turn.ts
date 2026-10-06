@@ -372,12 +372,64 @@ function tracesOf(results: ToolResult[]) {
   }));
 }
 
+/** How the desk rendering is paced onto a screen that is watching it arrive. */
+const DESK_CHUNK = 24;
+const DESK_CHUNK_MS = 16;
+
+/**
+ * The desk's own rendering, handed over in slices rather than as one paragraph
+ * at the end of the turn.
+ *
+ * A turn lands here when there is no key, or the configured provider refused the
+ * model id. The traveler is watching a process view either way, and a view that
+ * stays silent for the whole turn and then jumps straight to a finished answer
+ * reads as a hang — which is the opposite of what happened. Nothing is invented
+ * to fill the gap: the slices add up to exactly the fallback text, and the
+ * completion returns that same string.
+ */
 export function mockProvider(model = 'travelclaw-local'): ModelProvider {
   return {
     id: 'mock',
     model,
-    async complete({ fallback }) {
+    // The desk cannot call tools, so the turn keeps its router-only path.
+    usesTools: false,
+    streams: true,
+    async complete({ fallback, signal, onDelta }) {
+      if (onDelta) {
+        for (const chunk of readingChunks(fallback, DESK_CHUNK)) {
+          if (signal?.aborted) break;
+          onDelta({ text: chunk });
+          await pause(signal, DESK_CHUNK_MS);
+        }
+      }
       return { text: fallback, provider: 'mock', model };
     },
   };
+}
+
+/**
+ * Split on code points, not UTF-16 units: a plain `.{1,24}` cut would slice an
+ * emoji or a surrogate pair in half and put a lone surrogate on the wire.
+ */
+function readingChunks(text: string, size: number): string[] {
+  const points = Array.from(text);
+  const chunks: string[] = [];
+  for (let index = 0; index < points.length; index += size) {
+    chunks.push(points.slice(index, index + size).join(''));
+  }
+  return chunks;
+}
+
+/** The gap between slices, cut short by Stop so a stopped turn stops at once. */
+function pause(signal: AbortSignal | undefined, ms: number): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal?.removeEventListener('abort', done);
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
 }
