@@ -40,7 +40,10 @@ function writeJson(key: string, value: unknown): void {
 }
 
 /** Reads the cached chat list for a guest, or writes a fresh one when `sessions` is given. */
-export function mirrorGuestSessions(guestId: string, sessions?: SessionRecord[]): SessionRecord[] {
+export function mirrorGuestSessions(
+  guestId: string,
+  sessions?: SessionRecord[],
+): SessionRecord[] {
   const key = sessionsKey(guestId);
   if (sessions) {
     writeJson(key, sessions.slice(0, MAX_SESSIONS));
@@ -61,6 +64,15 @@ export function mirrorGuestMessages(
     return messages;
   }
   return readJson<MessageRecord[]>(key, []);
+}
+
+/** Drops one deleted chat's transcript from the device cache. */
+export function forgetGuestMessages(guestId: string, sessionId: string): void {
+  try {
+    window.localStorage.removeItem(messagesKey(guestId, sessionId));
+  } catch {
+    // Nothing to clean up if storage is unavailable.
+  }
 }
 
 /** Drops everything cached for a guest, once its chats have moved onto a real account. */

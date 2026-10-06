@@ -148,6 +148,31 @@ a {
   background: rgba(255, 250, 243, 0.2);
 }
 
+.sidebar-toggle,
+.sidebar-rail-action {
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #cbbba8;
+}
+.sidebar-toggle {
+  display: inline-flex;
+  margin-left: auto;
+}
+.sidebar-toggle:hover,
+.sidebar-rail-action:hover {
+  background: rgba(255, 250, 243, 0.1);
+  color: #fff;
+}
+.sidebar-rail-action {
+  display: none;
+}
+
 .brand {
   display: flex;
   gap: 12px;
@@ -290,7 +315,8 @@ a {
     var(--paper);
 }
 .canvas:has(.chat-layout) {
-  padding: 16px;
+  padding: 0;
+  overflow: hidden;
 }
 
 .kicker {
@@ -576,7 +602,8 @@ h3 {
 .chat-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  height: calc(100dvh - 32px);
+  height: 100dvh;
+  min-height: 0;
 }
 .turn {
   display: flex;
@@ -1409,6 +1436,69 @@ h3 {
   color: #cbbba8;
   font-size: 0.85rem;
 }
+.side-error {
+  margin: 4px 8px;
+  color: #ffc3b9;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.chat-list-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  border-radius: 10px;
+}
+.chat-list-item .chat-link {
+  flex: 1;
+  min-width: 0;
+  padding-right: 6px;
+}
+.chat-link span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbbba8;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.chat-list-item:hover .chat-delete,
+.chat-list-item:focus-within .chat-delete,
+.chat-delete:focus-visible {
+  opacity: 1;
+}
+.chat-delete:hover:not(:disabled) {
+  background: rgba(255, 250, 243, 0.12);
+  color: #ffc3b9;
+}
+.chat-delete:disabled {
+  cursor: wait;
+  opacity: 0.42;
+}
+.delete-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 250, 243, 0.35);
+  border-top-color: #f6f1e7;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
 .session-col,
 .thread {
   background: var(--paper-2);
@@ -1423,9 +1513,13 @@ h3 {
 .thread {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .thread-head {
-  padding: 12px 16px;
+  padding: 12px clamp(16px, 6vw, 96px);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -1454,7 +1548,7 @@ h3 {
 /* The composer: attach, write, send — or stop while the desk works. */
 .composer {
   border-top: 1px solid var(--line);
-  padding: 10px 14px 12px;
+  padding: 10px clamp(16px, 6vw, 96px) 12px;
   display: grid;
   gap: 8px;
   background: var(--paper-2);
@@ -1555,13 +1649,10 @@ h3 {
 }
 .transcript {
   overflow: auto;
-  padding: 18px 18px 18px 46px;
+  padding: 18px clamp(16px, 6vw, 96px);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow:
-    inset 28px 0 0 #f6f1e7,
-    inset 29px 0 0 #ead8c4;
   flex: 1;
 }
 .bubble {
@@ -1647,8 +1738,8 @@ h3 {
 .hero {
   height: 100%;
   min-height: 520px;
-  border-radius: 20px;
-  border: 1px solid var(--line);
+  border-radius: 0;
+  border: 0;
   overflow: hidden;
   position: relative;
   display: flex;
@@ -1727,6 +1818,72 @@ h3 {
   }
 }
 
+@media (min-width: 861px) {
+  .shell.sidebar-collapsed {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .sidebar-collapsed .sidebar {
+    align-items: center;
+    gap: 18px;
+    padding: 16px 8px;
+  }
+  .sidebar-collapsed .brand {
+    width: 100%;
+    flex-direction: column;
+    gap: 13px;
+    padding: 0;
+  }
+  .sidebar-collapsed .brand > div {
+    display: none;
+  }
+  .sidebar-collapsed .brand img {
+    width: 32px;
+    height: 32px;
+  }
+  .sidebar-collapsed .sidebar-toggle {
+    order: -1;
+    margin: 0;
+  }
+  .sidebar-collapsed .side-new {
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border-radius: 14px;
+  }
+  .sidebar-collapsed .side-new span,
+  .sidebar-collapsed .chat-section-head,
+  .sidebar-collapsed .side-search,
+  .sidebar-collapsed .side-error,
+  .sidebar-collapsed .chat-scroll,
+  .sidebar-collapsed .side-foot .account-box,
+  .sidebar-collapsed .side-version {
+    display: none;
+  }
+  .sidebar-collapsed .chats-section {
+    width: 100%;
+    flex: 1;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  .sidebar-collapsed .sidebar-rail-action {
+    display: inline-flex;
+  }
+  .sidebar-collapsed .side-foot {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+    border-top: 0;
+  }
+  .sidebar-collapsed .gateway-status {
+    margin: 0;
+    font-size: 0;
+  }
+  .sidebar-collapsed .gateway-status .dot {
+    margin: 0;
+  }
+}
+
 @media (max-width: 860px) {
   .shell {
     grid-template-columns: 1fr;
@@ -1753,6 +1910,13 @@ h3 {
   .sidebar-close {
     display: inline-flex;
   }
+  .sidebar-toggle,
+  .sidebar-rail-action {
+    display: none;
+  }
+  .chat-delete {
+    opacity: 1;
+  }
 
   .sidebar-backdrop {
     display: block;
@@ -1773,21 +1937,24 @@ h3 {
   /* On a phone the thread owns the viewport: the transcript scrolls inside, the
      composer stays pinned under it, and nothing needs a page-level scroll. */
   .chat-layout {
-    height: calc(100dvh - 76px);
+    height: calc(100dvh - 56px);
   }
   .chat-layout.chat-landing {
-    height: auto;
-    min-height: calc(100dvh - 96px);
+    height: calc(100dvh - 56px);
+    min-height: 0;
+  }
+  .chat-layout.chat-landing .hero {
+    min-height: 100%;
   }
   .canvas {
     padding: 18px 14px 36px;
   }
   .canvas:has(.chat-layout) {
-    padding: 10px;
+    padding: 0;
   }
   .transcript {
     box-shadow: none;
-    padding-left: 16px;
+    padding: 16px 14px;
   }
   .thread-head {
     flex-wrap: wrap;
@@ -2015,10 +2182,11 @@ h3 {
   border-top: 1px solid var(--line);
 }
 
-/* The thread: one column, generous rhythm, and the copper spine kept quiet. */
+/* The transcript fills the workspace without a card frame or decorative spine. */
 .transcript {
   gap: 18px;
-  padding: 22px 20px 22px 46px;
+  padding: 22px clamp(16px, 6vw, 96px);
+  box-shadow: none;
 }
 .turn {
   gap: 10px;
@@ -2034,7 +2202,9 @@ h3 {
 .composer-main {
   border: 1px solid transparent;
   border-radius: 14px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .composer-main:focus-within {
   border-color: var(--line);
@@ -2044,7 +2214,9 @@ h3 {
   font-size: 0.98rem;
 }
 .send-btn {
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
 }
 .send-btn:hover:not(:disabled) {
   transform: translateY(-1px);

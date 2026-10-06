@@ -1,11 +1,20 @@
 import type { HealthReport, SessionRecord } from '@travelclaw/shared';
-import { Menu, Plus, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import {
+  Menu,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveRevision } from '../App';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { useAuth } from '../auth';
-import { mirrorGuestSessions } from '../guestChatCache';
+import { forgetGuestMessages, mirrorGuestSessions } from '../guestChatCache';
 
 export function Shell() {
   const revision = useLiveRevision();
@@ -15,12 +24,17 @@ export function Shell() {
   const userId = user?.id;
   const userIsGuest = user?.isGuest === true;
   const navigate = useNavigate();
+  const location = useLocation();
   const [health, setHealth] = useState<HealthReport | null>(null);
   const [down, setDown] = useState(false);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [signingOut, setSigningOut] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState('');
+  const [sessionError, setSessionError] = useState('');
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const deletedSessionIds = useRef(new Set<string>());
 
   useEffect(() => {
     let stop = false;
@@ -44,15 +58,37 @@ export function Shell() {
   }, []);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        'travelclaw:sidebar-collapsed',
+        sidebarCollapsed ? '1' : '0',
+      );
+    } catch {
+      // The preference is optional when storage is disabled.
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    deletedSessionIds.current.clear();
+  }, [userId]);
+
+  useEffect(() => {
     if (userId && userIsGuest) {
       // Instant paint from this device's own cache while the network round trip is
       // still in flight — a guest's chats otherwise have nowhere else to come from.
-      setSessions(mirrorGuestSessions(userId));
+      setSessions(
+        mirrorGuestSessions(userId).filter(
+          (session) => !deletedSessionIds.current.has(session.id),
+        ),
+      );
     }
     api<SessionRecord[]>('/api/sessions')
       .then((fetched) => {
-        setSessions(fetched);
-        if (userId && userIsGuest) mirrorGuestSessions(userId, fetched);
+        const visible = fetched.filter(
+          (session) => !deletedSessionIds.current.has(session.id),
+        );
+        setSessions(visible);
+        if (userId && userIsGuest) mirrorGuestSessions(userId, visible);
       })
       .catch(() => setSessions([]));
   }, [revision, userId, userIsGuest]);
@@ -74,10 +110,48 @@ export function Shell() {
     }
   }
 
+  async function deleteChat(session: SessionRecord) {
+    if (deletingSessionId) return;
+    const confirmed = window.confirm(
+      `Delete “${session.title}”? This permanently removes the chat and its history.`,
+    );
+    if (!confirmed) return;
+
+    setSessionError('');
+    setDeletingSessionId(session.id);
+    deletedSessionIds.current.add(session.id);
+    try {
+      await api<void>(`/api/sessions/${session.id}`, { method: 'DELETE' });
+      const remaining = sessions.filter((item) => item.id !== session.id);
+      setSessions(remaining);
+      if (userId && userIsGuest) {
+        mirrorGuestSessions(userId, remaining);
+        forgetGuestMessages(userId, session.id);
+      }
+      if (location.pathname === `/chat/${session.id}`) {
+        navigate('/', { replace: true });
+      }
+    } catch (err) {
+      deletedSessionIds.current.delete(session.id);
+      setSessionError(
+        err instanceof ApiError
+          ? err.message
+          : 'Could not delete this chat. Please try again.',
+      );
+      const refreshed = await api<SessionRecord[]>('/api/sessions').catch(() => null);
+      if (refreshed) {
+        setSessions(refreshed);
+        if (userId && userIsGuest) mirrorGuestSessions(userId, refreshed);
+      }
+    } finally {
+      setDeletingSessionId('');
+    }
+  }
+
   const initial = (user?.displayName || '?').trim().charAt(0).toUpperCase();
 
   return (
-    <div className="shell">
+    <div className={sidebarCollapsed ? 'shell sidebar-collapsed' : 'shell'}>
       <header className="mobile-topbar">
         <button
           type="button"
@@ -112,17 +186,45 @@ export function Shell() {
             <strong>TravelClaw</strong>
             <em>Agent mode</em>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={17} aria-hidden="true" />
+            ) : (
+              <PanelLeftClose size={17} aria-hidden="true" />
+            )}
+          </button>
         </div>
 
-        <NavLink to="/" end className="btn side-new" onClick={() => setMenuOpen(false)}>
+        <NavLink
+          to="/"
+          end
+          className="btn side-new"
+          onClick={() => setMenuOpen(false)}
+          title="New chat"
+        >
           <Plus size={16} aria-hidden="true" />
-          New chat
+          <span>New chat</span>
         </NavLink>
 
         <div className="side-section chats-section">
-          <div className="side-section-head">
+          <div className="side-section-head chat-section-head">
             <span>Chats</span>
           </div>
+          <button
+            type="button"
+            className="sidebar-rail-action"
+            aria-label="Expand sidebar to see chats"
+            title="Show chats"
+            onClick={() => setSidebarCollapsed(false)}
+          >
+            <MessageSquare size={18} aria-hidden="true" />
+          </button>
           {sessions.length > 3 ? (
             <label className="side-search">
               <Search size={14} aria-hidden="true" />
@@ -134,6 +236,11 @@ export function Shell() {
               />
             </label>
           ) : null}
+          {sessionError ? (
+            <p className="side-error" role="alert">
+              {sessionError}
+            </p>
+          ) : null}
           <nav className="nav chat-scroll" aria-label="Your chats">
             {filtered.length === 0 ? (
               <p className="side-empty">
@@ -141,13 +248,30 @@ export function Shell() {
               </p>
             ) : null}
             {filtered.map((session) => (
-              <NavLink
-                key={session.id}
-                to={`/chat/${session.id}`}
-                onClick={() => setMenuOpen(false)}
-              >
-                {session.title}
-              </NavLink>
+              <div className="chat-list-item" key={session.id}>
+                <NavLink
+                  className="chat-link"
+                  to={`/chat/${session.id}`}
+                  onClick={() => setMenuOpen(false)}
+                  title={session.title}
+                >
+                  <span>{session.title}</span>
+                </NavLink>
+                <button
+                  type="button"
+                  className="chat-delete"
+                  aria-label={`Delete chat: ${session.title}`}
+                  title="Delete chat"
+                  disabled={Boolean(deletingSessionId)}
+                  onClick={() => void deleteChat(session)}
+                >
+                  {deletingSessionId === session.id ? (
+                    <span className="delete-spinner" aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={14} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             ))}
           </nav>
         </div>
@@ -218,4 +342,12 @@ export function Shell() {
       </main>
     </div>
   );
+}
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem('travelclaw:sidebar-collapsed') === '1';
+  } catch {
+    return false;
+  }
 }

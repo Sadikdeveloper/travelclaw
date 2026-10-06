@@ -177,7 +177,7 @@ export interface LiveTurnRecord {
   startedAt: string;
   /** Every step so far, in order, with rows updated in place by id. */
   steps: TurnStepRecord[];
-  /** The model's own thinking, bounded to the tail the screen would keep. */
+  /** Provider reasoning and brief action summaries, bounded to the live screen's tail. */
   reasoning: string;
   /** The answer so far — empty until the model starts writing it. */
   reply: string;

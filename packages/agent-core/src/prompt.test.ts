@@ -73,6 +73,45 @@ describe('memory budget', () => {
     expect(prompt).toContain('never pass off memory');
   });
 
+  it('instructs the model to make a real alternative attempt after a failed tool', () => {
+    const prompt = assemblePrompt(
+      {
+        text: 'Search for current opening hours',
+        persona: { name: 'Marlow', soul: '', identity: '', user: '', agents: '' },
+        memory: [],
+        history: [],
+      },
+      [
+        {
+          name: 'web.search',
+          ok: false,
+          summary: 'Web search did not return results.',
+          data: null,
+        },
+      ],
+      { toolCalling: true },
+    );
+
+    expect(prompt).toContain('a different query, source, or tool could help');
+    expect(prompt).toContain('Do not merely tell the traveler');
+    expect(prompt).toContain('do not repeat an identical call');
+  });
+
+  it('does not let the final narration pass promise more work', () => {
+    const prompt = assemblePrompt(
+      {
+        text: 'Search for current opening hours',
+        persona: { name: 'Marlow', soul: '', identity: '', user: '', agents: '' },
+        memory: [],
+        history: [],
+      },
+      [],
+    );
+
+    expect(prompt).toContain('No more tool calls are available');
+    expect(prompt).toContain('Do not promise future work');
+  });
+
   it('never lets the desk claim a table, room, or ticket is held', () => {
     const prompt = assemblePrompt(
       {

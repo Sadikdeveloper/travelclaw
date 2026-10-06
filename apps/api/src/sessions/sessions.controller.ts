@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   createSessionSchema,
@@ -38,5 +48,12 @@ export class SessionsController {
       session: this.sessions.get(id, user.id),
       messages: this.sessions.messages(id, user.id),
     };
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete one of this account’s chats and its history' })
+  remove(@CurrentUser() user: UserRecord, @Param('id') id: string): void {
+    this.sessions.remove(id, user.id);
   }
 }

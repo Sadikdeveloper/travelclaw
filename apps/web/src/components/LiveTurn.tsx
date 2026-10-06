@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react';
 
 export interface LiveTurnState {
   steps: TurnStepRecord[];
-  /** The model's own thinking, when the provider exposes it. */
+  /** Provider reasoning, plus brief action summaries when a retry is needed. */
   reasoning: string;
   /** The answer, as the model writes it. */
   reply: string;

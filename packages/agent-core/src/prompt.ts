@@ -50,11 +50,9 @@ export function assemblePrompt(
     : 'No active trip is open.';
   const toolBlock = options.toolCalling
     ? tools.length
-      ? `Results already returned this turn:\n\n${renderToolResults(tools)}\n\nCall another tool only if it is still needed to answer. Otherwise write the final reply now. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.`
-      : 'No tool has run yet. Call the tools that fit this request, then wait for their results. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.'
-    : tools.length
-      ? renderToolResults(tools)
-      : 'No tool ran.';
+      ? `Results already returned this turn:\n\n${renderToolResults(tools)}\n\nUse the results to decide what is still needed. If a call failed or returned no useful data and a different query, source, or tool could help, make that call now. Do not merely tell the traveler that you will try another approach, and do not repeat an identical call. If no meaningful alternative remains or a traveler detail is missing, explain the limitation and ask a concise follow-up. Otherwise write the final reply now. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.`
+      : 'No tool has run yet. Call the tools that fit this request, then wait for their results. Do not narrate an intended search or other action instead of calling its tool. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.'
+    : `${tools.length ? renderToolResults(tools) : 'No tool ran.'}\n\nNo more tool calls are available in this answer. Do not promise future work. State what the results do and do not establish, and ask for a missing detail only when one is needed.`;
 
   return [
     `You are ${input.persona.name}, answering inside TravelClaw.`,
@@ -76,7 +74,7 @@ function renderToolResults(tools: ToolResult[]): string {
   return tools
     .map(
       (tool) =>
-        `### ${tool.name} (${tool.ok ? 'ok' : 'needs input'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
+        `### ${tool.name} (${tool.ok ? 'ok' : 'not successful'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
     )
     .join('\n\n');
 }

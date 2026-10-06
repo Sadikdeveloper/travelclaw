@@ -97,6 +97,15 @@ export class SessionsService {
     return this.get(id, userId);
   }
 
+  /** Delete only an owned chat; its transcript, desks, offers, and browser state cascade. */
+  remove(sessionId: string, userId: string): void {
+    this.get(sessionId, userId);
+    // Tool runs are an operator log without a foreign key, so remove the chat's
+    // rows explicitly before the session cascade removes its other child records.
+    this.db.run('DELETE FROM tool_runs WHERE session_id = ?', sessionId);
+    this.db.run('DELETE FROM sessions WHERE id = ? AND user_id = ?', sessionId, userId);
+  }
+
   messages(sessionId: string, userId: string): MessageRecord[] {
     this.get(sessionId, userId);
     return this.messagesRaw(sessionId);

@@ -218,7 +218,7 @@ describe('rejected model calls', () => {
     expect(turn.toolResults[0].warning).toMatch(/amount/);
     expect(turn.tools[0]).toMatchObject({ name: 'currency.convert', ok: false });
     // The model still gets a grounded second pass, with the rejection in it.
-    expect(provider.calls[1].system).toMatch(/needs input/);
+    expect(provider.calls[1].system).toMatch(/not successful/);
     expect(turn.reply).toBe('How much would you like to convert?');
   });
 
@@ -454,6 +454,121 @@ describe('the agentic turn', () => {
     ]);
     expect(turn.reply).toBe('November is cool, quiet, and wet. Pack a shell.');
     expect(calls).toContain('https://example.org/lisbon');
+  });
+
+  it('retries after a model announces an alternative instead of leaving that as the answer', async () => {
+    const replies: ModelCompletion[] = [
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'Lisbon museum official opening hours' })],
+      },
+      {
+        text: "The first search returned nothing. I'll try another query.",
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'official Lisbon museum hours site' })],
+      },
+      {
+        text: 'The search desk is offline, so no current hours could be checked.',
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+    ];
+    const calls: ProviderCall[] = [];
+    const provider: ModelProvider & { calls: ProviderCall[] } = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      streams: true,
+      calls,
+      async complete(input) {
+        calls.push(input);
+        const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
+        if (reply.text) input.onDelta?.({ text: reply.text });
+        return reply;
+      },
+    };
+    const events: string[] = [];
+    const liveReasoning: string[] = [];
+
+    const turn = await completeTurn(
+      request('Search the web for Lisbon museum opening hours'),
+      {
+        provider,
+        ctx,
+        toolRounds: 5,
+        onEvent: (event) => {
+          events.push(event.type);
+          if (event.type === 'reasoning') liveReasoning.push(event.text);
+        },
+      },
+    );
+
+    expect(calls).toHaveLength(4);
+    expect(calls[1].system).toContain('not successful');
+    expect(calls[1].system).toContain('make that call now');
+    expect(calls[2].tools).toHaveLength(BUNDLED_TOOLS.length);
+    expect(events).toContain('reply_reset');
+    expect(liveReasoning).toContain(
+      'The last result was not useful. I’m checking whether another available approach can help.',
+    );
+    expect(turn.toolResults).toHaveLength(2);
+    expect(turn.toolResults.every((result) => !result.ok)).toBe(true);
+    expect(turn.reply).toBe(
+      'The search desk is offline, so no current hours could be checked.',
+    );
+    expect(turn.reply).not.toMatch(/I'll try another query/i);
+  });
+
+  it('does not save a retry promise when the final pass has no tools left', async () => {
+    const replies: ModelCompletion[] = [
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'Lisbon museum opening hours' })],
+      },
+      {
+        text: "I couldn't get a result. I'll try another source.",
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+    ];
+    const calls: ProviderCall[] = [];
+    const provider: ModelProvider & { calls: ProviderCall[] } = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      streams: true,
+      calls,
+      async complete(input) {
+        calls.push(input);
+        const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
+        if (reply.text) input.onDelta?.({ text: reply.text });
+        return reply;
+      },
+    };
+    const events: string[] = [];
+
+    const turn = await completeTurn(request('Search for Lisbon museum opening hours'), {
+      provider,
+      ctx,
+      toolRounds: 1,
+      onEvent: (event) => events.push(event.type),
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].tools).toBeUndefined();
+    expect(events).toContain('reply_reset');
+    expect(turn.reply).not.toMatch(/I'll try another source/i);
+    expect(turn.reply).toMatch(/did not return results/i);
   });
 
   it('reports every tool as it starts and finishes, in order', async () => {
