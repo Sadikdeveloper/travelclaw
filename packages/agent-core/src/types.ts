@@ -287,9 +287,10 @@ export interface ModelProvider {
    */
   usesTools?: boolean;
   /**
-   * True when `complete` writes `onDelta` as the answer arrives. The offline
-   * desk renderer leaves this off: it produces one finished sentence, and the
-   * turn then emits that sentence whole rather than faking a token stream.
+   * True when `complete` writes `onDelta` as the answer arrives. The offline desk
+   * renderer sets it too: it has the whole sentence up front and paces it out, so
+   * a turn with no live model still reads as one being written instead of going
+   * quiet and then appearing finished.
    */
   streams?: boolean;
   complete(input: {

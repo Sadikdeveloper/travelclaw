@@ -522,9 +522,9 @@ describe('the agentic turn', () => {
     ]);
   });
 
-  it('emits one whole reply for a desk that cannot stream', async () => {
+  it('paces a desk rendering out in slices that add up to the whole reply', async () => {
     const events: string[] = [];
-    await completeTurn(request('Plan Lisbon for 4 days from 2026-10-12'), {
+    const turn = await completeTurn(request('Plan Lisbon for 4 days from 2026-10-12'), {
       provider: mockProvider(),
       ctx,
       onEvent: (event) => {
@@ -532,8 +532,54 @@ describe('the agentic turn', () => {
       },
     });
 
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatch(/Outline for Lisbon/);
+    // More than one slice, and nothing invented to fill the gap: joined, the
+    // slices are the reply the turn returned.
+    expect(events.length).toBeGreaterThan(1);
+    expect(events.join('').trim()).toBe(turn.reply);
+    expect(turn.reply).toMatch(/Outline for Lisbon/);
+  });
+
+  it('keeps a whole surrogate pair in one slice', async () => {
+    const events: string[] = [];
+    const provider = mockProvider();
+    await provider.complete({
+      system: '',
+      history: [],
+      user: '',
+      fallback: 'Bon voyage 🧳🌍 — safe travels',
+      onDelta: (delta) => {
+        if (delta.text) events.push(delta.text);
+      },
+    });
+
+    // No slice may end in a lone surrogate, which is what a UTF-16 cut does.
+    for (const chunk of events) {
+      const last = chunk.charCodeAt(chunk.length - 1);
+      expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+    }
+    expect(events.join('')).toBe('Bon voyage 🧳🌍 — safe travels');
+  });
+
+  it('stops pacing a desk rendering when the turn is stopped', async () => {
+    const events: string[] = [];
+    const controller = new AbortController();
+    const provider = mockProvider();
+    const done = provider.complete({
+      system: '',
+      history: [],
+      user: '',
+      fallback: 'x'.repeat(4000),
+      signal: controller.signal,
+      onDelta: (delta) => {
+        if (delta.text) events.push(delta.text);
+      },
+    });
+    controller.abort();
+    const completion = await done;
+
+    // Stopped well short of 4000 characters, and still an honest completion.
+    expect(events.join('').length).toBeLessThan(4000);
+    expect(completion.text).toHaveLength(4000);
   });
 
   it('runs an identical call once, however many times the model asks for it', async () => {
