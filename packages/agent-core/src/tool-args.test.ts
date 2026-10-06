@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseToolArgs, zodToJsonSchema } from './tool-args';
-import { findTool, toolSpecs } from './tools';
+import { BUNDLED_TOOLS, findTool, toolSpecs } from './tools';
 
 describe('zodToJsonSchema', () => {
   it('derives the provider schema from the tool argument schema', () => {
@@ -29,7 +29,7 @@ describe('zodToJsonSchema', () => {
 
   it('gives every bundled tool a usable spec', () => {
     const specs = toolSpecs();
-    expect(specs).toHaveLength(8);
+    expect(specs).toHaveLength(BUNDLED_TOOLS.length);
     for (const spec of specs) {
       expect(spec.name).toMatch(/^[a-z]+\.[a-z]+$/);
       expect(Object.keys(spec.parameters.properties).length).toBeGreaterThan(0);

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { mockProvider, type ModelProvider } from '@travelclaw/agent-core';
+import {
+  mockProvider,
+  type ModelCompletion,
+  type ModelProvider,
+} from '@travelclaw/agent-core';
 import type { ModelCatalogRecord, ModelRecord } from '@travelclaw/shared';
 import { loadConfig } from '../config';
 import {
@@ -11,12 +15,26 @@ import {
   modelCatalog,
   resolveProvider,
 } from './model-catalog';
-import { openAiRequestBody, parseOpenAiMessage } from './openai';
+import {
+  createOpenAiStreamParser,
+  openAiRequestBody,
+  parseOpenAiMessage,
+  streamPayload,
+} from './openai';
 import { ModelCacheService } from './model-cache.service';
 import { formatModelList, listProviderModels } from './model-list';
 
 /** What the desk rendering says when the live model is unavailable. */
 const DESK = { provider: 'mock', model: DESK_MODEL_ID } as const;
+
+/**
+ * One SSE frame can carry `event:` and `data:` lines; the payload is the last
+ * `data:` line. Frames without one (keep-alives, comments) are ignored.
+ */
+function lastDataLine(frame: string): string {
+  const lines = frame.split('\n').filter((line) => line.startsWith('data:'));
+  return lines.at(-1) ?? '';
+}
 
 @Injectable()
 export class ModelService {
@@ -84,6 +102,8 @@ export class ModelService {
         model: model.id,
         // The live model may ask for tools. The mock cannot, so it keeps the router.
         usesTools: true,
+        // And it can write the answer as it goes, so the traveler reads it live.
+        streams: true,
         complete: (input) =>
           this.completeOpenAi(
             input,
@@ -104,6 +124,7 @@ export class ModelService {
   ) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25_000);
+    const streaming = Boolean(input.onDelta);
     try {
       const response = await fetch(`${config.modelBaseUrl}/chat/completions`, {
         method: 'POST',
@@ -121,6 +142,7 @@ export class ModelService {
             history: input.history,
             user: input.user,
             tools: input.tools,
+            stream: streaming,
           }),
         ),
       });
@@ -146,6 +168,9 @@ export class ModelService {
         }
         return { text: input.fallback, ...DESK };
       }
+      if (streaming) {
+        return await this.readOpenAiStream(input, response.body, modelName, providerName);
+      }
       const { text, toolCalls } = parseOpenAiMessage(await response.json());
       if (!text && !toolCalls.length) {
         return { text: input.fallback, ...DESK };
@@ -157,12 +182,101 @@ export class ModelService {
         ...(toolCalls.length ? { toolCalls } : {}),
       };
     } catch (error) {
+      // A stopped turn is not a broken model. Hand the abort back to the turn
+      // loop so a cancelled answer is neither replaced by desk rendering nor
+      // saved as if the model had finished.
+      if (input.signal?.aborted) throw error;
       this.logger.warn(
         `Model call failed; using desk rendering (${error instanceof Error ? error.message : 'error'})`,
       );
       return { text: input.fallback, ...DESK };
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Read an OpenAI-compatible SSE completion. Text and reasoning are handed to
+   * `onDelta` the moment they arrive; tool-call fragments are accumulated and
+   * returned with the text so the turn loop can run what the model asked for.
+   *
+   * A stream that dies mid-answer is not silently completed by the desk
+   * rendering: the traveler keeps the words that actually arrived, with a line
+   * saying the answer was cut off, because a half answer plus an honest note is
+   * worth more than a plausible-looking substitution.
+   */
+  private async readOpenAiStream(
+    input: Parameters<ModelProvider['complete']>[0],
+    body: ReadableStream<Uint8Array> | null,
+    modelName: string,
+    providerName: string,
+  ): Promise<ModelCompletion> {
+    if (!body) return { text: input.fallback, ...DESK };
+    const parser = createOpenAiStreamParser();
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let sawDelta = false;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Frames are separated by a blank line; the last partial frame stays buffered.
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const delta = parser.push(streamPayload(lastDataLine(frame)));
+          if (delta.text) {
+            text += delta.text;
+            sawDelta = true;
+            input.onDelta?.({ text: delta.text });
+          }
+          if (delta.reasoning) {
+            sawDelta = true;
+            input.onDelta?.({ reasoning: delta.reasoning });
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      const delta = parser.push(streamPayload(lastDataLine(buffer)));
+      if (delta.text) {
+        text += delta.text;
+        input.onDelta?.({ text: delta.text });
+      }
+      if (delta.reasoning) input.onDelta?.({ reasoning: delta.reasoning });
+      const toolCalls = parser.toolCalls();
+      // Nothing at all came back — a provider that accepted `stream` and then
+      // said nothing is the same failure as an empty completion.
+      if (!text && !toolCalls.length && !sawDelta) return { text: input.fallback, ...DESK };
+      return {
+        text,
+        provider: providerName,
+        model: modelName,
+        ...(toolCalls.length ? { toolCalls } : {}),
+      };
+    } catch (error) {
+      // Stop, or a tab that went away: the answer is being cancelled on purpose,
+      // so the partial text is not dressed up as a finished reply.
+      if (input.signal?.aborted) throw error;
+      if (text.trim()) {
+        this.logger.warn(
+          `Model ${providerName}/${modelName} stream interrupted; keeping the partial answer`,
+        );
+        input.onDelta?.({
+          text: '\n\n(That answer was cut off — the model connection dropped.)',
+        });
+        return { text, provider: providerName, model: modelName };
+      }
+      this.logger.warn(
+        `Model stream failed; using desk rendering (${error instanceof Error ? error.message : 'error'})`,
+      );
+      return { text: input.fallback, ...DESK };
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   }
 

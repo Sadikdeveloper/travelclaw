@@ -12,4 +12,9 @@ export class EventsService {
   on(event: string, listener: (payload: unknown) => void) {
     this.emitter.on(event, listener);
   }
+
+  /** A per-request listener (a live turn watching for browser steps) must unregister. */
+  off(event: string, listener: (payload: unknown) => void) {
+    this.emitter.off(event, listener);
+  }
 }

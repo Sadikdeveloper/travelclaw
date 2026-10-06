@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Logger,
   Param,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -17,15 +19,27 @@ import {
   type SendMessageInput,
   type UserRecord,
 } from '@travelclaw/shared';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { RateLimiter } from '../auth/rate-limiter';
 import { clientKey, rateLimited } from '../common/rate-limit';
 import { ZodValidationPipe } from '../common/zod-pipe';
+import { EventsService } from '../events/events.service';
 import { TURN_WINDOW_MS } from '../models/model-catalog';
 import { ModelService } from '../models/model.service';
 import { GatewayService } from './gateway.service';
+import { TurnStream } from './turn-stream';
+
+/** What a browser run reports while a live turn is open. */
+interface BrowserStepEvent {
+  sessionId: string;
+  taskId: string;
+  action?: string;
+  message: string;
+  status: string;
+  step: number;
+}
 
 /** Turns a guest may run from one address across *paced* models. Unpaced models are exempt. */
 const GUEST_IP_TURNS = 30;
@@ -42,11 +56,135 @@ export class ChatController {
   private readonly turnLimiters = new Map<string, RateLimiter>();
   /** Blunts "hit the guest limit, mint a new guest" — this one is keyed by IP, not account. */
   private readonly guestIpLimiter = new RateLimiter(GUEST_IP_TURNS, TURN_WINDOW_MS);
+  private readonly logger = new Logger(ChatController.name);
 
   constructor(
     private readonly gateway: GatewayService,
     private readonly models: ModelService,
+    private readonly events: EventsService,
   ) {}
+
+  @Post('chat/stream')
+  @ApiOperation({ summary: 'Open or continue a chat, streaming the turn as it runs' })
+  async chatStream(
+    @Req() req: Request,
+    @Res() res: Response,
+    @CurrentUser() user: UserRecord,
+    @Body(new ZodValidationPipe(chatSchema)) body: ChatInput,
+  ) {
+    this.refuseModelChoice(req);
+    await this.runStream(req, res, user, { ...body }, body.sessionId);
+  }
+
+  @Post('sessions/:id/messages/stream')
+  @ApiOperation({ summary: 'Run a turn inside a chat, streaming it as it runs' })
+  async messageStream(
+    @Req() req: Request,
+    @Res() res: Response,
+    @CurrentUser() user: UserRecord,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(sendMessageSchema)) body: SendMessageInput,
+  ) {
+    this.refuseModelChoice(req);
+    await this.runStream(
+      req,
+      res,
+      user,
+      {
+        content: body.content,
+        attachments: body.attachments,
+        channel: 'webchat',
+        sessionId: id,
+      },
+      id,
+    );
+  }
+
+  /**
+   * One live turn. Pacing is checked before a single byte is written, so a
+   * caller who is over their model's pace gets an ordinary JSON error rather
+   * than an event stream that fails halfway.
+   */
+  private async runStream(
+    req: Request,
+    res: Response,
+    user: UserRecord,
+    input: ChatInput,
+    sessionId: string | undefined,
+  ): Promise<void> {
+    const model = this.models.best();
+    this.checkTurnLimit(req, user, model);
+
+    const stream = new TurnStream(res);
+    stream.open();
+    // A browser run is started by the desk, not by this request, so its steps
+    // arrive on the event bus. Only this chat's work is forwarded.
+    const onBrowserStep = (payload: unknown) => {
+      const event = payload as BrowserStepEvent;
+      if (!stream.matchesSession(event.sessionId)) return;
+      const state = ['handoff', 'stopped', 'failed'].includes(event.status)
+        ? 'failed'
+        : ['observed', 'ready'].includes(event.status)
+          ? 'done'
+          : 'running';
+      stream.step({
+        id: `browser:${event.taskId}:${event.step}`,
+        kind: 'browser',
+        name: event.action,
+        label: event.action
+          ? `Browser: ${describeBrowserAction(event.action)}`
+          : 'Browser research',
+        detail: event.message,
+        state,
+      });
+    };
+    this.events.on('browser.step', onBrowserStep);
+    // Closing the tab, or pressing Stop, cancels the model call itself rather
+    // than only the connection that would have carried its answer. This is
+    // `res`, not `req`: a request's own 'close' fires as soon as its body has
+    // been read, which would end every stream before the turn began.
+    const stop = () => {
+      if (!res.writableEnded) stream.stop();
+    };
+    res.on('close', stop);
+
+    try {
+      const response = await this.gateway.handleIncoming(
+        {
+          content: input.content,
+          attachments: input.attachments,
+          agentId: input.agentId,
+          channel: input.channel,
+          peerId: input.peerId,
+          sessionId: sessionId ?? input.sessionId,
+        },
+        user.id,
+        model,
+        stream,
+      );
+      stream.complete(response);
+    } catch (error) {
+      if (stream.aborted || isAbort(error)) {
+        // Stopped, not failed: there is nobody left to read an error.
+        stream.end();
+      } else {
+        const message =
+          error instanceof BadRequestException
+            ? (error.getResponse() as { message?: string })?.message || error.message
+            : 'The turn failed before it finished.';
+        // The traveler gets a sentence; the operator gets the stack. A failed
+        // stream is invisible in the UI otherwise.
+        this.logger.error(
+          `Streamed turn failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+        );
+        stream.fail(message);
+      }
+    } finally {
+      this.events.off('browser.step', onBrowserStep);
+      res.off('close', stop);
+      stream.end();
+    }
+  }
 
   @Post('chat')
   @ApiOperation({ summary: 'Open or continue a chat and run one turn' })
@@ -137,4 +275,22 @@ export class ChatController {
     }
     return limiter;
   }
+}
+
+/** `browser_observe` reads better as "read the page" than as tool-shaped jargon. */
+function describeBrowserAction(action: string): string {
+  const name = action.replace(/^browser_/, '').replaceAll('_', ' ');
+  if (name === 'observe') return 'read the page';
+  if (name === 'choose source') return 'chose a source';
+  return name;
+}
+
+function isAbort(error: unknown): boolean {
+  return (
+    (error instanceof Error &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')) ||
+    (typeof error === 'object' &&
+      error !== null &&
+      (error as { name?: string }).name === 'AbortError')
+  );
 }

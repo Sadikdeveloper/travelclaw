@@ -1,26 +1,36 @@
 import type {
   AgentTaskRecord,
-  ChatResponse,
   HoldAttempt,
   MessageAttachment,
   MessageRecord,
   SessionRecord,
   TaskDecision,
+  TurnStreamEvent,
 } from '@travelclaw/shared';
 import { Hotel, Plane, Sparkles } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useLiveRevision } from '../App';
 import { api, ApiError } from '../api';
 import { AgentCard } from '../components/AgentCard';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { Composer } from '../components/Composer';
+import { LiveTurn, type LiveTurnState } from '../components/LiveTurn';
 import { ProcessTrail } from '../components/ProcessTrail';
 import { RichText } from '../components/RichText';
 import { Banner } from '../components/Status';
 import { TaskFeedbackDialog } from '../components/TaskFeedbackDialog';
 import { useAuth } from '../auth';
 import { mirrorGuestMessages } from '../guestChatCache';
+import { streamTurn } from '../turnStream';
 
 const prompts: Array<{ text: string; icon: ComponentType<{ size?: number }> }> = [
   { text: 'Find a flight from Lagos to Lisbon on 2026-11-02', icon: Plane },
@@ -55,12 +65,17 @@ export function ChatPage() {
   const [holdingOfferId, setHoldingOfferId] = useState('');
   const [feedbackTask, setFeedbackTask] = useState<AgentTaskRecord | null>(null);
   const [givingFeedback, setGivingFeedback] = useState(false);
+  // The turn that is running right now, as the gateway reports it.
+  const [live, setLive] = useState<LiveTurnState | null>(null);
+  const liveRef = useRef<LiveTurnState | null>(null);
+  liveRef.current = live;
   const transcript = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
-  // The hero landing view only applies to a brand-new, not-yet-opened chat — once a
-  // specific chat id is in the URL, it always gets the normal thread, even mid-send.
-  const isLanding = !sessionId;
+  // The hero landing view only applies to a brand-new, not-yet-opened chat. A turn
+  // started from there becomes a thread immediately, so the traveler watches the
+  // process instead of a spinner on a landing page.
+  const isLanding = !sessionId && !live;
 
   useEffect(() => {
     // A different chat should not inherit a completion prompt or status history
@@ -79,6 +94,9 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!sessionId) {
+      // A turn started from the landing hero has no chat id to load yet; the
+      // socket's bumps must not wipe its optimistic message and live process.
+      if (liveRef.current) return;
       setMessages([]);
       setTasks([]);
       setTitle('New chat');
@@ -209,6 +227,28 @@ export function ChatPage() {
     setDraft('');
     setAttachments([]);
     stickToBottom.current = true;
+    // The traveler's own message lands before the desk answers, so the thread
+    // never looks like it swallowed what was just typed.
+    const pending: MessageRecord = {
+      id: `pending-${Date.now()}`,
+      sessionId: sessionId ?? 'new',
+      role: 'user',
+      content,
+      tools: [],
+      attachments: files,
+      provider: null,
+      model: null,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((current) => [...current, pending]);
+    setLive({
+      steps: [],
+      reasoning: '',
+      reply: '',
+      modelLabel: 'the desk',
+      provider: '',
+      startedAt: Date.now(),
+    });
     let id = sessionId;
     try {
       if (!id) {
@@ -219,10 +259,12 @@ export function ChatPage() {
         });
         id = session.id;
       }
-      const response = await api<ChatResponse>(`/api/sessions/${id}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ content, attachments: files }),
+      const response = await streamTurn({
+        sessionId: id,
+        content,
+        attachments: files,
         signal: controller.signal,
+        onEvent: (event) => applyLiveEvent(setLive, event),
       });
       if (response.model === 'agents') feedbackExpectedForSession.current = id;
       await loadChat(id, ++generation.current);
@@ -247,10 +289,12 @@ export function ChatPage() {
         setError(err instanceof ApiError ? err.message : 'The turn failed');
         setDraft(content);
         setAttachments(files);
+        setMessages((current) => current.filter((message) => message.id !== pending.id));
       }
     } finally {
       abort.current = null;
       setSending(false);
+      setLive(null);
     }
   }
 
@@ -376,20 +420,11 @@ export function ChatPage() {
               </div>
             );
           })}
-          {sending ? (
+          {live ? <LiveTurn state={live} onStop={stop} /> : null}
+          {sending && !live ? (
             <div className="working" aria-live="polite">
               <span className="working-spinner" aria-hidden="true" />
-              <div className="working-copy">
-                <strong>The desk is working</strong>
-                <span className="working-steps" aria-hidden="true">
-                  <span>reading your message</span>
-                  <span>running its tools</span>
-                  <span>writing the reply</span>
-                </span>
-              </div>
-              <button className="btn-ghost working-stop" type="button" onClick={stop}>
-                Stop
-              </button>
+              <strong>The desk is working</strong>
             </div>
           ) : null}
         </div>
@@ -409,4 +444,45 @@ export function ChatPage() {
 
 function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
+}
+
+/**
+ * Fold one gateway event into the live process. Steps are keyed, so a tool that
+ * was announced `running` is updated in place when its result lands instead of
+ * appearing twice. Reasoning and the answer both grow; only a bounded tail of
+ * the thinking is kept for the screen.
+ */
+function applyLiveEvent(
+  setLive: Dispatch<SetStateAction<LiveTurnState | null>>,
+  event: TurnStreamEvent,
+): void {
+  setLive((current) => {
+    if (!current) return current;
+    if (event.type === 'turn.started') {
+      return {
+        ...current,
+        modelLabel: event.modelLabel || event.model || current.modelLabel,
+        provider: event.provider,
+      };
+    }
+    if (event.type === 'step') {
+      const existing = current.steps.findIndex((step) => step.id === event.step.id);
+      const steps =
+        existing === -1
+          ? [...current.steps, event.step]
+          : current.steps.map((step, index) => (index === existing ? event.step : step));
+      return { ...current, steps };
+    }
+    if (event.type === 'reasoning.delta') {
+      return { ...current, reasoning: `${current.reasoning}${event.text}`.slice(-4000) };
+    }
+    if (event.type === 'reply.delta') {
+      return { ...current, reply: `${current.reply}${event.text}`.slice(-20000) };
+    }
+    if (event.type === 'reply.reset') {
+      // The model started an answer and then chose a tool. Clear the draft.
+      return { ...current, reply: '' };
+    }
+    return current;
+  });
 }

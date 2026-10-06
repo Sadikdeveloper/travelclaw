@@ -198,6 +198,14 @@ A session key is `agent:<agentId>:<channel>:<peerId>`. Direct webchat uses peer 
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
 6. Persist the assistant message, with each trace marked `model` or `router`, and emit `chat.completed`.
 
+A tool-calling model is offered the catalog again after its results, so it can chain real
+work (search, then read a page, then answer) instead of answering from the first hit. The
+budget does not move: at most three executions per turn. A call identical to one that
+already ran in the same turn — same tool, same arguments — is not run again; the result is
+already in the model's context, so the pass after it answers from what it has. Rejection is
+still loud: a call for a tool that is not on the desk, or with arguments that do not
+validate, is reported as a failed step.
+
 A tool call is validated against the tool's zod argument schema before it runs. A payload
 that does not match is rejected with a short traveler sentence — never coerced, and never
 a 500. The mock provider has no tool support, so it keeps the router-only path: the same
@@ -208,11 +216,67 @@ error inside a tool becomes a failed result with the desk still speaking, not a 
 
 A complete flight or hotel search does not go through that tool list. When this install has a configured provider source (or an authorized browser fallback) and the traveler supplied every field needed for the query, it wakes one or two desks, Flight and Stay. Incomplete requests remain ordinary model turns so the traveler gets a useful follow-up instead of a fake completion card. A desk is marked **Search finished** only after its source returns, then the traveler can dismiss or answer the task-success prompt: **Yes**, **No**, or **Keep working**. Keep working does not replay a stale query; it leaves the composer available for the next instruction. An authorized browser handoff is the exception and says what input is needed. A provider offer is not a booking. Asking its provider to hold it is a separate traveler action, and the desk reports a hold only after confirmation.
 
+### The live turn
+
+The chat UI does not wait in the dark. `POST /api/chat/stream` and
+`POST /api/sessions/:id/messages/stream` take the same body as the plain routes and answer
+with Server-Sent Events on the response to that same request: there is no second channel to
+keep in sync and no turn id to invent. One frame per event, in the order it happened:
+
+| Event | What it carries |
+| --- | --- |
+| `turn.started` | The chat, and the provider/model label the desk picked |
+| `step` | A keyed row: `kind` (`stage`, `tool`, `desk`, `browser`), label, detail, `state` (`running`, `done`, `failed`), and `source` for a tool (`model` or `router`) |
+| `reasoning.delta` | The model's own thinking, when the provider exposes it |
+| `reply.delta` | The answer, as the model writes it |
+| `reply.reset` | The model wrote prose and then chose a tool instead: clear the draft |
+| `turn.completed` | The same `ChatResponse` the plain route returns |
+| `turn.failed` | One sentence for the traveler; the stack goes to the operator log |
+
+Steps are keyed, so a tool announced `running` is updated in place when its result lands
+instead of appearing twice. The stream is only opened for a caller that passed the same
+pace check as any other turn; a refusal is ordinary JSON, never an empty event stream.
+
+A live turn also changes how the desk behaves: it runs the agentic loop above, waits for a
+desk it woke instead of answering "they are working", and forwards browser steps from the
+in-process event bus as they happen. Stopping — the Stop button, or a tab that went away —
+closes the response, which aborts the turn's `AbortController`. That signal reaches the
+model call itself, so a stopped turn is cancelled rather than rescued: the traveler's
+message stays, and no half-written answer is saved or replaced by desk rendering. The plain
+`POST /api/chat` keeps the original two-pass shape and never streams; a provider that
+cannot stream has its finished sentence emitted as a single delta, so the screen shows the
+same order of events either way.
+
+## Reading the public web
+
+Two tools read the open web, and both are read-only: `web.search` returns up to five
+titles, URLs, and snippets, and `web.fetch` returns the readable text of one page. The
+shape follows the provider pattern OpenClaw and Hermes use — a search/extract pair behind a
+source, with a keyless tier so a bare install still reaches the web:
+
+1. An operator connector named `search` (base URL + key) is used when it exists, so a
+   self-hosted SearXNG or a paid API is one environment variable away.
+2. Otherwise the keyless DuckDuckGo HTML endpoint is used, the same no-credential fallback
+   OpenClaw ships as its `duckduckgo` provider and Hermes reaches through `ddgs`.
+3. With the network flag off (`TRAVELCLAW_NETWORK=0`), nothing is fetched and the tool says
+   so.
+
+A configured source that answers nothing usable is reported as that source's failure, never
+silently swapped for a public scrape. `web.fetch` refuses anything that is not a public
+http(s) page on the usual ports: no credentials in the URL, no loopback or private/link-local
+literal address, no redirect, at most 400 KB read and 4000 characters kept, and the
+truncation is stated. Page text is untrusted data: the prompt tells the model to attribute
+it to its source and ignore instructions inside it. This is not the browser worker — it
+cannot click, type, or submit anything — and the worker remains the fallback for
+interactive research under #25.
+
 ## What the traveler sees
 
 The control pages (desk, tools, memory) are not the product. The traveler gets a chat and a sidebar of their chats. Tools are functions we register, and the model calls them with the router as fallback. The traveler only says what they need: provider access is the desk's job (see Connectors), and anything the desk needs back arrives as a turn, not a setting. Nobody has to sign in to chat — a guest is provisioned on first load — but chats belong to the account that made them, guest or signed-in.
 
-The chat shows the trail, not just the answer. Under each reply, a process trail lists what actually happened, in order: every tool that ran and who asked for it (the model, or the router standing in), every desk that was woken, and which model wrote the reply. The newest trail opens itself; older ones collapse. While a turn runs, the composer's send button becomes a stop button — stopping ends the waiting and reconciles with whatever the desk already persisted (the message is saved before the model runs, and the socket refills a reply that lands late).
+The chat shows the trail, not just the answer. While a turn runs, a live card at the end of the thread shows the desk's work as it happens: the model's thinking when the provider shares it, every step in order — the read, what it chose to run, each tool with the arguments it was asked with and the result it returned, desks and browser steps as they move — and the reply, written out as the model writes it. Everything in the card is something the gateway reported; nothing is a placeholder that pretends work is happening. Under a finished reply the same steps stay as a process trail: every tool that ran and who asked for it (the model, or the router standing in), every desk that was woken, and which model wrote the reply. The newest trail opens itself; older ones collapse.
+
+Stopping is immediate. The composer's send button becomes a stop button for the length of a turn; pressing it cancels the model call and saves nothing half-written, leaving the traveler's own message in the thread. A reply that the desk persists before the tab goes away is refilled by the socket on the next load.
 
 The composer is the mode line. A tag reading `Agent mode` sits under the input, both on the landing hero and inside a thread, so the traveler can see how the desk behaves while typing. Attachments are metadata: a traveler can attach up to four images or documents per message, images carry a small inline thumbnail rendered in the browser, and the model is told what arrived by name — the files themselves never reach the gateway. Reading document contents is a later roadmap step, so the desk acknowledges a file rather than opening it.
 

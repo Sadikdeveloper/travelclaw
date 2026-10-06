@@ -8,7 +8,7 @@ expose this past your own machine.
 - Do not store card numbers, passport numbers, or medical details in memory or chat. The database is a plain SQLite file.
 - Tools cannot run shell commands. Keep it that way.
 - Workspace writes are limited to the five persona files, and paths are checked against the workspace root. A per-agent override lives under `workspace/agents/<id>/`; the agent id is one validated lowercase segment, so it cannot climb out of the workspace, and `GET /api/workspace?agentId=` reports which file backs each slot.
-- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; an operator connector may repoint one at a compatible base URL (see Connectors).
+- A live model key in `.env` is sent only to `TRAVELCLAW_MODEL_BASE_URL`. Tool HTTP calls go to Open-Meteo and Frankfurter by default when the network flag is on; an operator connector may repoint one at a compatible base URL (see Connectors). The read-only web pair goes further by design: `web.search` reaches the operator's `search` connector when one is configured, otherwise DuckDuckGo's no-JavaScript endpoint, and `web.fetch` opens a page only when it is public http(s) on port 80/443 with no credentials and no private or link-local address, reads at most 400 KB, and refuses redirects. Page text is data, not instruction: the prompt says to attribute it and ignore directions inside it. `TRAVELCLAW_NETWORK=0` stops both tools before any request is made.
 - Treat visa and safety text as a checklist. The desk is not an authority.
 
 ## Accounts

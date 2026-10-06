@@ -41,9 +41,27 @@ export {
   visaNotes,
   weatherOutlook,
 } from './tools';
-export type { ToolDefinition } from './tools';
+export type { ToolDefinition, ToolRunHooks } from './tools';
 export { mergeHints, planToolCalls, runToolPlan } from './tool-calls';
 export type { PlannedToolCall, ToolPlan } from './tool-calls';
+export {
+  firstUrlIn,
+  isPrivateHost,
+  MAX_FETCH_CHARS,
+  MAX_WEB_RESULTS,
+  parseDuckDuckGo,
+  publicHttpUrl,
+  searchQueryFrom,
+  webFetch,
+  webSearch,
+} from './web';
+export type {
+  WebFetchData,
+  WebFetchOutcome,
+  WebSearchData,
+  WebSearchOutcome,
+  WebSearchResult,
+} from './web';
 export { parseToolArgs, rejectionSummary, zodToJsonSchema } from './tool-args';
 export {
   assemblePrompt,
@@ -52,7 +70,14 @@ export {
   MEMORY_MAX_LINES,
 } from './prompt';
 export { renderFallback } from './reply';
-export { completeTurn, formatToolList, mockProvider, parseCommand } from './turn';
+export {
+  AGENTIC_TOOL_ROUNDS,
+  completeTurn,
+  formatToolList,
+  mockProvider,
+  parseCommand,
+} from './turn';
+export type { CompleteTurnDeps } from './turn';
 export type {
   ActiveTripHint,
   BudgetData,
@@ -62,6 +87,7 @@ export type {
   HistoryTurn,
   JsonSchemaObject,
   ModelCompletion,
+  ModelDelta,
   ModelProvider,
   ModelToolCall,
   ModelToolSpec,
@@ -79,6 +105,8 @@ export type {
   ToolSource,
   ToolTrace,
   TripHints,
+  TurnEvent,
+  TurnEventSink,
   TurnRequest,
   TurnResult,
   VisaData,

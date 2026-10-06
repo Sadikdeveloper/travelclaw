@@ -1,15 +1,34 @@
 import { assemblePrompt } from './prompt';
 import { renderFallback } from './reply';
-import { planToolCalls, runToolPlan, type ToolPlan } from './tool-calls';
-import { BUNDLED_TOOLS, routeTools, runTools, toolSpecs } from './tools';
+import { planToolCalls, runToolPlan, toolCallKey, type ToolRunHooks } from './tool-calls';
+import {
+  BUNDLED_TOOLS,
+  findTool,
+  MAX_TOOLS_PER_TURN,
+  routeTools,
+  runTools,
+  toolSpecs,
+} from './tools';
 import type {
+  ModelCompletion,
+  ModelDelta,
   ModelProvider,
   RememberData,
   ToolContext,
   ToolResult,
+  TurnEventSink,
   TurnRequest,
   TurnResult,
 } from './types';
+
+/**
+ * How many times a live model may be handed the tool catalog in one turn. The
+ * historic shape is two passes — call, then narrate. A third pass is what lets
+ * the desk chain real work (`web.search` → `web.fetch` → answer) the way a
+ * coding agent chains its tools, without letting one turn run away: the total
+ * number of executions stays capped by `MAX_TOOLS_PER_TURN`.
+ */
+export const AGENTIC_TOOL_ROUNDS = 3;
 
 export function parseCommand(
   text: string,
@@ -26,12 +45,33 @@ export function formatToolList(): string {
   return BUNDLED_TOOLS.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n');
 }
 
+export interface CompleteTurnDeps {
+  provider: ModelProvider;
+  ctx: ToolContext;
+  /**
+   * Times the provider may be offered tools. `1` is the original two-pass turn;
+   * the control UI's live stream asks for the default so a search can be read.
+   */
+  toolRounds?: number;
+  /** Where the desk reports what it is doing, in the order it happened. */
+  onEvent?: TurnEventSink;
+  /** Aborted when the traveler presses Stop; ends the provider call in flight. */
+  signal?: AbortSignal;
+}
+
 export async function completeTurn(
   input: TurnRequest,
-  deps: { provider: ModelProvider; ctx: ToolContext },
+  deps: CompleteTurnDeps,
 ): Promise<TurnResult> {
+  const emit: TurnEventSink = deps.onEvent ?? (() => {});
+  const history = input.history.slice(-8);
+  // What the model reads: the traveler's words, plus any gateway note (attachments).
+  // Routing already runs on the raw text, so a note cannot steer tool choice.
+  const userText = input.modelNote ? `${input.text}\n\n${input.modelNote}` : input.text;
+
   const command = parseCommand(input.text);
   if (command?.name === 'tools') {
+    emit({ type: 'stage', id: 'command', label: 'Ran the /tools command', state: 'done' });
     return {
       reply: `Tools on this desk:\n${formatToolList()}`,
       tools: [],
@@ -52,72 +92,284 @@ export async function completeTurn(
     };
   }
 
+  deps.signal?.throwIfAborted();
   const text = command?.name === 'remember' ? `/remember ${command.rest}` : input.text;
   const routerNames =
     command?.name === 'remember' ? ['memory.remember'] : routeTools(text).slice(0, 3);
-  const history = input.history.slice(-8);
-  // What the model reads: the traveler's words, plus any gateway note (attachments).
-  // Routing above already ran on the raw text, so a note cannot steer tool choice.
-  const userText = input.modelNote ? `${input.text}\n\n${input.modelNote}` : input.text;
+
+  emit({
+    type: 'stage',
+    id: 'read',
+    label: 'Read your message',
+    detail: `${input.memory.length} memory line${input.memory.length === 1 ? '' : 's'} and ${history.length} earlier message${history.length === 1 ? '' : 's'} in context.`,
+    state: 'done',
+  });
+
+  const toolRounds = Math.max(1, Math.min(deps.toolRounds ?? 1, 4));
+  const routerOnly = command?.name === 'remember' || deps.provider.usesTools !== true;
+  // Did the answer reach the screen as the model wrote it? A round that turned
+  // out to want a tool resets the draft, so this is not simply "a delta arrived".
+  const answered = { streamed: false };
 
   let toolResults: ToolResult[];
-  if (command?.name === 'remember' || deps.provider.usesTools !== true) {
-    // Offline, mock, or an explicit command: the router is the only caller.
-    toolResults = await runTools(text, routerNames, deps.ctx);
-  } else {
-    // The model gets the catalog first. If it asks for nothing, the router
-    // still runs, so a model that ignores tools cannot leave the turn ungrounded.
-    const first = await deps.provider.complete({
-      system: assemblePrompt(input, [], { toolCalling: true }),
-      history,
-      user: userText,
-      fallback: renderFallback(text, [], input.persona.name),
-      tools: toolSpecs(),
+  if (routerOnly) {
+    emit({
+      type: 'stage',
+      id: 'plan',
+      label: 'Chose what to run',
+      detail: routerNames.length
+        ? `The desk router picked ${routerNames.join(', ')}.`
+        : 'Nothing on this desk needed a tool.',
+      state: 'done',
     });
-    const plan: ToolPlan = planToolCalls({
+    toolResults = await runTools(text, routerNames, deps.ctx, toolHooks(emit, 0));
+  } else {
+    const looped = await runModelRounds({
+      input,
+      deps,
+      emit,
+      userText,
+      history,
       text,
       routerNames,
-      modelCalls: first.toolCalls ?? [],
+      rounds: toolRounds,
+      answered,
     });
-    toolResults = await runToolPlan(plan, text, deps.ctx);
-    if (!toolResults.length) {
-      // Nothing to ground: the model's own answer stands, or the desk speaks.
+    if (looped.answered) {
+      // The model answered without asking for anything more. Everything that did
+      // run on the way there is still this turn's grounding, and is returned as
+      // such — a chain of tools is not discarded because the last pass was prose.
+      const answeredResults = looped.results;
+      const kept = answeredResults.find(
+        (result) => result.name === 'memory.remember' && result.ok,
+      );
+      const reply =
+        looped.answered.text.trim() ||
+        renderFallback(text, answeredResults, input.persona.name);
+      if (!answered.streamed) emit({ type: 'reply_delta', text: reply });
+      emit({
+        type: 'stage',
+        id: 'write',
+        label: 'Wrote the reply',
+        detail: `${looped.answered.model || looped.answered.provider} answered.`,
+        state: 'done',
+      });
       return {
-        reply: first.text.trim() || renderFallback(text, [], input.persona.name),
-        tools: [],
-        toolResults: [],
-        provider: first.provider,
-        model: first.model,
+        reply,
+        tools: tracesOf(answeredResults),
+        toolResults: answeredResults,
+        provider: looped.answered.provider,
+        model: looped.answered.model,
+        ...(kept ? { remembered: kept.data as RememberData } : {}),
         command: command?.name,
       };
     }
+    toolResults = looped.results;
   }
 
   const remembered = toolResults.find(
     (result) => result.name === 'memory.remember' && result.ok,
   );
   const fallback = renderFallback(text, toolResults, input.persona.name);
+  emit({
+    type: 'stage',
+    id: 'write',
+    label: 'Writing the reply',
+    detail: toolResults.length
+      ? 'Grounding the answer in what ran above.'
+      : 'No tool result to ground on, so the model answers from the desk files.',
+    state: 'running',
+  });
+
+  deps.signal?.throwIfAborted();
   const completion = await deps.provider.complete({
-    system: assemblePrompt(input, toolResults),
+    system: assemblePrompt(input, toolResults, { toolCalling: false }),
     history,
     user: userText,
     fallback,
+    ...(deps.signal ? { signal: deps.signal } : {}),
+    ...liveDeltas(deps, emit, answered),
   });
-  const traces = toolResults.map((result) => ({
-    name: result.name,
-    ok: result.ok,
-    summary: result.summary,
-    source: result.source,
-  }));
+  const reply = completion.text.trim() || fallback;
+  if (!answered.streamed) emit({ type: 'reply_delta', text: reply });
+  emit({
+    type: 'stage',
+    id: 'write',
+    label: 'Wrote the reply',
+    detail: `${completion.model || completion.provider} answered.`,
+    state: 'done',
+  });
+
   return {
-    reply: completion.text.trim() || fallback,
-    tools: traces,
+    reply,
+    tools: tracesOf(toolResults),
     toolResults,
     provider: completion.provider,
     model: completion.model,
     remembered: remembered ? (remembered.data as RememberData) : undefined,
     command: command?.name,
   };
+}
+
+/**
+ * The agentic part: offer the catalog, run what the model asks for, show it the
+ * results, and let it ask again — inside one turn budget. The loop stops the
+ * moment the model writes an answer instead of calling a tool, or when the
+ * execution ceiling is reached, whichever comes first.
+ */
+async function runModelRounds(input: {
+  input: TurnRequest;
+  deps: CompleteTurnDeps;
+  emit: TurnEventSink;
+  userText: string;
+  history: TurnRequest['history'];
+  text: string;
+  routerNames: string[];
+  rounds: number;
+  answered: { streamed: boolean };
+}): Promise<{ results: ToolResult[]; answered?: ModelCompletion }> {
+  const { deps, emit, text } = input;
+  const results: ToolResult[] = [];
+  // What this turn has already run, so a later pass cannot spend the budget
+  // asking for the same thing again: the result is already in its context.
+  const ran: string[] = [];
+  const ranTools: string[] = [];
+  let index = 0;
+
+  for (let round = 0; round < input.rounds; round++) {
+    deps.signal?.throwIfAborted();
+    const first = round === 0;
+    const roundStreamed = { streamed: false };
+    const completion = await deps.provider.complete({
+      system: assemblePrompt(input.input, results, { toolCalling: true }),
+      history: input.history,
+      user: input.userText,
+      fallback: renderFallback(text, results, input.input.persona.name),
+      tools: toolSpecs(),
+      ...(deps.signal ? { signal: deps.signal } : {}),
+      ...liveDeltas(deps, emit, roundStreamed),
+    });
+
+    const plan = planToolCalls({
+      text,
+      routerNames: first ? input.routerNames : [],
+      modelCalls: completion.toolCalls ?? [],
+      remaining: Math.max(0, MAX_TOOLS_PER_TURN - results.length),
+      ran,
+      ranTools,
+    });
+
+    if (plan.calls.length || plan.rejected.length) {
+      // The model wrote prose and then chose work instead. Take the draft back
+      // rather than leaving words on screen that the turn is not going to keep.
+      if (roundStreamed.streamed) emit({ type: 'reply_reset' });
+    } else {
+      input.answered.streamed = roundStreamed.streamed;
+    }
+
+    if (!plan.calls.length && !plan.rejected.length) {
+      emit({
+        type: 'stage',
+        id: 'plan',
+        label: results.length ? 'Decided it had enough' : 'Answered without tools',
+        detail: results.length
+          ? `${results.length} tool${results.length === 1 ? '' : 's'} ran; the model wrote the answer from them.`
+          : 'Nothing on this desk matched, so the model answered from the desk files.',
+        state: 'done',
+      });
+      // With nothing run yet, whatever the model wrote is the turn's answer. A
+      // silent model after real tool work gets the narration pass instead, so
+      // the results are never dropped on the floor.
+      if (completion.text.trim() || !results.length)
+        return { results, answered: completion };
+      break;
+    }
+
+    emit({
+      type: 'stage',
+      id: `plan-${round}`,
+      label:
+        round === 0 ? 'Chose what to run' : `Chose what to run next (pass ${round + 1})`,
+      detail: [
+        plan.calls.length
+          ? `${plan.calls.length} tool${plan.calls.length === 1 ? '' : 's'}: ${plan.calls.map((call) => call.name).join(', ')}.`
+          : 'No tool ran.',
+        plan.rejected.length ? `${plan.rejected.length} call refused.` : '',
+        plan.repeated
+          ? `${plan.repeated} call already ran this turn and was not repeated.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      state: 'done',
+    });
+
+    const roundResults = await runToolPlan(plan, text, deps.ctx, toolHooks(emit, index));
+    index += plan.calls.length;
+    results.push(...roundResults);
+    ran.push(...plan.calls.map((call) => toolCallKey(call.name, call.args)));
+    ranTools.push(...plan.calls.map((call) => call.name));
+  }
+  // The round budget is spent. What ran is still the turn's grounding, so the
+  // narration pass below answers from it rather than from nothing.
+  return { results };
+}
+
+/** Report every execution to the traveler's screen as it starts and ends. */
+function toolHooks(emit: TurnEventSink, startIndex: number): ToolRunHooks {
+  return {
+    start: (call) => {
+      const tool = findTool(call.name);
+      emit({
+        type: 'tool_start',
+        id: `tool-${startIndex + call.index}`,
+        name: call.name,
+        label: tool?.label ?? call.name,
+        source: call.source,
+        ...(call.args ? { args: call.args } : {}),
+      });
+    },
+    end: (call) => {
+      emit({
+        type: 'tool_end',
+        id: `tool-${startIndex + call.index}`,
+        name: call.name,
+        ok: call.ok,
+        summary: call.summary,
+      });
+    },
+  };
+}
+
+/**
+ * Stream only when a screen is watching. The plain POST path asks for one
+ * finished answer, so a streaming-capable provider is not asked to stream into
+ * nowhere (and a non-streaming body is never parsed as if it were SSE).
+ */
+function liveDeltas(
+  deps: CompleteTurnDeps,
+  emit: TurnEventSink,
+  seen: { streamed: boolean },
+): { onDelta?: (delta: ModelDelta) => void } {
+  if (!deps.provider.streams || !deps.onEvent) return {};
+  return {
+    onDelta: (delta: ModelDelta) => {
+      if (delta.reasoning) emit({ type: 'reasoning', text: delta.reasoning });
+      if (delta.text) {
+        seen.streamed = true;
+        emit({ type: 'reply_delta', text: delta.text });
+      }
+    },
+  };
+}
+
+function tracesOf(results: ToolResult[]) {
+  return results.map((result) => ({
+    name: result.name,
+    ok: result.ok,
+    summary: result.summary,
+    source: result.source,
+  }));
 }
 
 export function mockProvider(model = 'travelclaw-local'): ModelProvider {

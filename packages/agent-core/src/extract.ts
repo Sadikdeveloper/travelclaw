@@ -1,4 +1,4 @@
-import type { BudgetStyle } from '@travelclaw/shared';
+import { MAX_OUTLINE_DAYS, type BudgetStyle } from '@travelclaw/shared';
 import { addDays } from './dates';
 import { findDestination } from './destinations';
 import type { TripHints } from './types';
@@ -18,6 +18,50 @@ const INTERESTS = [
   'walking',
 ];
 
+/** Dates beyond this are an outline request, not an itinerary. */
+const MAX_INFERRED_DAYS = MAX_OUTLINE_DAYS;
+
+const MONTHS = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+
+/** Travelers write "four days" and "a week" far more often than "4 days". */
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+};
+
+const COUNT_WORD = `(\\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)`;
+
 const CURRENCIES = [
   'USD',
   'EUR',
@@ -34,9 +78,9 @@ const CURRENCIES = [
   'ISK',
 ];
 
-export function extractHints(text: string): TripHints {
+export function extractHints(text: string, now: Date = new Date()): TripHints {
   const dates = [...text.matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)].map((match) => match[1]);
-  const dayCount = text.match(/\b(\d{1,2})\s*[- ]?days?\b/i);
+  const days = lengthInDays(text);
   const travelers = text.match(
     /\b(\d{1,2})\s*(travelers|travellers|people|adults|guests)\b/i,
   );
@@ -51,10 +95,13 @@ export function extractHints(text: string): TripHints {
   );
   const destination = findDestination(text);
 
-  const startDate = dates[0];
+  // A month name is a soft anchor, not a booking: "four days in November"
+  // starts on the 1st so the length still decides the range, while a bare "in
+  // November" leaves the dates open instead of inventing a 30-day trip.
+  const monthStart = monthAnchor(text, now);
+  const startDate = dates[0] ?? (days !== undefined ? monthStart : undefined);
   let endDate: string | undefined = dates[1];
-  const days = dayCount ? Number(dayCount[1]) : undefined;
-  if (startDate && !endDate && days && days > 0 && days <= 18) {
+  if (startDate && !endDate && days && days > 0 && days <= MAX_INFERRED_DAYS) {
     endDate = addDays(startDate, days - 1) ?? undefined;
   }
 
@@ -84,6 +131,42 @@ export function extractHints(text: string): TripHints {
   };
 }
 
+/** How long the traveler said the trip is, in days. */
+function lengthInDays(text: string): number | undefined {
+  const counted = new RegExp(`\\b${COUNT_WORD}\\s*[- ]?\\s*(?:days?|nights?)\\b`, 'i').exec(
+    text,
+  );
+  if (counted) return countFrom(counted[1]);
+  const weeks = new RegExp(`\\b${COUNT_WORD}\\s*[- ]?\\s*weeks?\\b`, 'i').exec(text);
+  const weekCount = weeks ? countFrom(weeks[1]) : undefined;
+  if (weekCount) return weekCount * 7;
+  if (/\bfortnight\b/i.test(text)) return 14;
+  if (/\blong weekend\b/i.test(text)) return 3;
+  if (/\bweekend\b/i.test(text)) return 2;
+  return undefined;
+}
+
+function countFrom(word: string): number | undefined {
+  const lower = word.toLowerCase();
+  if (lower === 'a' || lower === 'an') return 1;
+  return /^\d+$/.test(lower) ? Number(lower) : NUMBER_WORDS[lower];
+}
+
+/**
+ * The first day of the month the traveler named, in the next year that has not
+ * already started, so "in November" written in December means next November.
+ */
+function monthAnchor(text: string, now: Date): string | undefined {
+  const lower = text.toLowerCase();
+  const index = MONTHS.findIndex((month) => new RegExp(`\\b${month}\\b`).test(lower));
+  if (index === -1) return undefined;
+  const year = now.getUTCFullYear();
+  const first = Date.UTC(year, index, 1);
+  const thisMonth = Date.UTC(year, now.getUTCMonth(), 1);
+  const chosen = first < thisMonth ? Date.UTC(year + 1, index, 1) : first;
+  return new Date(chosen).toISOString().slice(0, 10);
+}
+
 function matchEnum<T extends string>(text: string, values: readonly T[]): T | undefined {
   const lower = text.toLowerCase();
   return values.find((value) => lower.includes(value));
@@ -91,9 +174,12 @@ function matchEnum<T extends string>(text: string, values: readonly T[]): T | un
 
 function matchStyle(text: string): BudgetStyle | undefined {
   const lower = text.toLowerCase();
-  if (/\b(lean|cheap|budget|hostel)\b/.test(lower)) return 'lean';
   if (/\b(splurge|luxury|nice hotel|high end)\b/.test(lower)) return 'splurge';
-  if (/\bcomfortable\b/.test(lower)) return 'comfortable';
+  if (/\b(comfortable|mid(?:-| )?(?:range|budget|tier)?|moderate|middling)\b/.test(lower)) {
+    return 'comfortable';
+  }
+  // "lean" is matched last so "a cheap but comfortable hotel" stays comfortable.
+  if (/\b(lean|cheap|budget|hostel|shoestring)\b/.test(lower)) return 'lean';
   return undefined;
 }
 

@@ -388,3 +388,217 @@ describe('history', () => {
     expect(provider.calls[0].history[0].content).toBe('turn 2');
   });
 });
+
+const SEARCH_HTML = `
+<div class="result">
+  <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Flisbon">Lisbon in November</a>
+  <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Flisbon">November is cool and quiet.</a>
+</div>
+`;
+
+const PAGE_HTML =
+  '<html><head><title>Lisbon in November</title></head><body><p>Pack a rain shell.</p></body></html>';
+
+function webFetchStub(): { impl: typeof fetch; calls: string[] } {
+  const calls: string[] = [];
+  const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes('duckduckgo.com'))
+      return new Response(SEARCH_HTML, { status: 200 });
+    if (init?.method === 'POST') return new Response(SEARCH_HTML, { status: 200 });
+    return new Response(PAGE_HTML, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }) as typeof fetch;
+  return { impl, calls };
+}
+
+describe('the agentic turn', () => {
+  it('searches, reads a page, then answers — inside one turn budget', async () => {
+    const provider = scriptedProvider([
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'lisbon in november' })],
+      },
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.fetch', { url: 'https://example.org/lisbon' })],
+      },
+      {
+        text: 'November is cool, quiet, and wet. Pack a shell.',
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+    ]);
+    const { impl, calls } = webFetchStub();
+
+    const turn = await completeTurn(request('What is Lisbon like in November?'), {
+      provider,
+      ctx: { now: new Date('2026-10-06T09:00:00Z'), network: true, fetchImpl: impl },
+      toolRounds: 3,
+    });
+
+    expect(provider.calls).toHaveLength(3);
+    // Pass two sees what pass one returned, and the catalog is still on offer.
+    expect(provider.calls[1].system).toContain('web.search');
+    expect(provider.calls[1].tools).toHaveLength(BUNDLED_TOOLS.length);
+    expect(turn.toolResults.map((result) => result.name)).toEqual([
+      'web.search',
+      'web.fetch',
+    ]);
+    expect(turn.reply).toBe('November is cool, quiet, and wet. Pack a shell.');
+    expect(calls).toContain('https://example.org/lisbon');
+  });
+
+  it('reports every tool as it starts and finishes, in order', async () => {
+    const provider = scriptedProvider([
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'lisbon weather' })],
+      },
+      { text: 'Cool and damp.', provider: 'openai', model: 'gpt-test' },
+    ]);
+    const { impl } = webFetchStub();
+    const events: string[] = [];
+
+    await completeTurn(request('What is Lisbon like in November?'), {
+      provider,
+      ctx: { now: new Date('2026-10-06T09:00:00Z'), network: true, fetchImpl: impl },
+      toolRounds: 2,
+      onEvent: (event) => {
+        if (event.type === 'tool_start') events.push(`start:${event.name}:${event.source}`);
+        if (event.type === 'tool_end') events.push(`end:${event.name}:${event.ok}`);
+        if (event.type === 'stage') events.push(`stage:${event.id}:${event.state}`);
+      },
+    });
+
+    expect(events).toEqual([
+      // The plan is announced, then each execution is announced as it runs.
+      'stage:read:done',
+      'stage:plan-0:done',
+      'start:web.search:model',
+      'end:web.search:true',
+      // The second pass had nothing left to run and answered from the result.
+      'stage:plan:done',
+      'stage:write:done',
+    ]);
+  });
+
+  it('streams reasoning and the answer when a screen is watching', async () => {
+    const provider: ModelProvider = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      streams: true,
+      async complete(input) {
+        input.onDelta?.({ reasoning: 'Checking the desk files.' });
+        input.onDelta?.({ text: 'Two ' });
+        input.onDelta?.({ text: 'cities.' });
+        return { text: 'Two cities.', provider: 'openai', model: 'gpt-test' };
+      },
+    };
+    const events: Array<{ type: string; text?: string }> = [];
+
+    await completeTurn(request('Where should I go in November?'), {
+      provider,
+      ctx,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.filter((event) => event.type === 'reasoning')).toEqual([
+      { type: 'reasoning', text: 'Checking the desk files.' },
+    ]);
+    expect(events.filter((event) => event.type === 'reply_delta')).toEqual([
+      { type: 'reply_delta', text: 'Two ' },
+      { type: 'reply_delta', text: 'cities.' },
+    ]);
+  });
+
+  it('emits one whole reply for a desk that cannot stream', async () => {
+    const events: string[] = [];
+    await completeTurn(request('Plan Lisbon for 4 days from 2026-10-12'), {
+      provider: mockProvider(),
+      ctx,
+      onEvent: (event) => {
+        if (event.type === 'reply_delta') events.push(event.text);
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatch(/Outline for Lisbon/);
+  });
+
+  it('runs an identical call once, however many times the model asks for it', async () => {
+    const endless = {
+      text: '',
+      provider: 'openai',
+      model: 'gpt-test',
+      toolCalls: [
+        call('currency.convert', { amount: 10, fromCurrency: 'USD', toCurrency: 'EUR' }),
+      ],
+    };
+    const provider = scriptedProvider([
+      endless,
+      endless,
+      { text: 'Done.', provider: 'openai', model: 'gpt-test' },
+    ]);
+
+    const turn = await completeTurn(request('convert 10 USD to EUR'), {
+      provider,
+      ctx,
+      toolRounds: 3,
+    });
+
+    // Asking again for what already ran is not work: the result is in the model's
+    // context, so the desk answers from it instead of repeating the call.
+    expect(turn.toolResults).toHaveLength(1);
+    expect(turn.reply).toBe('Done.');
+  });
+
+  it('runs a different call in a later pass, and still stops at the ceiling', async () => {
+    const provider = scriptedProvider([
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [
+          call('currency.convert', { amount: 10, fromCurrency: 'USD', toCurrency: 'EUR' }),
+        ],
+      },
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('budget.estimate', { destination: 'Lisbon', days: 4 })],
+      },
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('packing.list', { destination: 'Lisbon', days: 4 })],
+      },
+      { text: 'Done.', provider: 'openai', model: 'gpt-test' },
+    ]);
+
+    const turn = await completeTurn(request('convert 10 USD to EUR for Lisbon'), {
+      provider,
+      ctx,
+      toolRounds: 3,
+    });
+
+    expect(turn.toolResults.map((result) => result.name)).toEqual([
+      'currency.convert',
+      'budget.estimate',
+      'packing.list',
+    ]);
+    expect(turn.reply).toBe('Done.');
+  });
+});

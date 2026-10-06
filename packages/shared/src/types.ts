@@ -117,6 +117,47 @@ export interface ToolTrace {
   source?: 'model' | 'router';
 }
 
+/**
+ * One line of the process view: a stage the desk went through, a tool it ran, a
+ * desk it woke, or a browser step. Steps are keyed by `id`, so the same step can
+ * be announced `running` and later updated to `done` — the UI replaces it rather
+ * than appending a second row.
+ */
+export interface TurnStepRecord {
+  id: string;
+  kind: 'stage' | 'tool' | 'desk' | 'browser';
+  label: string;
+  detail?: string;
+  state: 'running' | 'done' | 'failed';
+  /** Tool name, desk kind, or the action a browser took. */
+  name?: string;
+  source?: 'model' | 'router';
+  at: string;
+}
+
+/**
+ * What the gateway writes on a streaming turn (`text/event-stream`). The reply
+ * arrives twice on purpose: `reply.delta` for the words as the model writes
+ * them, and `turn.completed` with the persisted record — the client swaps the
+ * draft for the saved message rather than trusting a stream it cannot replay.
+ */
+export type TurnStreamEvent =
+  | {
+      type: 'turn.started';
+      at: string;
+      sessionId: string;
+      provider: string;
+      model: string;
+      modelLabel: string;
+    }
+  | { type: 'step'; at: string; step: TurnStepRecord }
+  | { type: 'reasoning.delta'; at: string; text: string }
+  | { type: 'reply.delta'; at: string; text: string }
+  /** The model wrote a draft and then chose a tool: drop it and keep watching. */
+  | { type: 'reply.reset'; at: string }
+  | { type: 'turn.completed'; at: string; response: ChatResponse }
+  | { type: 'turn.failed'; at: string; message: string };
+
 export interface MessageRecord {
   id: string;
   sessionId: string;

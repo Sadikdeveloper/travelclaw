@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  AGENTIC_TOOL_ROUNDS,
   completeTurn,
   deskName,
   extractHints,
@@ -26,6 +27,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { ToolsService } from '../tools/tools.service';
 import { TripsService } from '../trips/trips.service';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { TurnStream } from './turn-stream';
 
 @Injectable()
 export class GatewayService {
@@ -57,6 +59,12 @@ export class GatewayService {
     // Resolved by the caller so the pace check and the turn agree on one model. Nobody
     // picks it: the desk runs the best model it has, for guests and accounts alike.
     model: ModelRecord = this.models.best(),
+    /**
+     * A live turn. When a stream is present the desk narrates as it goes, waits
+     * for its desks instead of answering "they are working", and the caller
+     * keeps the connection open until this method returns.
+     */
+    stream?: TurnStream,
   ): Promise<ChatResponse> {
     const agent = this.agents.resolve(input.agentId);
     const session = input.sessionId
@@ -69,6 +77,15 @@ export class GatewayService {
           },
           userId,
         );
+    stream?.setSession(session.id);
+    stream?.send({
+      type: 'turn.started',
+      at: new Date().toISOString(),
+      sessionId: session.id,
+      provider: model.provider,
+      model: model.id,
+      modelLabel: model.label,
+    });
 
     if (input.content.trim().toLowerCase() === '/new') {
       const reset = this.sessions.reset(session.id);
@@ -94,7 +111,8 @@ export class GatewayService {
     // where the model can ask a useful follow-up instead of creating a fake "Ready"
     // card that merely repeats the missing fields.
     const desks = this.searchableDesks(input.content);
-    if (desks.length) return this.startDesks(session.id, input.content, desks, userId);
+    if (desks.length)
+      return this.startDesks(session.id, input.content, desks, userId, stream);
 
     const history = this.sessions.recentHistory(session.id).slice(0, -1);
     // Per-agent persona: workspace/agents/<id>/<file> when it exists, the shared
@@ -135,6 +153,16 @@ export class GatewayService {
           fetchImpl: fetch,
           connectors: this.connectors.resolverFor(),
         },
+        // A live turn gets the agentic loop and a screen to write on. The plain
+        // POST keeps the original two-pass shape, so nothing that already reads
+        // a turn's result changes underneath it.
+        ...(stream
+          ? {
+              toolRounds: AGENTIC_TOOL_ROUNDS,
+              onEvent: stream.sink(),
+              signal: stream.signal,
+            }
+          : { toolRounds: 1 }),
       },
     );
 
@@ -213,6 +241,7 @@ export class GatewayService {
     content: string,
     desks: Array<'flight' | 'stay'>,
     userId: string,
+    stream?: TurnStream,
   ) {
     const names = desks.map((kind) => deskName(kind));
     const reply =
@@ -229,8 +258,40 @@ export class GatewayService {
       kinds: desks,
       request: content,
     });
+    for (const task of opened) {
+      stream?.step({
+        id: `desk:${task.id}`,
+        kind: 'desk',
+        name: task.kind,
+        label: `${task.agentName} searching`,
+        detail: 'Querying the configured sources. Nothing is booked.',
+        state: 'running',
+      });
+    }
     const delay = loadConfig().taskDelayMs;
-    if (delay > 0) {
+    if (stream) {
+      // On a live turn the traveler watches the search finish rather than being
+      // told it is running and left to refresh.
+      await this.tasks.schedule(opened);
+      const finished = this.tasks
+        .forSession(sessionId)
+        .filter((task) => opened.some((item) => item.id === task.id));
+      for (const task of finished) {
+        stream.step({
+          id: `desk:${task.id}`,
+          kind: 'desk',
+          name: task.kind,
+          label: `${task.agentName} ${task.status === 'completed' ? 'finished' : task.status}`,
+          detail: task.summary,
+          state:
+            task.status === 'completed'
+              ? 'done'
+              : task.status === 'rejected'
+                ? 'failed'
+                : 'running',
+        });
+      }
+    } else if (delay > 0) {
       void this.tasks.schedule(opened);
     } else {
       await this.tasks.schedule(opened);
