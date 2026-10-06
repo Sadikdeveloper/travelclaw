@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Logger,
   Param,
   Post,
@@ -28,7 +29,9 @@ import { ZodValidationPipe } from '../common/zod-pipe';
 import { EventsService } from '../events/events.service';
 import { TURN_WINDOW_MS } from '../models/model-catalog';
 import { ModelService } from '../models/model.service';
+import { SessionsService } from '../sessions/sessions.service';
 import { GatewayService } from './gateway.service';
+import { LiveTurnsService } from './live-turns.service';
 import { TurnStream } from './turn-stream';
 
 /** What a browser run reports while a live turn is open. */
@@ -62,7 +65,24 @@ export class ChatController {
     private readonly gateway: GatewayService,
     private readonly models: ModelService,
     private readonly events: EventsService,
+    private readonly sessions: SessionsService,
+    private readonly liveTurns: LiveTurnsService,
   ) {}
+
+  /**
+   * What this chat's running turn has reported so far, or `null` when nothing is
+   * running. The same POST that starts a turn streams every step back; this GET
+   * is the floor under that stream, for a browser whose response is being held
+   * up on the way in. It reads only in-memory state — no model call, no work.
+   */
+  @Get('sessions/:id/turn')
+  @ApiOperation({ summary: 'The turn running in this chat right now, if any' })
+  liveTurn(@CurrentUser() user: UserRecord, @Param('id') id: string) {
+    // Ownership first: an id is not a credential, so a chat that is not this
+    // account's is answered like one that does not exist.
+    this.sessions.get(id, user.id);
+    return { turn: this.liveTurns.running(id) };
+  }
 
   @Post('chat/stream')
   @ApiOperation({ summary: 'Open or continue a chat, streaming the turn as it runs' })

@@ -1,6 +1,23 @@
 import type { TurnEvent, TurnEventSink } from '@travelclaw/agent-core';
-import type { ChatResponse, TurnStepRecord, TurnStreamEvent } from '@travelclaw/shared';
+import type {
+  ChatResponse,
+  LiveTurnRecord,
+  TurnStepRecord,
+  TurnStreamEvent,
+} from '@travelclaw/shared';
+import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
+
+/** How much of the answer and the thinking the live view keeps, as the screen does. */
+const REASONING_TAIL = 4000;
+const REPLY_TAIL = 20000;
+/**
+ * A comment frame is not an event, so the client ignores it — but it is bytes on
+ * the wire, which is how a proxy that would otherwise hold a response until it
+ * has a bufferful is kept honest, and how a long model call keeps its connection
+ * warm in the meantime.
+ */
+const KEEP_ALIVE_MS = 10_000;
 
 /**
  * One live turn, written to the browser as Server-Sent Events.
@@ -12,11 +29,18 @@ import type { Response } from 'express';
  * closes it, which the gateway honors as "stop".
  */
 export class TurnStream {
+  /** Identifies this turn in `LiveTurnsService`, so a poll cannot pick up another one. */
+  readonly turnId = randomUUID();
   private readonly startedAt = Date.now();
   private readonly controller = new AbortController();
   private closed = false;
   private stopped = false;
   private sessionId: string | null = null;
+  private modelLabel = 'the desk';
+  private provider = '';
+  private reasoning = '';
+  private reply = '';
+  private keepAlive: ReturnType<typeof setInterval> | null = null;
   private readonly steps = new Map<string, TurnStepRecord>();
 
   constructor(private readonly res: Response) {}
@@ -31,6 +55,21 @@ export class TurnStream {
       'X-Accel-Buffering': 'no',
     });
     this.res.flushHeaders?.();
+    // The first bytes on purpose: a proxy that waits for a bufferful before it
+    // forwards anything gets its padding immediately, and the frames that follow
+    // are small but no longer first. A tiny write is also sent without waiting on
+    // Nagle, so what the desk reports is what the traveler sees.
+    this.res.socket?.setNoDelay?.(true);
+    this.res.write(`: ${' '.repeat(2048)}\n\n`);
+    this.keepAlive = setInterval(() => {
+      if (this.closed) return;
+      try {
+        this.res.write(`: keep-alive ${Date.now()}\n\n`);
+      } catch {
+        this.closed = true;
+      }
+    }, KEEP_ALIVE_MS);
+    this.keepAlive.unref?.();
   }
 
   /** The chat this turn belongs to, once the gateway has opened or found it. */
@@ -57,6 +96,11 @@ export class TurnStream {
     return this.controller.signal;
   }
 
+  /** True once the turn is over — answered, failed, stopped, or the client left. */
+  get finished(): boolean {
+    return this.closed;
+  }
+
   /** Stop: cancel the work, then close the stream it was writing to. */
   stop(): void {
     this.stopped = true;
@@ -65,11 +109,58 @@ export class TurnStream {
   }
 
   send(event: TurnStreamEvent): void {
+    // Recorded even when the connection is gone: a stopped turn still has a
+    // truthful last state, and the snapshot is what a poll reads.
+    this.record(event);
     if (this.closed) return;
     try {
       this.res.write(`data: ${JSON.stringify(event)}\n\n`);
     } catch {
       this.closed = true;
+    }
+  }
+
+  /**
+   * Everything this turn has reported so far, for a client reading with a plain
+   * `GET` instead of the stream. Steps keep their ids and order, so a watcher
+   * can replace its rows wholesale rather than reconciling them.
+   */
+  snapshot(): LiveTurnRecord {
+    return {
+      turnId: this.turnId,
+      sessionId: this.sessionId ?? '',
+      modelLabel: this.modelLabel,
+      provider: this.provider,
+      startedAt: new Date(this.startedAt).toISOString(),
+      steps: [...this.steps.values()],
+      reasoning: this.reasoning,
+      reply: this.reply,
+    };
+  }
+
+  /** Folds one outgoing event into the snapshot, through the same funnel. */
+  private record(event: TurnStreamEvent): void {
+    switch (event.type) {
+      case 'turn.started':
+        this.sessionId ??= event.sessionId;
+        this.modelLabel = event.modelLabel || event.model || this.modelLabel;
+        this.provider = event.provider;
+        return;
+      case 'reasoning.delta':
+        this.reasoning = (this.reasoning + event.text).slice(-REASONING_TAIL);
+        return;
+      case 'reply.delta':
+        this.reply = (this.reply + event.text).slice(-REPLY_TAIL);
+        return;
+      case 'reply.reset':
+        this.reply = '';
+        return;
+      case 'turn.completed':
+        this.provider = event.response.provider;
+        this.modelLabel = event.response.model || this.modelLabel;
+        return;
+      default:
+        return;
     }
   }
 
@@ -155,6 +246,10 @@ export class TurnStream {
   }
 
   end(): void {
+    if (this.keepAlive) {
+      clearInterval(this.keepAlive);
+      this.keepAlive = null;
+    }
     if (this.closed) return;
     this.closed = true;
     try {

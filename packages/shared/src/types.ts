@@ -158,6 +158,31 @@ export type TurnStreamEvent =
   | { type: 'turn.completed'; at: string; response: ChatResponse }
   | { type: 'turn.failed'; at: string; message: string };
 
+/**
+ * A turn that is running right now, as the gateway keeps it.
+ *
+ * The event stream is the fast path: it carries every step and every word as
+ * it happens. This record is the floor under it — the same state, readable with
+ * one plain `GET` — so a response that a proxy, an extension, or a slow network
+ * holds on to cannot turn a live turn back into "send, wait, and read the
+ * result". It is served only while the turn runs; a finished turn reads as
+ * `null`, which is what tells a watcher it can stop asking.
+ */
+export interface LiveTurnRecord {
+  turnId: string;
+  sessionId: string;
+  /** The model the desk picked for this turn, as it should be shown. */
+  modelLabel: string;
+  provider: string;
+  startedAt: string;
+  /** Every step so far, in order, with rows updated in place by id. */
+  steps: TurnStepRecord[];
+  /** The model's own thinking, bounded to the tail the screen would keep. */
+  reasoning: string;
+  /** The answer so far — empty until the model starts writing it. */
+  reply: string;
+}
+
 export interface MessageRecord {
   id: string;
   sessionId: string;
