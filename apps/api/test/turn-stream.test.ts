@@ -118,6 +118,40 @@ describe('streaming a turn', () => {
     expect(reopened.body.messages.at(-1).content).toBe(completed.response.message.content);
   });
 
+  it('reports nothing running once the turn is over, and only to its owner', async () => {
+    const agent = request.agent(app.getHttpServer());
+    await agent.post('/api/auth/register').send({
+      email: `floor-${Math.random().toString(36).slice(2)}@example.com`,
+      password: 'correct horse battery staple',
+      displayName: 'Floor Traveler',
+    });
+    const opened = await agent.post('/api/sessions').send({ channel: 'webchat' });
+    const sessionId = opened.body.id as string;
+
+    await agent
+      .post(`/api/sessions/${sessionId}/messages/stream`)
+      .set('Accept', 'text/event-stream')
+      .send({ content: 'Plan Lisbon from 2026-11-02 to 2026-11-06' });
+
+    // The turn is saved, so the read-only view of what is running reports
+    // nothing: a watcher asking "still going?" is told no, never shown a
+    // finished turn as if it were live.
+    const after = await agent.get(`/api/sessions/${sessionId}/turn`);
+    expect(after.status).toBe(200);
+    expect(after.body).toEqual({ turn: null });
+
+    // An id is not a credential: another account's chat reads as missing, the
+    // same way it would if it had never existed.
+    const stranger = request.agent(app.getHttpServer());
+    await stranger.post('/api/auth/register').send({
+      email: `stranger-${Math.random().toString(36).slice(2)}@example.com`,
+      password: 'correct horse battery staple',
+      displayName: 'Stranger',
+    });
+    const denied = await stranger.get(`/api/sessions/${sessionId}/turn`);
+    expect(denied.status).toBe(404);
+  });
+
   it('refuses a signed-out caller with JSON, not an empty stream', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/sessions/whatever/messages/stream')

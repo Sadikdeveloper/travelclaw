@@ -12,6 +12,7 @@ import { WorkspaceModule } from '../workspace/workspace.module';
 import { ChatController } from './chat.controller';
 import { DeskGateway } from './desk.gateway';
 import { GatewayService } from './gateway.service';
+import { LiveTurnsService } from './live-turns.service';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { GatewayService } from './gateway.service';
     ConnectorsModule,
   ],
   controllers: [ChatController],
-  providers: [GatewayService, DeskGateway],
-  exports: [GatewayService],
+  providers: [GatewayService, DeskGateway, LiveTurnsService],
+  exports: [GatewayService, LiveTurnsService],
 })
 export class GatewayModule {}

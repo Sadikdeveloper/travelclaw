@@ -27,6 +27,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { ToolsService } from '../tools/tools.service';
 import { TripsService } from '../trips/trips.service';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { LiveTurnsService } from './live-turns.service';
 import { TurnStream } from './turn-stream';
 
 @Injectable()
@@ -44,6 +45,7 @@ export class GatewayService {
     private readonly models: ModelService,
     private readonly connectors: ConnectorsService,
     private readonly events: EventsService,
+    private readonly liveTurns: LiveTurnsService,
   ) {}
 
   async handleIncoming(
@@ -78,6 +80,10 @@ export class GatewayService {
           userId,
         );
     stream?.setSession(session.id);
+    // Registered before the first frame goes out: from here on, the running turn
+    // is readable with a plain GET as well as on the stream, so a response that
+    // something in between holds on to cannot hide the work.
+    if (stream) this.liveTurns.attach(session.id, stream);
     stream?.send({
       type: 'turn.started',
       at: new Date().toISOString(),

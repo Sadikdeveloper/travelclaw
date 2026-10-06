@@ -30,6 +30,7 @@ import { Banner } from '../components/Status';
 import { TaskFeedbackDialog } from '../components/TaskFeedbackDialog';
 import { useAuth } from '../auth';
 import { mirrorGuestMessages } from '../guestChatCache';
+import { adoptLiveTurn, watchLiveTurn } from '../liveTurn';
 import { streamTurn } from '../turnStream';
 
 const prompts: Array<{ text: string; icon: ComponentType<{ size?: number }> }> = [
@@ -74,8 +75,11 @@ export function ChatPage() {
 
   // The hero landing view only applies to a brand-new, not-yet-opened chat. A turn
   // started from there becomes a thread immediately, so the traveler watches the
-  // process instead of a spinner on a landing page.
-  const isLanding = !sessionId && !live;
+  // process instead of a spinner on a landing page — and it stays a thread for the
+  // whole turn, and after it: the hero used to come back for the moment between the
+  // last frame and the new chat's id landing in the URL, which hid the reply (and
+  // the traveler's own message) right as the turn finished.
+  const isLanding = !sessionId && !live && !sending && messages.length === 0;
 
   useEffect(() => {
     // A different chat should not inherit a completion prompt or status history
@@ -250,6 +254,7 @@ export function ChatPage() {
       startedAt: Date.now(),
     });
     let id = sessionId;
+    let stopWatching: (() => void) | null = null;
     try {
       if (!id) {
         const session = await api<SessionRecord>('/api/sessions', {
@@ -259,6 +264,16 @@ export function ChatPage() {
         });
         id = session.id;
       }
+      // Two ways to watch, one view. The stream below is the fast path; this read
+      // is the floor under it, for the case where something between the gateway
+      // and this tab holds the streamed response until the turn is over. It costs
+      // one small request every 700ms while a turn runs, and it is what keeps the
+      // process visible on a connection that cannot see the stream at all.
+      stopWatching = watchLiveTurn({
+        sessionId: id,
+        signal: controller.signal,
+        onSnapshot: (snapshot) => setLive((current) => adoptLiveTurn(current, snapshot)),
+      });
       const response = await streamTurn({
         sessionId: id,
         content,
@@ -292,6 +307,7 @@ export function ChatPage() {
         setMessages((current) => current.filter((message) => message.id !== pending.id));
       }
     } finally {
+      stopWatching?.();
       abort.current = null;
       setSending(false);
       setLive(null);
@@ -299,11 +315,15 @@ export function ChatPage() {
   }
 
   // Follow the trail down as it grows, unless the traveler scrolled up to read.
+  // `live` is in the list on purpose: the running turn is what grows most while a
+  // traveler watches, and leaving it out left the live card writing below the fold
+  // of a long thread — the desk looked silent until the reply was saved and the
+  // thread finally scrolled.
   useEffect(() => {
     const el = transcript.current;
     if (!el || !stickToBottom.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, tasks, sending]);
+  }, [messages, tasks, sending, live]);
 
   const lastAssistantId = useMemo(
     () => [...messages].reverse().find((message) => message.role === 'assistant')?.id,
