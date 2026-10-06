@@ -347,7 +347,18 @@ function itineraryCandidate(
       : `flightapi-${itinerary.data.id.slice(0, 88)}#${hash(itinerary.data.id)}`;
 
   if (complete) {
-    return { id, price: { amount, currency: context.currency }, segments };
+    // Where the traveler changes planes: every leg's endpoint except the last,
+    // which is the destination. Derived from the vendor's own leg structure.
+    const stopNames: string[] = [];
+    for (const segment of segments.slice(0, -1)) stopNames.push(segment.to);
+    return {
+      id,
+      price: { amount, currency: context.currency },
+      segments,
+      stops: legs.length ? stops : null,
+      durationMinutes: duration > 0 ? duration : null,
+      stopNames,
+    };
   }
   // Without a name for every stop, a partial segment list would hide a
   // stopover. The offer keeps the provider's price, duration, and stop count,
@@ -369,6 +380,9 @@ function itineraryCandidate(
     price: { amount, currency: context.currency },
     title,
     ...(detail ? { detail } : {}),
+    // Even without a name for every stop, the vendor's own counts are real.
+    stops: legs.length ? stops : null,
+    durationMinutes: duration > 0 ? duration : null,
   };
 }
 

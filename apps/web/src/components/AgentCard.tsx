@@ -1,7 +1,8 @@
 import type { AgentTaskRecord, OfferRecord } from '@travelclaw/shared';
-import { Clock3, Hotel, Plane } from 'lucide-react';
+import { Building2, Clock3, Hotel, Plane } from 'lucide-react';
 import { BrowserResearch } from './BrowserResearch';
 import { formatWhen } from '../format';
+import { offerRow } from '../offerDisplay';
 
 const label: Record<AgentTaskRecord['status'], string> = {
   working: 'Searching',
@@ -48,7 +49,12 @@ export function AgentCard({
       </p>
       {offers.length ? (
         <section className="provider-offers" aria-label={`${task.agentName} offers`}>
-          <h3>Provider offers</h3>
+          <h3>
+            {task.kind === 'flight' ? 'Flight options' : 'Places to stay'}
+            <span className="provider-offers-count">
+              {offers.length} {offers.length === 1 ? 'offer' : 'offers'}
+            </span>
+          </h3>
           <p className="provider-offers-note">
             Offers, not bookings. Prices and availability may change; nothing is purchased
             here.
@@ -74,6 +80,12 @@ export function AgentCard({
   );
 }
 
+/**
+ * One offer as a row: who, where, when, how long, how much. Facts the source sent
+ * are laid out as columns — the same numbers, just readable — and a source that
+ * sent only prose keeps its sentence. The hold state and the hold ask stay on the
+ * row, because an offer the traveler cannot act on is only half the answer.
+ */
 function ProviderOffer({
   offer,
   busy,
@@ -87,18 +99,32 @@ function ProviderOffer({
     offer.totalAmount,
   );
   const held = offer.hold === 'confirmed';
+  const row = offerRow(offer);
+  const Icon = offer.kind === 'flight' ? Plane : Building2;
   return (
     <article className="provider-offer">
-      <header className="provider-offer-head">
-        <strong>{offer.title}</strong>
-        <span className={held ? 'offer-state confirmed' : 'offer-state'}>
-          {held ? 'Hold confirmed by provider' : 'Offer · no hold confirmed'}
+      <div className="offer-row">
+        <span className="offer-row-icon" aria-hidden="true">
+          <Icon size={15} />
         </span>
-      </header>
-      <p className="provider-offer-price">
-        {offer.currency} {price}
-      </p>
-      {offer.detail ? <p className="provider-offer-detail">{offer.detail}</p> : null}
+        <div className="offer-row-body">
+          <p className="offer-row-lead">
+            <strong>{row?.lead ?? offer.title}</strong>
+            {row?.qualifier ? <span className="offer-route">{row.qualifier}</span> : null}
+          </p>
+          {row?.when ? <p className="offer-row-when">{row.when}</p> : null}
+          {row?.facts ? <p className="offer-row-facts">{row.facts}</p> : null}
+          {!row && offer.detail ? <p className="offer-row-detail">{offer.detail}</p> : null}
+        </div>
+        <div className="offer-row-price">
+          <strong>
+            {offer.currency} {price}
+          </strong>
+          <span className={held ? 'offer-state confirmed' : 'offer-state'}>
+            {held ? 'Hold confirmed by provider' : 'Offer · no hold confirmed'}
+          </span>
+        </div>
+      </div>
       <p className="provider-offer-meta">
         {offer.provider} · retrieved {formatWhen(offer.retrievedAt)}
       </p>

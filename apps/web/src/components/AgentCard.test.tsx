@@ -15,6 +15,21 @@ const offer: OfferRecord = {
   totalAmount: 620.5,
   title: 'Example Air: LOS → LIS',
   detail: 'nonstop · Example Air',
+  facts: {
+    kind: 'flight',
+    segments: [
+      {
+        from: 'LOS',
+        to: 'LIS',
+        departAt: '2026-11-02 08:05',
+        arriveAt: '2026-11-02 15:30',
+        carrier: 'Example Air',
+      },
+    ],
+    stops: 0,
+    durationMinutes: 385,
+    stopNames: [],
+  },
   hold: 'none',
   holdSupport: 'provider',
   holdRef: null,
@@ -38,11 +53,20 @@ const task: AgentTaskRecord = {
   updatedAt: '2026-10-06T09:00:00Z',
 };
 
+function render(withOffer: OfferRecord, overrides: Partial<AgentTaskRecord> = {}): string {
+  return renderToStaticMarkup(
+    <AgentCard
+      task={{ ...task, ...overrides, offers: [withOffer] }}
+      holdingOfferId=""
+      onHold={vi.fn()}
+      onStopBrowser={vi.fn()}
+    />,
+  );
+}
+
 describe('provider offer card', () => {
   it('offers the hold ask only for a source that can confirm one', () => {
-    const html = renderToStaticMarkup(
-      <AgentCard task={task} holdingOfferId="" onHold={vi.fn()} onStopBrowser={vi.fn()} />,
-    );
+    const html = render(offer);
 
     expect(html).toContain('Ask provider to hold');
     expect(html).toContain('Offer · no hold confirmed');
@@ -50,14 +74,7 @@ describe('provider offer card', () => {
   });
 
   it('says a quote-only source cannot hold instead of showing a dead button', () => {
-    const html = renderToStaticMarkup(
-      <AgentCard
-        task={{ ...task, offers: [{ ...offer, holdSupport: 'unsupported' }] }}
-        holdingOfferId=""
-        onHold={vi.fn()}
-        onStopBrowser={vi.fn()}
-      />,
-    );
+    const html = render({ ...offer, holdSupport: 'unsupported' });
 
     expect(html).not.toContain('Ask provider to hold');
     expect(html).toContain('does not hold them');
@@ -65,22 +82,93 @@ describe('provider offer card', () => {
   });
 
   it('shows the reference only after the provider confirmed a hold', () => {
-    const html = renderToStaticMarkup(
-      <AgentCard
-        task={{
-          ...task,
-          offers: [
-            { ...offer, hold: 'confirmed', holdRef: 'HOLD-9', holdSupport: 'provider' },
-          ],
-        }}
-        holdingOfferId=""
-        onHold={vi.fn()}
-        onStopBrowser={vi.fn()}
-      />,
-    );
+    const html = render({
+      ...offer,
+      hold: 'confirmed',
+      holdRef: 'HOLD-9',
+      holdSupport: 'provider',
+    });
 
     expect(html).toContain('Hold confirmed by provider');
     expect(html).toContain('Reference HOLD-9');
     expect(html).not.toContain('Ask provider to hold');
+  });
+
+  it('lays the vendor facts out as a fare row instead of a sentence', () => {
+    const html = render(offer);
+
+    expect(html).toContain('Example Air');
+    expect(html).toContain('LOS → LIS');
+    expect(html).toContain('08:05 → 15:30');
+    expect(html).toContain('Nonstop');
+    expect(html).toContain('6 hr 25 min');
+    expect(html).toContain('Flight options');
+  });
+
+  it('names a single connection in the words the vendor sent', () => {
+    const html = render({
+      ...offer,
+      facts: {
+        kind: 'flight',
+        segments: [
+          {
+            from: 'KAN',
+            to: 'LOS',
+            departAt: '2026-10-12 20:05',
+            arriveAt: '2026-10-12 21:20',
+            carrier: 'Air Peace',
+          },
+          {
+            from: 'LOS',
+            to: 'ABV',
+            departAt: '2026-10-12 22:10',
+            arriveAt: '2026-10-13 23:50',
+            carrier: 'Air Peace',
+          },
+        ],
+        stops: 1,
+        durationMinutes: 1440,
+        stopNames: ['Lagos'],
+      },
+    });
+
+    expect(html).toContain('1 stop');
+    expect(html).toContain('via Lagos');
+    expect(html).toContain('20:05 → 23:50+1');
+    expect(html).toContain('24 hr 0 min');
+  });
+
+  it('keeps the prose the provider sent when the source sent no facts', () => {
+    const html = render({ ...offer, facts: null, detail: 'nonstop · Example Air' });
+
+    expect(html).toContain('nonstop · Example Air');
+    expect(html).not.toContain('6 hr 25 min');
+  });
+
+  it('reads a stay as a stay: nights, window, and the rating that arrived', () => {
+    const html = render(
+      {
+        ...offer,
+        kind: 'stay',
+        title: 'Hotel Avenida Palace',
+        facts: {
+          kind: 'stay',
+          name: 'Hotel Avenida Palace',
+          roomType: 'Double room',
+          nights: 3,
+          checkIn: '2026-11-02',
+          checkOut: '2026-11-05',
+          rating: 8.8,
+        },
+      },
+      { kind: 'stay', agentName: 'Stay desk' },
+    );
+
+    expect(html).toContain('Places to stay');
+    expect(html).toContain('Hotel Avenida Palace');
+    expect(html).toContain('Double room');
+    expect(html).toContain('2026-11-02 → 2026-11-05');
+    expect(html).toContain('3 nights');
+    expect(html).toContain('Rated 8.8');
   });
 });

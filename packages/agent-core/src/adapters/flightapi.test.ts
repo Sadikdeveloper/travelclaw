@@ -129,6 +129,23 @@ describe('FlightAPI.io adapter', () => {
     });
     expect(result.offers[0].title).toContain('Example Air');
     expect(result.offers[0].detail).toContain('nonstop');
+    // The vendor's own duration and stop count travel as facts, not as prose.
+    const facts = result.offers[0].facts;
+    expect(facts).toEqual({
+      kind: 'flight',
+      segments: [
+        {
+          from: 'LOS',
+          to: 'LIS',
+          departAt: '2026-11-02T08:00:00',
+          arriveAt: '2026-11-02T13:30:00',
+          carrier: 'Example Air',
+        },
+      ],
+      stops: 0,
+      durationMinutes: 330,
+      stopNames: [],
+    });
     expect(result.dropped).toBe(1);
   });
 

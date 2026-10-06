@@ -722,67 +722,122 @@ h3 {
 .provider-offers h3 {
   margin: 0;
   font-size: 0.9rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.provider-offers-count {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 500;
 }
 .provider-offers-note,
 .provider-offer-meta,
-.provider-offer-detail,
 .provider-offer-hold {
   color: var(--muted);
   font-size: 0.8rem;
 }
 .provider-offer {
   min-width: 0;
+  background: white;
   border: 1px solid var(--line);
-  background: #fffcf8;
   border-radius: 12px;
   padding: 10px 11px;
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
-.provider-offer-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+/* One offer as a fare row: carrier and route, times, then the facts line; the
+   price is a column so a column of offers lines up and can be read down. */
+.offer-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
 }
-.provider-offer-head strong {
+.offer-row-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #f4efe8;
+  color: var(--copper-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.offer-row-body {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.offer-row-body p {
+  margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 0.88rem;
+}
+.offer-row-lead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.offer-row-lead strong {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+.offer-route {
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.offer-row-when {
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+.offer-row-facts,
+.offer-row-detail {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.offer-row-price {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+.offer-row-price strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .offer-state {
-  flex: 0 0 auto;
   border-radius: 999px;
-  padding: 3px 7px;
+  padding: 2px 7px;
   background: #f3e7d7;
   color: var(--copper-deep);
-  font-size: 0.7rem;
-  line-height: 1.35;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 .offer-state.confirmed {
   background: #e1f0eb;
   color: var(--sea-deep);
 }
-.provider-offer-price {
-  color: var(--ink);
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-.provider-offer-detail {
-  overflow-wrap: anywhere;
-}
 .provider-offer-meta {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
 }
 .provider-offer-hold {
   color: var(--sea-deep);
+  overflow-wrap: anywhere;
 }
 .provider-offer-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 9px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .provider-offer-actions .btn-ghost {
   display: inline-flex;

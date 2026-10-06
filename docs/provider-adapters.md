@@ -49,7 +49,11 @@ show or hold.
 1. Write `packages/agent-core/src/adapters/<vendor>.ts` exporting a
    `ProviderAdapter`. Read only what the vendor sent; take the base URL from
    `ctx.credential.baseUrl` via `connectorBase`, and set `defaultBaseUrl` to the
-   vendor's documented origin.
+   vendor's documented origin. When the vendor sends structure, keep it: `segments`
+   (and `stops`/`durationMinutes`/`stopNames` for flights, `stay` for rooms) reach
+   the card as rows instead of a sentence. Pass through only what the payload says
+   — a leg's own endpoint may name a stop, an itinerary with several legs may not
+   (it can be a round trip), and a missing number stays missing.
 2. Register it in `packages/agent-core/src/adapters/index.ts`: one entry in
    `PROVIDER_ADAPTERS` and one line in its `ProviderAdapterId` union
    (`adapters/types.ts`).

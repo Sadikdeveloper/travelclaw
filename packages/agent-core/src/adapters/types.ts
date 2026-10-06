@@ -69,6 +69,12 @@ export interface AdapterOfferCandidate {
     checkOut?: string | null;
     rating?: number | null;
   } | null;
+  /** The vendor's own stop count, when its payload counts them itself. */
+  stops?: number | null;
+  /** Minutes the vendor reported for the whole itinerary. */
+  durationMinutes?: number | null;
+  /** Places where the traveler changes planes, only when the vendor named them. */
+  stopNames?: string[] | null;
   hold?: unknown;
 }
 

@@ -153,6 +153,9 @@ CREATE TABLE IF NOT EXISTS offers (
   total_amount REAL NOT NULL,
   title TEXT NOT NULL,
   detail TEXT,
+  -- Structured vendor facts (flight legs, stops, duration, room, rating) so the
+  -- chat can lay an offer out as rows. Null for a prose-only source.
+  facts_json TEXT,
   hold TEXT NOT NULL DEFAULT 'none',
   -- Whether the source behind this offer can confirm a hold at all. A value of
   -- 'unsupported' means the vendor only quotes prices, so the UI offers no hold.

@@ -224,6 +224,50 @@ describe('SerpApi Google Flights adapter', () => {
     expect(result.detail).toContain('run out of searches');
   });
 
+  it('keeps the vendor stop count, layover name, and total duration as facts', async () => {
+    const { ctx } = ctxWith('flight', credential(), async () =>
+      json({
+        search_parameters: { engine: 'google_flights', currency: 'NGN' },
+        best_flights: [
+          {
+            flights: [
+              {
+                departure_airport: { id: 'KAN', time: '2026-10-12 20:05' },
+                arrival_airport: { id: 'LOS', time: '2026-10-12 21:20' },
+                airline: 'Air Peace',
+                flight_number: 'P4 7121',
+              },
+              {
+                departure_airport: { id: 'LOS', time: '2026-10-12 22:10' },
+                arrival_airport: { id: 'ABV', time: '2026-10-13 23:50' },
+                airline: 'Air Peace',
+                flight_number: 'P4 7130',
+              },
+            ],
+            total_duration: 1440,
+            price: 222174,
+            layovers: [{ name: 'Lagos', id: 'LOS', duration: 50 }],
+          },
+        ],
+      }),
+    );
+
+    const result = await searchFlights(
+      { origin: 'KAN', destination: 'ABV', departDate: '2026-10-12', travelers: 1 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const facts = result.offers[0].facts;
+    expect(facts?.kind).toBe('flight');
+    if (facts?.kind !== 'flight') return;
+    expect(facts.stops).toBe(1);
+    expect(facts.durationMinutes).toBe(1440);
+    expect(facts.stopNames).toEqual(['Lagos']);
+    expect(facts.segments).toHaveLength(2);
+  });
+
   it('names the source from the adapter when the operator did not label it', async () => {
     const { ctx } = ctxWith('flight', credential({ providerName: undefined }), async () =>
       json(flightsPayload),

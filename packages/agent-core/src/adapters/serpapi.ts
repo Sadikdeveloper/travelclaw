@@ -101,10 +101,18 @@ const flightLegSchema = z.object({
   travel_class: z.string().trim().max(40).nullish(),
 });
 
+const layoverSchema = z.object({
+  name: z.string().trim().min(1).max(120).nullish(),
+  id: z.string().trim().min(1).max(24).nullish(),
+  duration: z.number().nonnegative().nullish(),
+});
+
 const flightBundleSchema = z.object({
   flights: z.array(flightLegSchema).min(1).max(8),
   price: z.union([z.number(), z.string()]).nullish(),
   total_duration: z.number().nonnegative().nullish(),
+  // Google names each connection. Its length is also the vendor's own stop count.
+  layovers: z.array(layoverSchema).max(8).nullish(),
 });
 
 const flightPayloadSchema = z.object({
@@ -261,10 +269,17 @@ function flightCandidate(
   const composite = bundle.data.flights
     .map((leg) => `${leg.flight_number ?? ''}@${leg.departure_airport?.time ?? ''}`)
     .join('|');
+  const layovers = bundle.data.layovers ?? [];
+  const stopNames = layovers
+    .map((layover) => layover.name?.trim())
+    .filter((name): name is string => Boolean(name));
   return {
     id: hashedId('serpapi-flight', composite || `bundle-${index}`, 88),
     price: { amount: price, currency },
     segments,
+    stops: layovers.length,
+    durationMinutes: bundle.data.total_duration ?? null,
+    stopNames,
   };
 }
 

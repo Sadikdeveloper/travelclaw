@@ -396,6 +396,9 @@ A successful adapter response is JSON with an optional provider label and an off
       "detail": "Optional provider detail",
       "segments": [{ "from": "LOS", "to": "LIS", "carrier": "Example Air" }],
       "stay": { "name": "Optional hotel name", "roomType": "double", "nights": 4 },
+      "stops": 1,
+      "durationMinutes": 85,
+      "stopNames": ["Lagos"],
       "hold": {
         "confirmed": true,
         "ref": "provider-hold-reference",
@@ -407,6 +410,10 @@ A successful adapter response is JSON with an optional provider label and an off
 ```
 
 `price.amount` is required and must come from the source; it is a non-negative number or decimal string, capped at one billion and three decimal places. Offers without a usable id and price are dropped, never filled in from a desk estimate. The desk records when it received each response, shows the source and time, and stores offers against the chat task in SQLite (up to 24 recent unheld offers per task; provider-confirmed holds are retained). `GET /api/sessions/:id/tasks` returns the saved offers when the chat is opened again.
+
+### What the card draws, and from what
+
+`segments`, `stay`, `stops`, `durationMinutes`, and `stopNames` are the vendor's own structure, so they are kept as such: the desk stores them as `facts` on the offer (`facts_json` on the `offers` row) beside the `title`/`detail` prose. The chat card reads the facts to draw a fare row — carrier, route, times, stops, duration, price — the way a booking site does, and the desk's brief names the same facts in one line per offer. A source that sends no structured data keeps its prose, and the card falls back to it. Facts are never inferred: an itinerary with more than one leg does not become a stop count (that could be a return journey), a stop is named only when the vendor named it or the leg structure shows where the change happens, and a stored row whose facts will not parse is read as prose rather than as a broken row.
 
 ### Holds and provider identity
 

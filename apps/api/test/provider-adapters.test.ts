@@ -40,7 +40,9 @@ describe('vendor provider adapters', () => {
             flight_number: 'EX 1',
           },
         ],
+        total_duration: 450,
         price: 620.5,
+        layovers: [],
       },
     ],
   };
@@ -152,6 +154,22 @@ describe('vendor provider adapters', () => {
       totalAmount: 620.5,
       hold: 'none',
       holdSupport: 'unsupported',
+    });
+    // The vendor's structured facts survive storage, so the chat draws a fare row
+    // rather than re-reading a sentence.
+    expect(task.offers[0].facts).toMatchObject({
+      kind: 'flight',
+      stops: 0,
+      durationMinutes: 450,
+      segments: [
+        {
+          from: 'LOS',
+          to: 'LIS',
+          departAt: '2026-11-02 08:00',
+          arriveAt: '2026-11-02 15:30',
+          carrier: 'Example Air',
+        },
+      ],
     });
     expect(JSON.stringify(task)).not.toContain('serpapi-operator-key-9931');
 

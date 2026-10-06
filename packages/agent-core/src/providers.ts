@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OfferFacts } from '@travelclaw/shared';
 import { adapterFor, type ProviderAdapterId } from './adapters';
 import type { FlightQueryInput, StayQueryInput } from './adapters';
 import type { DeskKind } from './desks';
@@ -72,6 +73,8 @@ export interface ProviderOffer {
   providerOfferId: string;
   title: string;
   detail: string | null;
+  /** Structured vendor facts when the source sent them, else null. */
+  facts: OfferFacts | null;
   currency: string;
   totalAmount: number;
   /** `confirmed` only when the provider confirmed one and named a reference. */
@@ -218,6 +221,9 @@ const providerOfferSchema = z.object({
   detail: z.string().trim().min(1).max(600).nullish(),
   segments: z.array(segmentSchema).min(1).max(8).nullish(),
   stay: staySchema.nullish(),
+  stops: z.number().int().min(0).max(8).nullish(),
+  durationMinutes: z.number().int().min(0).max(10_080).nullish(),
+  stopNames: z.array(z.string().trim().min(1).max(80)).max(8).nullish(),
   hold: z.unknown().nullish(),
 });
 
@@ -709,6 +715,7 @@ function normalizeOffer(
     providerOfferId: raw.id,
     title,
     detail,
+    facts: offerFacts(raw, kind, segments, stay),
     currency: raw.price.currency,
     totalAmount: raw.price.amount,
     hold: hold.hold,
@@ -717,6 +724,52 @@ function normalizeOffer(
     holdNote: hold.note,
     adapter: source.adapter,
     holdSupport: source.holdSupport,
+  };
+}
+
+/**
+ * The structured shape of what the vendor sent, or null when it sent nothing
+ * structured. A derived stop count is allowed only where the structure proves it:
+ * one leg is nonstop, and a leg's own endpoint is where the traveler changes
+ * planes. Everything else is the vendor's own number or stays absent.
+ */
+function offerFacts(
+  raw: ProviderOfferPayload,
+  kind: DeskKind,
+  segments: z.infer<typeof segmentSchema>[],
+  stay: z.infer<typeof staySchema> | null,
+): OfferFacts | null {
+  if (kind === 'stay') {
+    if (!stay) return null;
+    return {
+      kind: 'stay',
+      name: stay.name,
+      roomType: stay.roomType ?? null,
+      nights: stay.nights ?? null,
+      checkIn: stay.checkIn ?? null,
+      checkOut: stay.checkOut ?? null,
+      rating: stay.rating ?? null,
+    };
+  }
+  if (!segments.length) return null;
+  // One leg is provably nonstop. More than one leg is not a stop count: it can
+  // be a round trip or a multi-city itinerary, so only the vendor may say.
+  const stops = raw.stops ?? (segments.length === 1 ? 0 : null);
+  const stopNames = raw.stopNames?.length
+    ? raw.stopNames
+    : segments.slice(0, -1).map((segment) => segment.to);
+  return {
+    kind: 'flight',
+    segments: segments.map((segment) => ({
+      from: segment.from,
+      to: segment.to,
+      departAt: segment.departAt ?? null,
+      arriveAt: segment.arriveAt ?? null,
+      carrier: segment.carrier ?? null,
+    })),
+    stops,
+    durationMinutes: raw.durationMinutes ?? null,
+    stopNames: stops !== null && stopNames.length === stops ? stopNames : [],
   };
 }
 
