@@ -2,10 +2,11 @@ import { z } from 'zod';
 import {
   connectorBase,
   FetchTimeoutError,
-  fetchWithTimeout,
+  fetchWithRetry,
   NOT_JSON,
   readJson,
   scrubSecrets,
+  SEARCH_RETRY,
   SEARCH_TIMEOUT_MS,
 } from '../http';
 import type {
@@ -179,13 +180,14 @@ export const flightapiAdapter: ProviderAdapter = {
 
     let response: Response;
     try {
-      response = await fetchWithTimeout(
+      response = await fetchWithRetry(
         ctx.fetchImpl,
         `${base}/${path.join('/')}${region}`,
         SEARCH_TIMEOUT_MS,
         {
           headers: { Accept: 'application/json' },
         },
+        { ...SEARCH_RETRY, signal: ctx.tool.signal },
       );
     } catch (error) {
       if (error instanceof FetchTimeoutError) {

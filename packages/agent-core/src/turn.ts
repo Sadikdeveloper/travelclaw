@@ -104,6 +104,10 @@ export async function completeTurn(
     state: 'done',
   });
 
+  // The tools this turn runs share its Stop, so a retried vendor call ends when
+  // the traveler ends the turn.
+  const ctx: ToolContext = deps.signal ? { ...deps.ctx, signal: deps.signal } : deps.ctx;
+
   const toolRounds = Math.max(1, Math.min(deps.toolRounds ?? 1, 5));
   const routerOnly = command?.name === 'remember' || deps.provider.usesTools !== true;
   // Did the answer reach the screen as the model wrote it? A round that turned
@@ -121,7 +125,7 @@ export async function completeTurn(
         : 'Nothing on this desk needed a tool.',
       state: 'done',
     });
-    toolResults = await runTools(text, routerNames, deps.ctx, toolHooks(emit, 0));
+    toolResults = await runTools(text, routerNames, ctx, toolHooks(emit, 0));
   } else {
     const looped = await runModelRounds({
       input,
@@ -131,6 +135,7 @@ export async function completeTurn(
       history,
       text,
       routerNames,
+      ctx,
       rounds: toolRounds,
       answered,
     });
@@ -231,6 +236,8 @@ async function runModelRounds(input: {
   history: TurnRequest['history'];
   text: string;
   routerNames: string[];
+  /** The tool context, carrying this turn's Stop. */
+  ctx: ToolContext;
   rounds: number;
   answered: { streamed: boolean };
 }): Promise<{ results: ToolResult[]; answered?: ModelCompletion }> {
@@ -336,7 +343,7 @@ async function runModelRounds(input: {
       state: 'done',
     });
 
-    const roundResults = await runToolPlan(plan, text, deps.ctx, toolHooks(emit, index));
+    const roundResults = await runToolPlan(plan, text, input.ctx, toolHooks(emit, index));
     index += plan.calls.length;
     results.push(...roundResults);
     ran.push(...plan.calls.map((call) => toolCallKey(call.name, call.args)));

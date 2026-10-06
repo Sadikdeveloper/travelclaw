@@ -345,6 +345,12 @@ export interface ToolContext {
   network: boolean;
   fetchImpl?: typeof fetch;
   connectors?: ToolConnectors;
+  /**
+   * The turn's Stop. Passed to every call a tool makes so a retry cannot
+   * outlive the traveler who asked for it — a stopped turn ends the wait
+   * between two attempts as well as the attempt itself.
+   */
+  signal?: AbortSignal;
 }
 
 export interface JsonSchemaObject {

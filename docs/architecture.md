@@ -305,6 +305,20 @@ their labeled desk estimate. Flight and stay search instead say that no offers
 were returned. No chat message, transcript, error string, or prompt ever carries
 the secret.
 
+## Retries
+
+Every outbound call the desk makes — the model, the rate and forecast lookups,
+`web.search` and `web.fetch`, and each flight or stay source — goes through one
+retry engine in `packages/agent-core`. A retry is jittered, bounded by a
+wall-clock budget rather than a count, honours `Retry-After` up to a cap, and
+stops the instant the traveler presses Stop.
+
+It is also deliberately refused where repeating a request is worse than losing
+it: a hold (there is no idempotency key, so a retry could create two),
+browser-worker actions, a model stream that has already written a word, and a
+request whose body cannot be sent twice. See [retries](retries.md) for the rules,
+the budgets, and where each one applies.
+
 ## Flight and stay search
 
 ### What provider documentation means for a worldwide desk

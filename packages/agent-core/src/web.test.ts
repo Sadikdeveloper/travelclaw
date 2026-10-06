@@ -85,6 +85,16 @@ const ctx = (fetchImpl?: typeof fetch, network = true): ToolContext => ({
   ...(fetchImpl ? { fetchImpl } : {}),
 });
 
+/** A search source that is briefly down, counting how often it is asked. */
+function busySource() {
+  const calls: string[] = [];
+  const fetchImpl = (async (url: string | URL | Request) => {
+    calls.push(String(url));
+    return new Response('upstream error', { status: 503 });
+  }) as typeof fetch;
+  return { fetchImpl, calls };
+}
+
 describe('webSearch', () => {
   it('returns nothing, and says so, when the desk is offline', async () => {
     const outcome = await webSearch('lisbon in november', 5, ctx(undefined, false));
@@ -106,6 +116,28 @@ describe('webSearch', () => {
     expect(outcome.data.results).toHaveLength(2);
     expect(calls[0].url).toBe('https://html.duckduckgo.com/html/');
     expect(calls[0].body).toContain('q=best+time+to+visit+Lisbon');
+  });
+
+  it('asks a briefly-busy source again before giving up', async () => {
+    const { fetchImpl, calls } = busySource();
+    const outcome = await webSearch('lisbon', 3, ctx(fetchImpl));
+    // A source that is down for a second is not the same as one that will not
+    // answer: the search is worth one more ask inside its budget.
+    expect(calls).toHaveLength(2);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it('stops asking the moment the traveler stops', async () => {
+    const { fetchImpl, calls } = busySource();
+    const controller = new AbortController();
+    controller.abort();
+    const outcome = await webSearch('lisbon', 3, {
+      ...ctx(fetchImpl),
+      signal: controller.signal,
+    });
+    // Stop ends the call, the retry, and the pause between them.
+    expect(calls).toHaveLength(0);
+    expect(outcome.ok).toBe(false);
   });
 
   it('prefers an operator search connector and never silently falls back', async () => {

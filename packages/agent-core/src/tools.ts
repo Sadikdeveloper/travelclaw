@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eachDate, inclusiveDayCount } from './dates';
 import { findDestinationByName } from './destinations';
 import { extractHints } from './extract';
-import { authHeaders, connectorBase, fetchWithTimeout } from './http';
+import { authHeaders, connectorBase, fetchWithRetry, LOOKUP_RETRY } from './http';
 import { zodToJsonSchema } from './tool-args';
 import { firstUrlIn, MAX_WEB_RESULTS, searchQueryFrom, webFetch, webSearch } from './web';
 import type {
@@ -820,7 +820,16 @@ export async function convertCurrency(
     const headers = authHeaders(connector?.apiKey);
     try {
       const url = `${base}/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&amount=${amount}`;
-      const response = await fetchWithTimeout(ctx.fetchImpl, url, 4000, { headers });
+      const response = await fetchWithRetry(
+        ctx.fetchImpl,
+        url,
+        4000,
+        { headers },
+        {
+          ...LOOKUP_RETRY,
+          signal: ctx.signal,
+        },
+      );
       if (response.status === 401 || response.status === 403) {
         ctx.connectors?.rejected?.('currency');
       } else if (response.ok) {
@@ -886,9 +895,13 @@ export async function weatherOutlook(
       url.searchParams.set('daily', 'weathercode,temperature_2m_max,temperature_2m_min');
       url.searchParams.set('timezone', 'auto');
       url.searchParams.set('forecast_days', '5');
-      const response = await fetchWithTimeout(ctx.fetchImpl, url.toString(), 4000, {
-        headers,
-      });
+      const response = await fetchWithRetry(
+        ctx.fetchImpl,
+        url.toString(),
+        4000,
+        { headers },
+        { ...LOOKUP_RETRY, signal: ctx.signal },
+      );
       if (response.status === 401 || response.status === 403) {
         ctx.connectors?.rejected?.('weather');
       } else if (response.ok) {

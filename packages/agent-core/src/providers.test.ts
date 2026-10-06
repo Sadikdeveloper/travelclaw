@@ -376,7 +376,7 @@ describe('flight search', () => {
 
   it('stops waiting when a provider exceeds the request timeout', async () => {
     vi.useFakeTimers();
-    const { ctx } = ctxWith(
+    const { ctx, seen } = ctxWith(
       'flight',
       { apiKey: 'k', baseUrl: 'https://f.example' },
       async (_url, init) =>
@@ -389,8 +389,13 @@ describe('flight search', () => {
 
     const pending = searchFlights(FLIGHT_QUERY, ctx);
     await vi.advanceTimersByTimeAsync(9000);
+    // A source that hung is tried once more — inside the search's own budget,
+    // so the second attempt gets the time that is left rather than a fresh
+    // nine seconds.
+    await vi.advanceTimersByTimeAsync(12_000);
     const result = await pending;
     expect(result).toMatchObject({ ok: false, reason: 'timeout' });
+    expect(seen).toHaveLength(2);
   });
 
   afterEach(() => {

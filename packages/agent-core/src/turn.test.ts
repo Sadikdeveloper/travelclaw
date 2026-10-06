@@ -456,6 +456,48 @@ describe('the agentic turn', () => {
     expect(calls).toContain('https://example.org/lisbon');
   });
 
+  it('hands the tools the turn’s Stop, so a stopped turn stops the call', async () => {
+    const provider = scriptedProvider([
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.fetch', { url: 'https://example.org/lisbon' })],
+      },
+      { text: 'The page would not load.', provider: 'openai', model: 'gpt-test' },
+    ]);
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const abortedWithIt: boolean[] = [];
+    const impl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal ?? undefined;
+      if (signal && signals.length === 0) {
+        // Stop the turn mid-call. The signal the tool was given has to follow
+        // it, or a stopped turn keeps a vendor call — and a retry — alive.
+        controller.abort();
+        abortedWithIt.push(signal.aborted);
+      }
+      signals.push(signal);
+      return new Response('upstream error', { status: 503 });
+    }) as typeof fetch;
+
+    // A stopped turn ends the turn loop itself; what is under test here is
+    // what happened to the call that was already in flight.
+    await expect(
+      completeTurn(request('What is Lisbon like in November?'), {
+        provider,
+        ctx: { now: new Date('2026-10-06T09:00:00Z'), network: true, fetchImpl: impl },
+        signal: controller.signal,
+        toolRounds: 1,
+      }),
+    ).rejects.toBeTruthy();
+
+    expect(abortedWithIt).toEqual([true]);
+    // The page answered 503, which is normally worth another ask. Not after
+    // Stop: the retry is abandoned while it is still this turn's call.
+    expect(signals).toHaveLength(1);
+  });
+
   it('retries after a model announces an alternative instead of leaving that as the answer', async () => {
     const replies: ModelCompletion[] = [
       {
