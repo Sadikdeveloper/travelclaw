@@ -143,6 +143,18 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
       steps: [],
       observations: [],
     };
+    // A live turn watches these arrive; a task card can only poll for them.
+    let seq = 0;
+    const emitStep = (action?: string) => {
+      this.events.emit('browser.step', {
+        sessionId: input.session_id,
+        taskId: input.id,
+        ...(action ? { action } : {}),
+        message: state.message,
+        status: state.status,
+        step: ++seq,
+      });
+    };
     const assertAuthority = () => {
       if (this.sessions.ownerOf(input.session_id) !== userId) active.controller.abort();
       active.controller.signal.throwIfAborted();
@@ -191,9 +203,11 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
         state.reason = result.reason;
       }
       save();
+      emitStep(state.steps.at(-1)?.action);
     };
     try {
       save();
+      emitStep();
       const signal = active.controller.signal;
       const sites = sitesSchema
         .parse(await this.rpc('/sites', 'GET', undefined, signal))
@@ -284,6 +298,7 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
           });
           state.message = `Browser: ${action.action}. Nothing is booked.`;
           save();
+          emitStep(call.name);
           latest = browserStepResultSchema.parse(
             await this.rpc(
               `/sessions/${active.lease.id}/actions`,

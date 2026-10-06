@@ -33,25 +33,43 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     // A guest whose cookie went stale is not a signed-out traveler. Restore the
     // session and replay the request once rather than showing a sign-in demand.
     // A 401 means the guard rejected before the handler ran, so the replay is safe.
-    recoveryInFlight ??= recoverSession().finally(() => {
-      recoveryInFlight = null;
-    });
-    if (await recoveryInFlight) return parse<T>(await send(path, init));
+    if (await restoreSession()) return parse<T>(await send(path, init));
   }
   return parse<T>(response);
+}
+
+/**
+ * Restore a usable session after a 401, sharing one in-flight recovery so a
+ * burst of failed requests spends one guest and not one each. Exported for the
+ * streaming turn, which needs the same recovery before it replays its POST.
+ */
+export async function restoreSession(): Promise<boolean> {
+  if (!recoverSession) return false;
+  recoveryInFlight ??= recoverSession().finally(() => {
+    recoveryInFlight = null;
+  });
+  return recoveryInFlight;
+}
+
+/** The headers every gateway call carries, including the cookie-free bearer copy. */
+export function clientHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = readSessionToken();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
 }
 
 function send(path: string, init?: RequestInit): Promise<Response> {
   // The cookie is the primary credential. The bearer token covers the embedded case where
   // the browser stores the cookie and never sends it back.
-  const token = readSessionToken();
   return fetch(path, {
     ...init,
     credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...clientHeaders(),
       ...init?.headers,
     },
   });

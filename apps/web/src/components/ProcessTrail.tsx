@@ -5,6 +5,7 @@ import {
   CloudSun,
   Coins,
   FileText,
+  Globe,
   Hotel,
   Luggage,
   Map,
@@ -35,6 +36,8 @@ const TOOL_META: Record<string, { label: string; icon: LucideIcon }> = {
   'weather.outlook': { label: 'Checked the weather', icon: CloudSun },
   'visa.notes': { label: 'Checked entry notes', icon: Stamp },
   'memory.remember': { label: 'Kept a note in memory', icon: Brain },
+  'web.search': { label: 'Searched the web', icon: Globe },
+  'web.fetch': { label: 'Read a page', icon: FileText },
 };
 
 const TASK_STATUS: Record<AgentTaskRecord['status'], string> = {

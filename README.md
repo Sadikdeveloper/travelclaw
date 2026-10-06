@@ -54,6 +54,14 @@ flowchart LR
 5. Ask the model to narrate the tool results. The mock provider returns the desk rendering when no API key is set. If the live model fails, the desk rendering is the reply.
 6. Persist the assistant message, each tool trace marked `model` or `router`, and emit `chat.completed`.
 
+The chat UI watches the turn instead of waiting for it. `POST /api/sessions/:id/messages/stream`
+(and `POST /api/chat/stream`) answer with Server-Sent Events on the same request: the model's
+thinking, every step in order — what it chose to run, each tool with its arguments and its
+result, browser steps — and the reply as it is written. Stop cancels the model call and saves
+nothing half-written. Two read-only tools reach the public web for a grounded answer:
+`web.search` and `web.fetch`, with an operator `search` connector when one is configured and a
+keyless DuckDuckGo tier otherwise. See [architecture](docs/architecture.md#reading-the-public-web).
+
 A provider hold is a separate, explicit traveler action after an offer is shown. Only a provider confirmation can mark it held; that still does not purchase anything.
 
 ## Gemini setup

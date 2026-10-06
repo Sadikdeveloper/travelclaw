@@ -31,6 +31,7 @@ export function openAiRequestBody(input: {
   history: HistoryTurn[];
   user: string;
   tools?: ModelToolSpec[];
+  stream?: boolean;
 }): Record<string, unknown> {
   const tools = openAiToolsPayload(input.tools);
   return {
@@ -42,6 +43,7 @@ export function openAiRequestBody(input: {
       { role: 'user', content: input.user },
     ],
     ...(tools ? { tools, tool_choice: 'auto' } : {}),
+    ...(input.stream ? { stream: true } : {}),
   };
 }
 
@@ -56,6 +58,88 @@ export function parseOpenAiMessage(body: unknown): {
   const text = typeof choice?.content === 'string' ? choice.content : '';
   const raw = Array.isArray(choice?.tool_calls) ? choice.tool_calls : [];
   return { text, toolCalls: raw.flatMap(parseToolCall) };
+}
+
+/**
+ * The streaming half: a chunk carries text, reasoning, or the next slice of a
+ * tool call's arguments. Reasoning is provider-specific — DeepSeek and GLM send
+ * `reasoning_content`, OpenRouter-style gateways send `reasoning` — so both are
+ * read, and a provider with neither simply never sends the field.
+ *
+ * Tool calls arrive as partial arguments keyed by index, so the parser
+ * accumulates them and only hands back complete calls at the end of the stream.
+ */
+export function createOpenAiStreamParser() {
+  const calls = new Map<number, { id: string; name: string; args: string }>();
+  return {
+    push(payload: unknown): { text?: string; reasoning?: string } {
+      const choice = (
+        payload as {
+          choices?: Array<{
+            delta?: {
+              content?: unknown;
+              reasoning_content?: unknown;
+              reasoning?: unknown;
+              tool_calls?: unknown;
+            };
+          }>;
+        }
+      )?.choices?.[0];
+      const delta = choice?.delta;
+      if (delta?.tool_calls) {
+        for (const raw of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
+          const entry = raw as {
+            index?: unknown;
+            id?: unknown;
+            function?: { name?: unknown; arguments?: unknown };
+          };
+          const index = typeof entry.index === 'number' ? entry.index : 0;
+          const current = calls.get(index) ?? { id: '', name: '', args: '' };
+          if (typeof entry.id === 'string' && entry.id) current.id = entry.id;
+          if (typeof entry.function?.name === 'string' && entry.function.name) {
+            current.name = entry.function.name;
+          }
+          if (typeof entry.function?.arguments === 'string') {
+            current.args += entry.function.arguments;
+          }
+          calls.set(index, current);
+        }
+      }
+      const text = typeof delta?.content === 'string' ? delta.content : '';
+      const reasoning =
+        typeof delta?.reasoning_content === 'string'
+          ? delta.reasoning_content
+          : typeof delta?.reasoning === 'string'
+            ? delta.reasoning
+            : '';
+      return {
+        ...(text ? { text } : {}),
+        ...(reasoning ? { reasoning } : {}),
+      };
+    },
+    /** The tool calls assembled so far. Called once the stream has ended. */
+    toolCalls(): ModelToolCall[] {
+      return [...calls.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .flatMap(([, call]) =>
+          call.name
+            ? [{ id: call.id || call.name, name: call.name, arguments: call.args }]
+            : [],
+        );
+    },
+  };
+}
+
+/** One `data:` line's payload, or null for the keep-alive/`[DONE]` frames. */
+export function streamPayload(line: string): unknown | null {
+  if (!line.startsWith('data:')) return null;
+  const raw = line.slice(5).trim();
+  if (!raw || raw === '[DONE]') return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function parseToolCall(raw: unknown): ModelToolCall[] {

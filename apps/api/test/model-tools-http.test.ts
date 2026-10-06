@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { BUNDLED_TOOLS } from '@travelclaw/agent-core';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 
@@ -130,7 +131,7 @@ describe('chat with a tool-calling model', () => {
 
     // The first request carried the catalog; the narration pass did not.
     expect(requests[0].url).toBe('https://model.test/v1/chat/completions');
-    expect(requests[0].body.tools).toHaveLength(8);
+    expect(requests[0].body.tools).toHaveLength(BUNDLED_TOOLS.length);
     expect(
       Object.keys(requests[0].body.tools?.[0].function.parameters.properties ?? {}),
     ).toContain('destination');

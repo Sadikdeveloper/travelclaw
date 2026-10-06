@@ -4,7 +4,7 @@ Work in this order. Later tasks assume the earlier ones exist. Pick the first un
 
 This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, remain deferred pending the reviewed-workflow design in #25. Tools are functions we register. The traveler does not see a tool catalog.
 
-Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
+Checked on 2026-10-06, while adding the live turn and the read-only web tools.
 
 ## Done
 
@@ -19,6 +19,7 @@ Checked on 2026-10-04, while adding pairing auth for non-loopback clients.
 - [x] A desk card says search finished only after a source actually finishes, then offers a dismissible Yes / No / Keep working task-success prompt; Keep working leaves the composer open and does not replay the stale query
 - [x] **Accounts.** Email register and sign-in, cookie session, and Google sign-in behind `TRAVELCLAW_GOOGLE_CLIENT_ID`. Chats belong to the signed-in account.
 - [x] **Model-called tools.** The tool catalog goes to the provider as callable tools. A malformed call is rejected, not coerced. The router stays the fallback when the provider is `mock`, has no key, or asks for nothing, and a tool both picked runs once.
+- [x] **A turn the traveler can watch.** The turn streams over the POST that starts it: the model's thinking, every step in order (what it chose, each tool with its arguments and result, browser steps), and the answer as it is written. Stop cancels the model call and saves nothing half-written. The same work produced the read-only web pair `web.search` / `web.fetch`, grounded in an operator `search` connector or the keyless DuckDuckGo tier, with honest refusals instead of invented prices. See [the live turn](architecture.md#the-live-turn) and [reading the public web](architecture.md#reading-the-public-web).
 
 Without a configured search source, flight and stay requests remain ordinary chat turns, so the model can clarify the request. With an operator key, complete search requests can show provider offers. A hold is separate, explicit, and reported only after provider confirmation; nothing is purchased.
 

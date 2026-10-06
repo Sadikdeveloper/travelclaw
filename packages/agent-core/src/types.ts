@@ -149,6 +149,14 @@ export interface RememberData {
 export interface TripHints {
   destination?: string;
   origin?: string;
+  /**
+   * A free-text web query (`web.search`). Model arguments merge into `TripHints`
+   * like every other tool, so a web tool's arguments live here rather than in a
+   * parallel shape the planner would have to special-case.
+   */
+  query?: string;
+  /** A public page to read (`web.fetch`), only ever an http(s) URL. */
+  url?: string;
   startDate?: string;
   endDate?: string;
   days?: number;
@@ -233,6 +241,42 @@ export interface ModelCompletion {
   toolCalls?: ModelToolCall[];
 }
 
+/**
+ * One piece of a streaming completion, as the provider sent it. `text` is the
+ * answer being written; `reasoning` is the model's own thinking when the
+ * provider exposes it (DeepSeek/GLM `reasoning_content`, OpenRouter
+ * `reasoning`). A provider with no reasoning channel simply never sends the
+ * second field, and the desk shows only what it actually received.
+ */
+export interface ModelDelta {
+  text?: string;
+  reasoning?: string;
+}
+
+/**
+ * What the desk shows while a turn runs. The gateway turns these into wire
+ * events; `completeTurn` itself only says what happened, in the order it
+ * happened, and never formats anything for a screen.
+ */
+export type TurnEvent =
+  | { type: 'stage'; id: string; label: string; detail?: string; state: 'running' | 'done' }
+  | {
+      type: 'tool_start';
+      id: string;
+      name: string;
+      label: string;
+      source: ToolSource;
+      args?: string;
+    }
+  | { type: 'tool_end'; id: string; name: string; ok: boolean; summary: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'reply_delta'; text: string }
+  /** The model wrote something and then chose a tool instead: clear the draft. */
+  | { type: 'reply_reset' }
+  | { type: 'reply_start'; provider: string; model: string };
+
+export type TurnEventSink = (event: TurnEvent) => void;
+
 export interface ModelProvider {
   id: string;
   model: string;
@@ -242,6 +286,12 @@ export interface ModelProvider {
    * missing key still answers offline.
    */
   usesTools?: boolean;
+  /**
+   * True when `complete` writes `onDelta` as the answer arrives. The offline
+   * desk renderer leaves this off: it produces one finished sentence, and the
+   * turn then emits that sentence whole rather than faking a token stream.
+   */
+  streams?: boolean;
   complete(input: {
     system: string;
     history: HistoryTurn[];
@@ -249,6 +299,8 @@ export interface ModelProvider {
     fallback: string;
     tools?: ModelToolSpec[];
     signal?: AbortSignal;
+    /** Called as the provider streams. Ignored by a provider that cannot stream. */
+    onDelta?: (delta: ModelDelta) => void;
   }): Promise<ModelCompletion>;
 }
 
