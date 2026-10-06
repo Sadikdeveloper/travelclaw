@@ -364,6 +364,15 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
       'latest news',
       'current price',
       'any news',
+      // No structured source covers these, so the desk's own research does:
+      // a restaurant, an opening time, or an event is a current fact rather than
+      // an offer, and the desk checks it instead of answering from memory.
+      'restaurant',
+      'where to eat',
+      'place to eat',
+      'dinner',
+      'opening hours',
+      'opening times',
     ],
     args: z.object({
       query: z

@@ -106,28 +106,31 @@ the extension point for the rest.
 
 ### Restaurants
 
-A restaurant desk is wanted, and the shape is not settled. The honest problem is
-that the desk's offer type requires a **price**: a restaurant result is a place
-with hours, a rating, and sometimes a booking link, and a table reservation is
-not a fare. Reusing `ProviderOffer` would mean storing a number nobody quoted.
+Restaurants are handled by the desk's own research, not by a provider slot. Not
+every question is an offer: a restaurant answer is a place with hours, a rating,
+and often a booking link, and the desk's `ProviderOffer` requires a price nobody
+quoted. So a restaurant request goes through the same two tools that already
+reach the public web — `web.search` and `web.fetch`, with the keyless
+DuckDuckGo fallback when the operator has no search connector — and the answer
+names the page it came from. The prompt and the shipped `AGENTS.md` say that
+plainly: check it, cite it, and say when the check found nothing rather than
+answering from memory.
 
-So the plan is:
+Nothing about that path invents data. Search snippets are labeled untrusted page
+text, `web.fetch` refuses loopback and private addresses, and the desk never
+states a table is held.
 
-1. **Restaurants as places first.** The existing `suggestPlaces` tool already
-   answers "where should we eat in Lisbon" from the destination cards. A live
-   restaurant source would extend that with real names, hours, and ratings —
-   place data, not offers, and no hold to promise.
-2. **A reservation-capable vendor only if it can confirm one.** A table hold is
-   believable only when a vendor's own API answers with a reference, exactly like
-   a fare hold. A scraper that shows an OpenTable link is a link, not a hold, and
-   the desk must say so.
-3. **A `restaurant` slot when both exist.** The connector list, adapter registry,
-   and validation are already keyed by kind, so the work is a `DeskKind`, planner
-   keywords, a query draft (city, date, party size, time), and copy — not a new
-   architecture.
+A structured source becomes worth adding in two cases, and only then:
 
-Candidate sources to evaluate when that work starts: SerpApi's `google_local` and
-`google_maps` engines (places, hours, ratings), and its Tripadvisor, Yelp, and
-OpenTable engines. Whichever is picked gets the same treatment as the built-ins
-here: an adapter, a key in the operator env, no invented prices, and a `hold`
-value that reflects what the vendor can actually confirm.
+1. **Place data with provenance** — names, hours, and ratings from a vendor with
+   a real API (SerpApi's `google_local` and `google_maps` engines are the likely
+   first, since the key and adapter shape already exist). That would extend
+   `places.suggest` with live places; it is still place data, not an offer.
+2. **A vendor that can confirm a table.** A reservation is believable only when
+   the vendor's own API answers with a reference, exactly like a fare hold. A
+   scraper that surfaces an OpenTable link is a link, not a hold, and the desk
+   must say so.
+
+Either one lands the same way as the built-in adapters: an adapter, an operator
+key, a `restaurant` slot with its own query draft (city, date, party size, time),
+and a `hold` value that reflects only what the vendor can actually confirm.

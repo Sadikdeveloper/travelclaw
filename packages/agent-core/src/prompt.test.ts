@@ -58,6 +58,36 @@ describe('memory budget', () => {
     expect(prompt).not.toContain('## Memory');
   });
 
+  it("sends an unstructured question to the desk's own research, with attribution", () => {
+    const prompt = assemblePrompt(
+      {
+        text: 'Any good restaurants in Lisbon?',
+        persona: { name: 'Marlow', soul: '', identity: '', user: '', agents: '' },
+        memory: [],
+        history: [],
+      },
+      [],
+    );
+    expect(prompt).toContain('no structured source');
+    expect(prompt).toContain('name the page');
+    expect(prompt).toContain('never pass off memory');
+  });
+
+  it('never lets the desk claim a table, room, or ticket is held', () => {
+    const prompt = assemblePrompt(
+      {
+        text: 'hello',
+        persona: { name: 'Marlow', soul: '', identity: '', user: '', agents: '' },
+        memory: [],
+        history: [],
+      },
+      [],
+    );
+    expect(prompt).toContain(
+      'Never say a flight, room, table, or ticket is booked or available.',
+    );
+  });
+
   it('caps the memory a caller can put in a prompt', () => {
     const prompt = assemblePrompt(
       {
