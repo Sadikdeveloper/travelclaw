@@ -23,12 +23,11 @@ import type {
 
 /**
  * How many times a live model may be handed the tool catalog in one turn. The
- * historic shape is two passes — call, then narrate. A third pass is what lets
- * the desk chain real work (`web.search` → `web.fetch` → answer) the way a
- * coding agent chains its tools, without letting one turn run away: the total
- * number of executions stays capped by `MAX_TOOLS_PER_TURN`.
+ * extra passes let the desk chain real work (`web.search` → `web.fetch` → answer)
+ * and recover when a model first narrates an intended retry instead of calling a
+ * tool. The number of actual executions is still capped by `MAX_TOOLS_PER_TURN`.
  */
-export const AGENTIC_TOOL_ROUNDS = 3;
+export const AGENTIC_TOOL_ROUNDS = 5;
 
 export function parseCommand(
   text: string,
@@ -50,7 +49,7 @@ export interface CompleteTurnDeps {
   ctx: ToolContext;
   /**
    * Times the provider may be offered tools. `1` is the original two-pass turn;
-   * the control UI's live stream asks for the default so a search can be read.
+   * the live web UI opts into `AGENTIC_TOOL_ROUNDS` so searches can chain and retry.
    */
   toolRounds?: number;
   /** Where the desk reports what it is doing, in the order it happened. */
@@ -105,7 +104,7 @@ export async function completeTurn(
     state: 'done',
   });
 
-  const toolRounds = Math.max(1, Math.min(deps.toolRounds ?? 1, 4));
+  const toolRounds = Math.max(1, Math.min(deps.toolRounds ?? 1, 5));
   const routerOnly = command?.name === 'remember' || deps.provider.usesTools !== true;
   // Did the answer reach the screen as the model wrote it? A round that turned
   // out to want a tool resets the draft, so this is not simply "a delta arrived".
@@ -190,7 +189,14 @@ export async function completeTurn(
     ...(deps.signal ? { signal: deps.signal } : {}),
     ...liveDeltas(deps, emit, answered),
   });
-  const reply = completion.text.trim() || fallback;
+  let reply = completion.text.trim() || fallback;
+  if (toolResults.some((result) => !result.ok) && isRetryAnnouncement(reply)) {
+    // The last narration pass cannot call tools. If it still promises a retry,
+    // replace that promise with the grounded desk result instead of saving it.
+    if (answered.streamed) emit({ type: 'reply_reset' });
+    answered.streamed = false;
+    reply = fallback;
+  }
   if (!answered.streamed) emit({ type: 'reply_delta', text: reply });
   emit({
     type: 'stage',
@@ -259,15 +265,37 @@ async function runModelRounds(input: {
       ranTools,
     });
 
-    if (plan.calls.length || plan.rejected.length) {
+    const requestedWork = plan.calls.length > 0 || plan.rejected.length > 0;
+    if (requestedWork) {
       // The model wrote prose and then chose work instead. Take the draft back
       // rather than leaving words on screen that the turn is not going to keep.
       if (roundStreamed.streamed) emit({ type: 'reply_reset' });
-    } else {
-      input.answered.streamed = roundStreamed.streamed;
+      input.answered.streamed = false;
     }
 
-    if (!plan.calls.length && !plan.rejected.length) {
+    if (!requestedWork) {
+      if (results.some((result) => !result.ok) && isRetryAnnouncement(completion.text)) {
+        // A promise to retry is not the retry itself. Keep it out of the saved
+        // answer, show a short action summary in the live process, and ask again
+        // while this turn still has room for another distinct tool call.
+        if (roundStreamed.streamed) emit({ type: 'reply_reset' });
+        input.answered.streamed = false;
+        emit({
+          type: 'stage',
+          id: `retry-${round}`,
+          label: 'Checking another approach',
+          detail:
+            'The previous result was not usable; the remaining alternatives are being checked.',
+          state: 'done',
+        });
+        emit({
+          type: 'reasoning',
+          text: 'The last result was not useful. I’m checking whether another available approach can help.',
+        });
+        if (round + 1 < input.rounds && results.length < MAX_TOOLS_PER_TURN) continue;
+        break;
+      }
+
       emit({
         type: 'stage',
         id: 'plan',
@@ -280,8 +308,12 @@ async function runModelRounds(input: {
       // With nothing run yet, whatever the model wrote is the turn's answer. A
       // silent model after real tool work gets the narration pass instead, so
       // the results are never dropped on the floor.
-      if (completion.text.trim() || !results.length)
+      if (completion.text.trim() || !results.length) {
+        input.answered.streamed = roundStreamed.streamed;
         return { results, answered: completion };
+      }
+      if (roundStreamed.streamed) emit({ type: 'reply_reset' });
+      input.answered.streamed = false;
       break;
     }
 
@@ -313,6 +345,27 @@ async function runModelRounds(input: {
   // The round budget is spent. What ran is still the turn's grounding, so the
   // narration pass below answers from it rather than from nothing.
   return { results };
+}
+
+/**
+ * Some models narrate a retry as plain prose instead of emitting a tool call.
+ * That sentence is useful progress, but it is not a completed answer. Keep this
+ * deliberately narrow so a conditional offer like "I can search if you want"
+ * still reads as a normal reply.
+ */
+function isRetryAnnouncement(text: string): boolean {
+  const sentences = text
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .filter(Boolean);
+  const last = sentences
+    .at(-1)
+    ?.trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
+  if (!last || last.split(/\s+/).length > 36) return false;
+  return /^(?:(?:okay|all right|so|hmm|next|then)\b[,:;—-]*\s*)*(?:let me|i(?:['’]ll| will|['’]m going to| am going to))\s+(?:now\s+)?(?:try|retry|check|search|look(?:\s+up)?|find|open|read|fetch|query|use|consult|explore)\b/i.test(
+    last,
+  );
 }
 
 /** Report every execution to the traveler's screen as it starts and ends. */

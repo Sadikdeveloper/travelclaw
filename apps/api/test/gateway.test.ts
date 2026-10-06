@@ -142,6 +142,40 @@ describe('gateway', () => {
     expect(bobMessage.status).toBe(404);
   });
 
+  it('lets only the owner permanently delete a chat and its tool history', async () => {
+    const owner = await signedInAgent();
+    const stranger = await signedInAgent();
+    const opened = await owner.post('/api/chat').send({
+      content: 'What should I pack for Reykjavik for 4 days?',
+    });
+    expect(opened.status).toBe(201);
+    const sessionId = opened.body.session.id as string;
+    const before = await owner.get(`/api/sessions/${sessionId}`);
+    expect(before.body.messages.length).toBeGreaterThan(0);
+
+    const runsBefore = await request(app.getHttpServer()).get('/api/tools/runs');
+    expect(
+      runsBefore.body.some((run: { sessionId: string }) => run.sessionId === sessionId),
+    ).toBe(true);
+
+    // A guessed id is still a 404, and does not remove the owner's chat.
+    const denied = await stranger.delete(`/api/sessions/${sessionId}`);
+    expect(denied.status).toBe(404);
+    expect((await owner.get(`/api/sessions/${sessionId}`)).status).toBe(200);
+
+    const removed = await owner.delete(`/api/sessions/${sessionId}`);
+    expect(removed.status).toBe(204);
+    expect((await owner.get(`/api/sessions/${sessionId}`)).status).toBe(404);
+    const list = await owner.get('/api/sessions');
+    expect(list.body.some((session: { id: string }) => session.id === sessionId)).toBe(
+      false,
+    );
+    const runsAfter = await request(app.getHttpServer()).get('/api/tools/runs');
+    expect(
+      runsAfter.body.some((run: { sessionId: string }) => run.sessionId === sessionId),
+    ).toBe(false);
+  });
+
   it('keeps attachments with the message and accepts a file-only turn', async () => {
     const agent = await signedInAgent();
     const first = await agent.post('/api/chat').send({
