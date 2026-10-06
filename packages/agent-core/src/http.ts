@@ -37,6 +37,39 @@ export function authHeaders(apiKey: string | undefined): Record<string, string> 
   return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
+/** A fare shop is a bigger question than a rate lookup, so it gets longer than a tool call. */
+export const SEARCH_TIMEOUT_MS = 9000;
+
+const NOT_JSON = Symbol('not-json');
+
+/** A JSON body, or the symbol when the vendor answered with something else. */
+export async function readJson(response: Response): Promise<unknown | typeof NOT_JSON> {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return NOT_JSON;
+  }
+}
+
+export { NOT_JSON };
+
+/**
+ * Defense in depth for vendors that require a credential somewhere other than a
+ * header (one search API takes the key as a URL path segment). Every
+ * developer-facing string an adapter returns goes through this, so the secret
+ * cannot reach a summary, a log line, a task row, or a model prompt even if the
+ * vendor echoes the request back in an error message.
+ */
+export function scrubSecrets(text: string, secrets: Array<string | undefined>): string {
+  let clean = text;
+  for (const secret of secrets) {
+    const value = secret?.trim();
+    if (!value || value.length < 6) continue;
+    clean = clean.split(value).join('[redacted]');
+  }
+  return clean;
+}
+
 export class FetchTimeoutError extends Error {
   constructor() {
     super('Provider request timed out');

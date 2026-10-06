@@ -127,6 +127,24 @@ describe('flight search', () => {
       hold: 'none',
     });
     expect(result.offers[0].detail).toMatch(/nonstop/);
+    // The same vendor facts, kept structured so the card can draw a fare row.
+    expect(result.offers[0].facts).toEqual({
+      kind: 'flight',
+      segments: [
+        {
+          from: 'LOS',
+          to: 'LIS',
+          departAt: '2026-11-02T10:20Z',
+          arriveAt: '2026-11-02T15:05Z',
+          carrier: 'TP',
+        },
+      ],
+      stops: 0,
+      durationMinutes: null,
+      stopNames: [],
+    });
+    // An offer with no vendor segment data has no facts to draw: prose only.
+    expect(result.offers[1].facts).toBeNull();
     // A hold is reported because the provider confirmed one with a reference.
     expect(result.offers[1].hold).toBe('confirmed');
     expect(result.offers[1].holdRef).toBe('HOLD-9');
@@ -139,6 +157,113 @@ describe('flight search', () => {
     expect(seen[0].headers.Authorization).toBe('Bearer sk-fares-1234');
     expect(seen[0].url).not.toContain('sk-fares-1234');
     expect(JSON.stringify(result)).not.toContain('sk-fares-1234');
+  });
+
+  it('never turns a multi-leg itinerary into a stop count of its own', async () => {
+    const { ctx } = ctxWith(
+      'flight',
+      { apiKey: 'k', baseUrl: 'https://f.example' },
+      async () =>
+        json({
+          offers: [
+            {
+              id: 'round-trip-nonstop',
+              price: { amount: 400, currency: 'EUR' },
+              // Two legs is a return journey, not one connection. Without the
+              // vendor's own count the desk says nothing about stops.
+              segments: [
+                { from: 'LOS', to: 'LIS', carrier: 'TP' },
+                { from: 'LIS', to: 'LOS', carrier: 'TP' },
+              ],
+            },
+          ],
+        }),
+    );
+
+    const result = await searchFlights(FLIGHT_QUERY, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const facts = result.offers[0].facts;
+    expect(facts?.kind).toBe('flight');
+    if (facts?.kind !== 'flight') return;
+    expect(facts.stops).toBeNull();
+    expect(facts.stopNames).toEqual([]);
+  });
+
+  it('keeps a vendor stop count and its layover names when both are sent', async () => {
+    const { ctx } = ctxWith(
+      'flight',
+      { apiKey: 'k', baseUrl: 'https://f.example' },
+      async () =>
+        json({
+          offers: [
+            {
+              id: 'via-lagos',
+              price: { amount: 222174, currency: 'NGN' },
+              stops: 1,
+              durationMinutes: 1440,
+              stopNames: ['Lagos'],
+              segments: [
+                {
+                  from: 'KAN',
+                  to: 'LOS',
+                  departAt: '2026-10-12 20:05',
+                  carrier: 'Air Peace',
+                },
+                {
+                  from: 'LOS',
+                  to: 'ABV',
+                  departAt: '2026-10-12 22:10',
+                  carrier: 'Air Peace',
+                },
+              ],
+            },
+          ],
+        }),
+    );
+
+    const result = await searchFlights(FLIGHT_QUERY, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const facts = result.offers[0].facts;
+    expect(facts?.kind).toBe('flight');
+    if (facts?.kind !== 'flight') return;
+    expect(facts.stops).toBe(1);
+    expect(facts.durationMinutes).toBe(1440);
+    expect(facts.stopNames).toEqual(['Lagos']);
+  });
+
+  it('drops a stop count that cannot be squared with the named stops', async () => {
+    const { ctx } = ctxWith(
+      'flight',
+      { apiKey: 'k', baseUrl: 'https://f.example' },
+      async () =>
+        json({
+          offers: [
+            {
+              id: 'two-stops',
+              price: { amount: 300, currency: 'EUR' },
+              stops: 2,
+              // Only one place named: the desk keeps the count and drops the name
+              // rather than attributing it to the wrong connection.
+              stopNames: ['Lagos'],
+              segments: [
+                { from: 'KAN', to: 'LOS', carrier: 'Air Peace' },
+                { from: 'LOS', to: 'ABV', carrier: 'Air Peace' },
+              ],
+            },
+          ],
+        }),
+    );
+
+    const result = await searchFlights(FLIGHT_QUERY, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const facts = result.offers[0].facts;
+    expect(facts?.kind).toBe('flight');
+    if (facts?.kind !== 'flight') return;
+    expect(facts.stops).toBe(2);
+    expect(facts.stopNames).toEqual([]);
   });
 
   it('drops an offer the provider did not price instead of inventing one', async () => {

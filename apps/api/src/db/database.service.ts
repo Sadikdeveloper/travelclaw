@@ -30,6 +30,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateToAttachments();
     this.db.exec(SCHEMA);
     this.migrateOfferProviderIds();
+    this.migrateOfferHoldSupport();
+    this.migrateOfferFacts();
     this.ensureMemorySearch();
   }
 
@@ -181,6 +183,42 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.db.exec(
       "UPDATE offers SET provider_id = provider_base_url WHERE provider_id = ''",
     );
+  }
+
+  /**
+   * Offers written before vendor adapters existed came from a source that
+   * implements the hold contract, so they keep the `provider` default. A vendor
+   * that only quotes prices records `unsupported` instead.
+   */
+  private migrateOfferHoldSupport() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('offers')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(offers)');
+    if (columns.some((column) => column.name === 'hold_support')) return;
+    this.db.exec(
+      "ALTER TABLE offers ADD COLUMN hold_support TEXT NOT NULL DEFAULT 'provider'",
+    );
+  }
+
+  /**
+   * Structured offer facts arrived with the row layout. Offers written before
+   * them keep `NULL` and the card falls back to their prose, so no old row has to
+   * be back-filled with a guess.
+   */
+  private migrateOfferFacts() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('offers')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(offers)');
+    if (columns.some((column) => column.name === 'facts_json')) return;
+    this.db.exec('ALTER TABLE offers ADD COLUMN facts_json TEXT');
   }
 
   onModuleDestroy() {

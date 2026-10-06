@@ -223,15 +223,15 @@ The chat UI does not wait in the dark. `POST /api/chat/stream` and
 with Server-Sent Events on the response to that same request: there is no second channel to
 keep in sync and no turn id to invent. One frame per event, in the order it happened:
 
-| Event | What it carries |
-| --- | --- |
-| `turn.started` | The chat, and the provider/model label the desk picked |
-| `step` | A keyed row: `kind` (`stage`, `tool`, `desk`, `browser`), label, detail, `state` (`running`, `done`, `failed`), and `source` for a tool (`model` or `router`) |
-| `reasoning.delta` | The model's own thinking, when the provider exposes it |
-| `reply.delta` | The answer, as the model writes it |
-| `reply.reset` | The model wrote prose and then chose a tool instead: clear the draft |
-| `turn.completed` | The same `ChatResponse` the plain route returns |
-| `turn.failed` | One sentence for the traveler; the stack goes to the operator log |
+| Event             | What it carries                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `turn.started`    | The chat, and the provider/model label the desk picked                                                                                                        |
+| `step`            | A keyed row: `kind` (`stage`, `tool`, `desk`, `browser`), label, detail, `state` (`running`, `done`, `failed`), and `source` for a tool (`model` or `router`) |
+| `reasoning.delta` | The model's own thinking, when the provider exposes it                                                                                                        |
+| `reply.delta`     | The answer, as the model writes it                                                                                                                            |
+| `reply.reset`     | The model wrote prose and then chose a tool instead: clear the draft                                                                                          |
+| `turn.completed`  | The same `ChatResponse` the plain route returns                                                                                                               |
+| `turn.failed`     | One sentence for the traveler; the stack goes to the operator log                                                                                             |
 
 Steps are keyed, so a tool announced `running` is updated in place when its result lands
 instead of appearing twice. The stream is only opened for a caller that passed the same
@@ -315,7 +315,7 @@ Therefore TravelClaw treats global coverage as **multiple operator-managed sourc
 
 ### Operator configuration and fan-out
 
-A flight or stay search can query up to eight compatible sources of that kind in parallel. Configure JSON arrays with `TRAVELCLAW_FLIGHT_PROVIDERS_JSON` and `TRAVELCLAW_STAY_PROVIDERS_JSON`; each entry has a stable operator id, optional display name, base URL, and key:
+A flight or stay search can query up to eight sources of that kind in parallel. Configure JSON arrays with `TRAVELCLAW_FLIGHT_PROVIDERS_JSON` and `TRAVELCLAW_STAY_PROVIDERS_JSON`; each entry has a stable operator id, optional display name, an adapter, a base URL when the adapter has no default, and a key:
 
 ```json
 [
@@ -334,7 +334,30 @@ A flight or stay search can query up to eight compatible sources of that kind in
 ]
 ```
 
-The key belongs to the operator and stays on the server; travelers never supply one. A nonblank `*_PROVIDERS_JSON` value takes precedence over that kind's legacy `TRAVELCLAW_FLIGHT_BASE_URL` / `TRAVELCLAW_FLIGHT_API_KEY` or stay equivalents. An explicit `[]` disables that search kind. If the JSON setting is blank, the legacy pair remains supported as one source. Each URL must implement the normalized TravelClaw adapter contract below; vendor APIs have different request/response and booking flows, so this is **not** a direct Duffel, Booking.com, Expedia, or Hotelbeds integration.
+The key belongs to the operator and stays on the server; travelers never supply one. A nonblank `*_PROVIDERS_JSON` value takes precedence over that kind's legacy `TRAVELCLAW_FLIGHT_BASE_URL` / `TRAVELCLAW_FLIGHT_API_KEY` or stay equivalents. An explicit `[]` disables that search kind. If the JSON setting is blank, the legacy pair remains supported as one source.
+
+`adapter` says how the desk reaches that source. It defaults to `travelclaw`, the normalized contract below, so an install that already runs a compatible adapter is unchanged. `serpapi` and `flightapi` are built-in adapters for those vendors' own APIs; their base URL defaults to the vendor's documented origin. An adapter name that this build does not have, or one that cannot serve the configured kind, fails startup with the env var and the entry index named. A restaurant slot will read the same way when a restaurant desk exists (see `docs/roadmap.md`).
+
+### Built-in adapters
+
+| Adapter      | Kinds        | Reaches                                                                                                                                                  | Credential                                                                               |
+| ------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `travelclaw` | flight, stay | `GET {base}/search/flights`, `GET {base}/search/stays`, `POST {base}/holds`                                                                              | `Authorization: Bearer`                                                                  |
+| `serpapi`    | flight, stay | `GET {base}/search?engine=google_flights` and `?engine=google_hotels`, plus `engine=google_flights_autocomplete` for a city the desk only has a name for | `Authorization: Bearer`, with `api_key` in the query as the vendor's documented fallback |
+| `flightapi`  | flight       | `GET {base}/onewaytrip/...` and `GET {base}/roundtrip/...`                                                                                               | key in the URL path, as that vendor requires                                             |
+
+Header-first is the rule, even for a vendor that documents its key as a request parameter. `serpapi` sends the key as `Authorization: Bearer`; only if the vendor refuses that with `401` does it retry once with `api_key` in the query string, the placement SerpApi's own documentation prescribes, and remembers that answer for the life of the process so one rejected search costs one extra call, not one per search. When the header is accepted the key never enters a URL at all.
+
+Adapters translate a vendor's payload into the desk's offer shape and nothing more: `providers.ts` revalidates every candidate with the same schema the normalized contract uses, so no adapter can widen what the desk is willing to show or hold. An adapter never invents a price, a route, or a hold, and every developer-facing string it returns passes through a scrubber that removes the connector key, so a vendor error that echoed the request cannot carry a secret into a task row, a log line, a summary, or a model prompt.
+
+Two vendor facts are worth knowing before enabling one:
+
+- **Google Flights identifies a place by airport code or Google location id**, never by a city name. For `serpapi`, a city the traveler typed is resolved either from an operator `cityCodes` alias or through the vendor's own `google_flights_autocomplete` lookup; if neither has it, the search is refused with a sentence naming the city. For `flightapi`, only an airport code already in the message or an operator alias works, and anything else is refused rather than guessed. A resolved alias or lookup result is real data from the vendor or the operator, never a code the desk made up.
+- **Currency provenance.** `serpapi` prices in USD unless asked otherwise and echoes the currency it used in `search_parameters`, which is what the offer is labelled with. `flightapi` requires a currency in the request: the desk sends the traveler's or the operator's when one was stated and otherwise asks for USD, labelling the offer with what it asked for. No price is ever converted or compared across currencies.
+
+A vendor that only quotes prices is recorded as `holdSupport: unsupported` — offers from `serpapi` and `flightapi` carry it. The traveler sees the offer with a sentence that the source does not hold it, and the desktop refuses a hold request for it without calling the vendor at all. That is a vendor limit stated plainly, not a hold that failed.
+
+Multi-city, SerpApi's booking options and price insights, FlightAPI.io's multi-trip endpoint, and hotel property details are not wired yet; they are listed in `docs/roadmap.md`.
 
 All configured sources receive the same search and any market the message or the operator default supplied. TravelClaw does not yet infer route/property coverage or choose providers by region: an adapter may return no offers for a market it does not cover. The UI and task brief identify each source and retrieval time. A failed source does not discard another source's valid results; it is disclosed as a partial search. If every source fails, no offer is shown. Valid offers are interleaved in each source's own order, capped at six total, and are not falsely ranked across currencies. No results from a configured source means no currently returned offers, not proof that the route or city has no inventory.
 
@@ -356,7 +379,7 @@ The operator env values below apply only to the keys a message left unstated, fo
 
 Blank values are omitted so an adapter can use its own configured market. The task brief names where each value came from — the traveler's message or the operator default — so a summary never implies the traveler said something they did not. Every offer keeps the currency the provider returned; TravelClaw does not convert or compare unlike currencies. Booking and display rules vary by point of sale, so the configured adapter must return a lawful display total and the UI must continue to show the returned currency.
 
-### Search contract
+### Search contract (`travelclaw` adapter)
 
 Flight search uses `GET {base}/search/flights` with `origin`, `destination`, `departDate`, `travelers`, and optional `returnDate`. Stay search uses `GET {base}/search/stays` with `destination`, `checkIn`, `checkOut`, and `travelers`. Either request may additionally include `bookerCountry`, `currency`, and `language` — each only when the traveler's message stated it or the operator default supplies it. The desk sends each key only as `Authorization: Bearer ...`; it never goes in a URL, transcript, warning, or model prompt. Redirects are refused so a credential is not forwarded to another host. If the traveler does not specify a party size, the query uses one traveler and the brief names that assumption. A flight query with no written return date is one-way; a stay query requires check-in and check-out (an explicit number of nights may supply the latter).
 
@@ -373,6 +396,9 @@ A successful adapter response is JSON with an optional provider label and an off
       "detail": "Optional provider detail",
       "segments": [{ "from": "LOS", "to": "LIS", "carrier": "Example Air" }],
       "stay": { "name": "Optional hotel name", "roomType": "double", "nights": 4 },
+      "stops": 1,
+      "durationMinutes": 85,
+      "stopNames": ["Lagos"],
       "hold": {
         "confirmed": true,
         "ref": "provider-hold-reference",
@@ -385,9 +411,13 @@ A successful adapter response is JSON with an optional provider label and an off
 
 `price.amount` is required and must come from the source; it is a non-negative number or decimal string, capped at one billion and three decimal places. Offers without a usable id and price are dropped, never filled in from a desk estimate. The desk records when it received each response, shows the source and time, and stores offers against the chat task in SQLite (up to 24 recent unheld offers per task; provider-confirmed holds are retained). `GET /api/sessions/:id/tasks` returns the saved offers when the chat is opened again.
 
+### What the card draws, and from what
+
+`segments`, `stay`, `stops`, `durationMinutes`, and `stopNames` are the vendor's own structure, so they are kept as such: the desk stores them as `facts` on the offer (`facts_json` on the `offers` row) beside the `title`/`detail` prose. The chat card reads the facts to draw a fare row — carrier, route, times, stops, duration, price — the way a booking site does, and the desk's brief names the same facts in one line per offer. A source that sends no structured data keeps its prose, and the card falls back to it. Facts are never inferred: an itinerary with more than one leg does not become a stop count (that could be a return journey), a stop is named only when the vendor named it or the leg structure shows where the change happens, and a stored row whose facts will not parse is read as prose rather than as a broken row.
+
 ### Holds and provider identity
 
-A hold exists only when the source explicitly confirms it with a reference. A search never asks for a hold. The traveler can choose **Ask provider to hold** on a displayed offer; that POST requires `{ "confirm": true }` and calls the same source's `POST {base}/holds` with `{ "kind": "flight" | "stay", "offerId": "provider-offer-id" }`. Each adapter must implement the underlying supplier's correct revalidation/hold flow; a vague response (`pending`, `requested`, `held` without a reference), HTTP error, or timeout remains an offer. Provider confirmation and reference are persisted. The connector id and endpoint identity that returned the offer are stored privately; if either changes before a hold request, the desk refuses to send the old offer id to another source and asks for a fresh search. This is not a booking; there is no payment action or card storage.
+A hold exists only when the source explicitly confirms it with a reference. A search never asks for a hold, and a source whose adapter cannot confirm one (`serpapi`, `flightapi`) is refused locally with the reason instead of being sent an offer id it has no endpoint for. The traveler can choose **Ask provider to hold** on a displayed offer; that POST requires `{ "confirm": true }` and calls the same source's `POST {base}/holds` with `{ "kind": "flight" | "stay", "offerId": "provider-offer-id" }`. Each adapter must implement the underlying supplier's correct revalidation/hold flow; a vague response (`pending`, `requested`, `held` without a reference), HTTP error, or timeout remains an offer. Provider confirmation and reference are persisted. The connector id and endpoint identity that returned the offer are stored privately; if either changes before a hold request, the desk refuses to send the old offer id to another source and asks for a fresh search. This is not a booking; there is no payment action or card storage.
 
 ## Memory
 

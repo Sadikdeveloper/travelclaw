@@ -5,6 +5,23 @@ export type { DeskKind } from './desks';
 export { extractHints } from './extract';
 export { hasSearchMarket, mergeSearchMarket, searchMarketFrom } from './market';
 export {
+  adapterFor,
+  adapterServes,
+  flightapiAdapter,
+  isProviderAdapterId,
+  PROVIDER_ADAPTER_IDS,
+  PROVIDER_ADAPTERS,
+  serpapiAdapter,
+  travelclawAdapter,
+} from './adapters';
+export type {
+  AdapterFailureReason,
+  AdapterOfferCandidate,
+  AdapterOutcome,
+  ProviderAdapter,
+  ProviderAdapterId,
+} from './adapters';
+export {
   MAX_OFFERS_PER_SEARCH,
   flightQueryFrom,
   requestProviderHold,

@@ -17,12 +17,15 @@ import {
   type StayQuery,
   type ToolContext,
 } from '@travelclaw/agent-core';
-import type {
-  AgentTaskRecord,
-  AgentTaskStatus,
-  HoldAttempt,
-  OfferRecord,
-  TaskDecision,
+import {
+  offerCarriers,
+  offerFactsLine,
+  offerRoute,
+  type AgentTaskRecord,
+  type AgentTaskStatus,
+  type HoldAttempt,
+  type OfferRecord,
+  type TaskDecision,
 } from '@travelclaw/shared';
 import { newId, nowIso } from '../common/util';
 import { BrowserService } from '../browser/browser.service';
@@ -60,7 +63,9 @@ interface OfferRow {
   total_amount: number;
   title: string;
   detail: string | null;
+  facts_json: string | null;
   hold: OfferRecord['hold'];
+  hold_support: OfferRecord['holdSupport'];
   hold_ref: string | null;
   hold_expires_at: string | null;
   hold_note: string | null;
@@ -421,9 +426,9 @@ export class TasksService {
         this.db.run(
           `INSERT INTO offers
             (id, session_id, task_id, kind, provider, provider_id, provider_base_url, provider_offer_id,
-             retrieved_at, currency, total_amount, title, detail, hold, hold_ref,
+             retrieved_at, currency, total_amount, title, detail, facts_json, hold, hold_support, hold_ref,
              hold_expires_at, hold_note, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           task.session_id,
           task.id,
@@ -437,7 +442,9 @@ export class TasksService {
           offer.totalAmount,
           offer.title,
           offer.detail,
+          offer.facts ? JSON.stringify(offer.facts) : null,
           offer.hold,
+          offer.holdSupport,
           offer.holdRef,
           offer.holdExpiresAt,
           offer.holdNote,
@@ -622,14 +629,33 @@ function holdStatus(kind: DeskKind, confirmed: boolean): string {
     : 'No room is held. Nothing was purchased.';
 }
 
+/**
+ * One offer as one line. The card above draws the times and stops; the brief
+ * names the same facts in a sentence the model can carry into its reply without
+ * repeating every leg. A source that sent only prose keeps that prose here,
+ * because it is the only description of the offer there is.
+ */
 function providerOfferSummary(offer: OfferRecord, index: number): string {
   const price = `${offer.totalAmount.toLocaleString('en-US', { maximumFractionDigits: 3 })} ${offer.currency}`;
   const status =
     offer.hold === 'confirmed'
       ? `provider-confirmed hold${offer.holdRef ? ` (${offer.holdRef})` : ''}`
       : 'offer only; no hold confirmed';
+  const facts = offer.facts;
+  if (facts?.kind === 'flight') {
+    const carriers = offerCarriers(facts);
+    const lead = carriers.length ? carriers.join(', ') : offer.title;
+    const route = offerRoute(facts);
+    const heading = [lead, route].filter(Boolean).join(': ');
+    const shape = offerFactsLine(facts);
+    return `${index + 1}. ${heading} — ${shape ? `${shape} — ` : ''}${price} (${status}).`;
+  }
+  if (facts?.kind === 'stay') {
+    const shape = offerFactsLine(facts);
+    return `${index + 1}. ${facts.name} — ${shape ? `${shape} — ` : ''}${price} (${status}).`;
+  }
   const detail = offer.detail ? ` — ${offer.detail}` : '';
-  return `${index + 1}. ${offer.title}: ${price}${detail} (${offer.provider}; retrieved ${offer.retrievedAt}; ${status}).`;
+  return `${index + 1}. ${offer.title}: ${price}${detail} (${status}).`;
 }
 
 function holdConfirmedSummary(
@@ -714,6 +740,24 @@ function mapTask(row: TaskRow, offers: OfferRecord[]): AgentTaskRecord {
   };
 }
 
+/**
+ * Facts were written by the desk from a validated vendor payload, but a stored
+ * row is still read defensively: unreadable JSON is `null`, which the card shows
+ * as prose rather than as a broken row or an invented number.
+ */
+function parseOfferFacts(raw: string | null): OfferRecord['facts'] {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const kind = (parsed as { kind?: unknown }).kind;
+    if (kind !== 'flight' && kind !== 'stay') return null;
+    return parsed as OfferRecord['facts'];
+  } catch {
+    return null;
+  }
+}
+
 function mapOffer(row: OfferRow): OfferRecord {
   return {
     id: row.id,
@@ -727,7 +771,9 @@ function mapOffer(row: OfferRow): OfferRecord {
     totalAmount: row.total_amount,
     title: row.title,
     detail: row.detail,
+    facts: parseOfferFacts(row.facts_json),
     hold: row.hold,
+    holdSupport: row.hold_support,
     holdRef: row.hold_ref,
     holdExpiresAt: row.hold_expires_at,
     holdNote: row.hold_note,

@@ -83,6 +83,16 @@ describe('router', () => {
     expect(names).not.toContain('trip.outline');
   });
 
+  it("checks a restaurant question with the desk's own research, not memory", () => {
+    const names = routeTools('Any good restaurants near the old town we should try?');
+    expect(names).toContain('web.search');
+  });
+
+  it('routes an opening-time question to the live source too', () => {
+    const names = routeTools('What are the opening hours of the Gulbenkian museum?');
+    expect(names).toContain('web.search');
+  });
+
   it('caps a planning sentence at three tools', () => {
     const names = routeTools(
       'Plan 5 days in Lisbon from 2026-10-01, budget for 2 travelers, and suggest places',

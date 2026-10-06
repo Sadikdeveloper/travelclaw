@@ -316,6 +316,16 @@ export interface ConnectorCredentials {
   providerName?: string;
   baseUrl?: string;
   apiKey?: string;
+  /**
+   * Which built-in adapter speaks to this source. Absent means the normalized
+   * TravelClaw contract (`./adapters`).
+   */
+  adapter?: string;
+  /**
+   * Operator aliases for a vendor that needs a code rather than a city name:
+   * lowercased place → airport code or Google location id. Not a secret.
+   */
+  cityCodes?: Record<string, string>;
 }
 
 /**

@@ -301,6 +301,54 @@ export type TaskDecision = 'complete' | 'no' | 'still_working';
 export type OfferHoldState = 'none' | 'confirmed';
 
 /**
+ * Whether the source behind an offer can confirm a hold. `unsupported` is a
+ * vendor that only quotes prices: the desk refuses the ask instead of sending an
+ * offer id somewhere that cannot reserve anything.
+ */
+export type OfferHoldSupport = 'provider' | 'unsupported';
+
+/**
+ * The structured parts of an offer, as the vendor described them. Kept so the
+ * chat can lay a fare out like a fare — times, stops, duration, price — instead
+ * of re-reading a prose sentence. Every value is the vendor's own or arithmetic
+ * on it (a connection count, a night count); nothing is inferred from a place
+ * name, and a field the vendor did not give stays null.
+ */
+export interface OfferFlightFacts {
+  kind: 'flight';
+  /** Legs in order, exactly as the vendor returned them. */
+  segments: Array<{
+    from: string;
+    to: string;
+    departAt: string | null;
+    arriveAt: string | null;
+    carrier: string | null;
+  }>;
+  /** Stops the vendor counted, or a single-leg itinerary's plain zero. */
+  stops: number | null;
+  /** Minutes the vendor reported for the whole itinerary. */
+  durationMinutes: number | null;
+  /**
+   * Where the traveler changes planes, only when the vendor named those places
+   * (a layover name) or the leg structure shows them (an intermediate airport).
+   */
+  stopNames: string[];
+}
+
+export interface OfferStayFacts {
+  kind: 'stay';
+  name: string;
+  roomType: string | null;
+  nights: number | null;
+  checkIn: string | null;
+  checkOut: string | null;
+  /** The vendor's own score, on the vendor's own scale. */
+  rating: number | null;
+}
+
+export type OfferFacts = OfferFlightFacts | OfferStayFacts;
+
+/**
  * One offer a provider returned to a desk, stored as it arrived. Every number
  * here came from the provider: nothing is estimated, converted, or filled in.
  */
@@ -319,7 +367,14 @@ export interface OfferRecord {
   totalAmount: number;
   title: string;
   detail: string | null;
+  /**
+   * Structured vendor facts when the source sent any. The card renders these
+   * when present and falls back to `title`/`detail` prose when it did not.
+   */
+  facts: OfferFacts | null;
   hold: OfferHoldState;
+  /** `unsupported` sources never grow a hold button or a hold request. */
+  holdSupport: OfferHoldSupport;
   holdRef: string | null;
   holdExpiresAt: string | null;
   /** Set when the provider sent hold-shaped details it never confirmed. */

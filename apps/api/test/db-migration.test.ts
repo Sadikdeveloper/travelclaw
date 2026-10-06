@@ -284,4 +284,65 @@ describe('accounts migration', () => {
       else process.env.DATABASE_PATH = previous.DATABASE_PATH;
     }
   });
+
+  it('adds hold_support to offers written before vendor adapters existed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'travelclaw-migrate-hold-support-'));
+    const dbPath = join(dir, 'legacy.db');
+
+    // Simulate offers from a build whose only providers implemented the hold
+    // contract: rows exist without a hold_support column.
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE offers (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        provider_base_url TEXT NOT NULL,
+        provider_offer_id TEXT NOT NULL,
+        retrieved_at TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        total_amount REAL NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT,
+        hold TEXT NOT NULL DEFAULT 'none',
+        hold_ref TEXT,
+        hold_expires_at TEXT,
+        hold_note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO offers VALUES ('o1', 's1', 't1', 'flight', 'Old Source', 'https://old.example.test', 'OFF-1', '2026-01-01T00:00:00Z', 'EUR', 100, 'Old offer', NULL, 'none', NULL, NULL, NULL, '2026-01-01', '2026-01-01');
+    `);
+    legacy.close();
+
+    const previous = { DATABASE_PATH: process.env.DATABASE_PATH };
+    process.env.DATABASE_PATH = dbPath;
+    try {
+      const service = new DatabaseService();
+      service.onModuleInit();
+      try {
+        const columns = service
+          .all<{ name: string }>('PRAGMA table_info(offers)')
+          .map((c) => c.name);
+        expect(columns).toContain('hold_support');
+        expect(columns).toContain('facts_json');
+        const offer = service.get<{
+          hold_support: string;
+          facts_json: string | null;
+          title: string;
+        }>('SELECT * FROM offers WHERE id = ?', 'o1');
+        expect(offer?.title).toBe('Old offer');
+        expect(offer?.hold_support).toBe('provider');
+        // An older row keeps no facts: the card shows its prose, never a guess.
+        expect(offer?.facts_json).toBeNull();
+      } finally {
+        service.onModuleDestroy();
+      }
+    } finally {
+      if (previous.DATABASE_PATH === undefined) delete process.env.DATABASE_PATH;
+      else process.env.DATABASE_PATH = previous.DATABASE_PATH;
+    }
+  });
 });
