@@ -115,13 +115,22 @@ function ProviderOffer({
               {offer.holdNote}
             </p>
           ) : null}
-          <div className="provider-offer-actions">
-            <button type="button" className="btn-ghost" disabled={busy} onClick={onHold}>
-              <Clock3 size={14} aria-hidden="true" />
-              {busy ? 'Asking provider…' : 'Ask provider to hold'}
-            </button>
-            <span>Nothing will be purchased.</span>
-          </div>
+          {offer.holdSupport === 'unsupported' ? (
+            // The source quotes prices and has no hold endpoint. A button here
+            // would promise an action the vendor cannot perform.
+            <p className="provider-offer-hold" role="status">
+              This source quotes prices and does not hold them. Book it with the airline,
+              the hotel, or an agent. Nothing is purchased here.
+            </p>
+          ) : (
+            <div className="provider-offer-actions">
+              <button type="button" className="btn-ghost" disabled={busy} onClick={onHold}>
+                <Clock3 size={14} aria-hidden="true" />
+                {busy ? 'Asking provider…' : 'Ask provider to hold'}
+              </button>
+              <span>Nothing will be purchased.</span>
+            </div>
+          )}
         </>
       )}
     </article>

@@ -64,6 +64,7 @@ export class ConnectorsService {
     return [
       {
         providerId: `${name}-default`,
+        adapter: 'travelclaw',
         ...(baseUrl ? { baseUrl } : {}),
         ...(apiKey ? { apiKey } : {}),
       },
@@ -91,6 +92,8 @@ function toCredentials(provider: SearchProviderConfig): ConnectorCredentials {
   return {
     providerId: provider.id,
     ...(provider.name ? { providerName: provider.name } : {}),
+    adapter: provider.adapter,
+    ...(provider.cityCodes ? { cityCodes: provider.cityCodes } : {}),
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
   };

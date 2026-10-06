@@ -61,6 +61,7 @@ interface OfferRow {
   title: string;
   detail: string | null;
   hold: OfferRecord['hold'];
+  hold_support: OfferRecord['holdSupport'];
   hold_ref: string | null;
   hold_expires_at: string | null;
   hold_note: string | null;
@@ -421,9 +422,9 @@ export class TasksService {
         this.db.run(
           `INSERT INTO offers
             (id, session_id, task_id, kind, provider, provider_id, provider_base_url, provider_offer_id,
-             retrieved_at, currency, total_amount, title, detail, hold, hold_ref,
+             retrieved_at, currency, total_amount, title, detail, hold, hold_support, hold_ref,
              hold_expires_at, hold_note, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           task.session_id,
           task.id,
@@ -438,6 +439,7 @@ export class TasksService {
           offer.title,
           offer.detail,
           offer.hold,
+          offer.holdSupport,
           offer.holdRef,
           offer.holdExpiresAt,
           offer.holdNote,
@@ -728,6 +730,7 @@ function mapOffer(row: OfferRow): OfferRecord {
     title: row.title,
     detail: row.detail,
     hold: row.hold,
+    holdSupport: row.hold_support,
     holdRef: row.hold_ref,
     holdExpiresAt: row.hold_expires_at,
     holdNote: row.hold_note,

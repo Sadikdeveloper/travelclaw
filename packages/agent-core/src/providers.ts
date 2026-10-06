@@ -1,11 +1,15 @@
 import { z } from 'zod';
+import { adapterFor, type ProviderAdapterId } from './adapters';
+import type { FlightQueryInput, StayQueryInput } from './adapters';
 import type { DeskKind } from './desks';
 import {
   authHeaders,
   connectorBase,
   FetchTimeoutError,
   fetchWithTimeout,
+  NOT_JSON,
   providerHost,
+  readJson,
 } from './http';
 import { addDays, parseIsoDate } from './dates';
 import type { ConnectorCredentials, SearchMarket, ToolContext, TripHints } from './types';
@@ -25,10 +29,12 @@ import type { ConnectorCredentials, SearchMarket, ToolContext, TripHints } from 
  *    failure rather than rendered into a plausible-looking list.
  * 3. A hold exists only when the provider says one does, with a reference to
  *    point at. Anything weaker is an offer, labelled as an offer.
+ *
+ * Translation to a vendor's own API lives in `./adapters`. This file keeps the
+ * rules: it fans out, validates every candidate an adapter returns, and refuses a
+ * hold when the source behind an offer cannot confirm one.
  */
 
-/** A fare shop is a bigger question than a rate lookup, so it gets longer than a tool call. */
-const SEARCH_TIMEOUT_MS = 9000;
 const HOLD_TIMEOUT_MS = 9000;
 
 /** How many offers a desk keeps from one search. The provider's own order is kept. */
@@ -74,6 +80,14 @@ export interface ProviderOffer {
   holdExpiresAt: string | null;
   /** Set when the provider sent hold-shaped details we refused to believe. */
   holdNote: string | null;
+  /** Which built-in adapter reached this source. */
+  adapter: ProviderAdapterId;
+  /**
+   * Whether the source behind this offer can confirm a hold at all. A vendor
+   * that only quotes prices is `unsupported`, and the desk says so instead of
+   * offering a button that would fail.
+   */
+  holdSupport: 'provider' | 'unsupported';
 }
 
 export interface ProviderSearchSource {
@@ -81,6 +95,9 @@ export interface ProviderSearchSource {
   provider: string;
   /** Private endpoint identity; never included in the traveler-facing offer type. */
   providerBaseUrl: string;
+  /** Which built-in adapter reached this source. */
+  adapter: ProviderAdapterId;
+  holdSupport: 'provider' | 'unsupported';
   ok: boolean;
   retrievedAt: string | null;
   offerCount: number;
@@ -109,7 +126,11 @@ export type ProviderFailureReason =
   | 'http_error'
   | 'timeout'
   | 'network_error'
-  | 'bad_payload';
+  | 'bad_payload'
+  /** The source cannot be asked this question — it needs a code the desk lacks. */
+  | 'bad_query'
+  /** This source has no way to do what was asked, such as confirm a hold. */
+  | 'unsupported';
 
 export interface ProviderSearchFailed {
   ok: false;
@@ -200,11 +221,6 @@ const providerOfferSchema = z.object({
   hold: z.unknown().nullish(),
 });
 
-const searchPayloadSchema = z.object({
-  provider: z.string().trim().min(1).max(80).nullish(),
-  offers: z.array(z.unknown()).max(50),
-});
-
 export function flightQueryFrom(text: string, hints: TripHints): QueryDraft<FlightQuery> {
   const route = routeFromText(text);
   const origin = cleanCity(hints.origin ?? route?.origin);
@@ -292,35 +308,23 @@ export async function searchFlights(
   query: FlightQuery,
   ctx: ToolContext,
 ): Promise<ProviderSearchResult> {
-  const params = new URLSearchParams({
-    origin: query.origin,
-    destination: query.destination,
-    departDate: query.departDate,
-    travelers: String(query.travelers),
-  });
-  if (query.returnDate) params.set('returnDate', query.returnDate);
-  addMarketParams(params, query);
-  return search(FLIGHT_SLOT, '/search/flights', params, ctx);
+  return search(FLIGHT_SLOT, query, ctx);
 }
 
 export async function searchStays(
   query: StayQuery,
   ctx: ToolContext,
 ): Promise<ProviderSearchResult> {
-  const params = new URLSearchParams({
-    destination: query.destination,
-    checkIn: query.checkIn,
-    checkOut: query.checkOut,
-    travelers: String(query.travelers),
-  });
-  addMarketParams(params, query);
-  return search(STAY_SLOT, '/search/stays', params, ctx);
+  return search(STAY_SLOT, query, ctx);
 }
 
-function addMarketParams(params: URLSearchParams, market: SearchMarket): void {
-  if (market.bookerCountry) params.set('bookerCountry', market.bookerCountry);
-  if (market.currency) params.set('currency', market.currency);
-  if (market.language) params.set('language', market.language);
+/** Only the market keys the message or the operator default actually supplied. */
+function marketOf(query: SearchMarket): SearchMarket {
+  return {
+    ...(query.bookerCountry ? { bookerCountry: query.bookerCountry } : {}),
+    ...(query.currency ? { currency: query.currency } : {}),
+    ...(query.language ? { language: query.language } : {}),
+  };
 }
 
 /**
@@ -359,6 +363,17 @@ export async function requestProviderHold(
     return refused(
       'provider_changed',
       `The provider changed since this offer was retrieved. Re-search before asking for a hold.`,
+    );
+  }
+  // A vendor that only quotes prices has no hold endpoint to call. Sending the
+  // offer id anywhere else would be asking a different question than the
+  // traveler asked, so the desk says what this source is instead.
+  const holdAdapter = adapterFor(target.adapter);
+  if (!holdAdapter || holdAdapter.hold !== 'provider') {
+    const source = holdAdapter?.label ?? 'this source';
+    return refused(
+      'unsupported',
+      `${source} quotes prices and does not confirm holds, so this stays an offer. Nothing was purchased.`,
     );
   }
   if (!target.apiKey) {
@@ -458,6 +473,7 @@ interface ProviderTarget {
   providerName?: string;
   baseUrl: string;
   apiKey?: string;
+  adapter?: string;
 }
 
 function providerCredentials(slot: DeskKind, ctx: ToolContext) {
@@ -478,6 +494,7 @@ function findProviderTarget(
     providerName: credential.providerName?.trim() || undefined,
     baseUrl: connectorBase(credential.baseUrl, ''),
     apiKey: credential.apiKey,
+    adapter: credential.adapter,
   }));
   if (!providerId && !savedBase) return targets[0];
 
@@ -500,8 +517,7 @@ function findProviderTarget(
 
 async function search(
   slot: DeskKind,
-  path: string,
-  params: URLSearchParams,
+  query: FlightQuery | StayQuery,
   ctx: ToolContext,
 ): Promise<ProviderSearchResult> {
   const failed = (
@@ -524,9 +540,10 @@ async function search(
     return failed('no_key', 'This desk has no way to call out.');
   }
 
+  const market = marketOf(query);
   const attempts = await Promise.all(
     credentials.map((credential, index) =>
-      searchOneProvider(slot, path, params, credential, index, ctx),
+      searchOneProvider(slot, query, market, credential, index, ctx),
     ),
   );
   const successful = attempts.filter((attempt) => attempt.source.ok);
@@ -567,102 +584,88 @@ async function search(
 
 async function searchOneProvider(
   slot: DeskKind,
-  path: string,
-  params: URLSearchParams,
+  query: FlightQuery | StayQuery,
+  market: SearchMarket,
   credential: ConnectorCredentials,
   index: number,
   ctx: ToolContext,
 ): Promise<ProviderAttempt> {
   const providerId = credential.providerId ?? `${slot}-${index + 1}`;
-  const base = connectorBase(credential.baseUrl, '');
+  const adapter = adapterFor(credential.adapter);
+  const base = connectorBase(credential.baseUrl, adapter?.defaultBaseUrl ?? '');
   const fallbackName =
     credential.providerName?.trim() ||
-    (base ? providerHost(base) : `${slot} source ${index + 1}`);
-  const failed = (reason: ProviderFailureReason, detail: string): ProviderAttempt => ({
-    source: {
-      providerId,
-      provider: fallbackName,
-      providerBaseUrl: base,
-      ok: false,
-      retrievedAt: null,
-      offerCount: 0,
-      dropped: 0,
-      limited: 0,
-      reason,
-      detail,
-    },
-    offers: [],
-  });
-
-  if (!credential.apiKey) return failed('no_key', 'no operator key is configured.');
-  if (!base) return failed('no_base_url', 'no usable base URL is configured.');
-
-  let response: Response;
-  try {
-    response = await fetchWithTimeout(
-      ctx.fetchImpl!,
-      `${base}${path}?${params}`,
-      SEARCH_TIMEOUT_MS,
-      {
-        headers: { ...authHeaders(credential.apiKey), Accept: 'application/json' },
-      },
-    );
-  } catch (error) {
-    if (error instanceof FetchTimeoutError) {
-      return failed('timeout', `did not answer within ${SEARCH_TIMEOUT_MS}ms.`);
-    }
-    return failed(
-      'network_error',
-      'could not be reached or redirected the request elsewhere.',
-    );
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    ctx.connectors?.rejected?.(slot);
-    return failed(`unauthorized`, `rejected the operator key (HTTP ${response.status}).`);
-  }
-  if (!response.ok) {
-    return failed('http_error', `answered HTTP ${response.status}.`);
-  }
-
-  const body = await readJson(response);
-  if (body === NOT_JSON) {
-    return failed('bad_payload', 'answered with something that is not JSON.');
-  }
-  const payload = searchPayloadSchema.safeParse(body);
-  if (!payload.success) {
-    return failed('bad_payload', 'answered, but not with an offer list this desk reads.');
-  }
-
-  const provider = payload.data.provider ?? fallbackName;
-  const retrievedAt = ctx.now.toISOString();
+    (adapter && adapter.id !== 'travelclaw'
+      ? adapter.label
+      : base
+        ? providerHost(base)
+        : `${slot} source ${index + 1}`);
   const source: ProviderSearchSource = {
     providerId,
-    provider,
+    provider: fallbackName,
     providerBaseUrl: base,
-    ok: true,
-    retrievedAt,
+    adapter: adapter?.id ?? 'travelclaw',
+    holdSupport: adapter?.hold ?? 'provider',
+    ok: false,
+    retrievedAt: null,
     offerCount: 0,
     dropped: 0,
     limited: 0,
   };
+  const failed = (reason: ProviderFailureReason, detail: string): ProviderAttempt => ({
+    source: { ...source, reason, detail },
+    offers: [],
+  });
+
+  if (!adapter) {
+    // Config refuses an unknown adapter at startup; this is the direct-caller path.
+    return failed('unsupported', 'names a provider adapter this build does not have.');
+  }
+  if (!adapter.slots.includes(slot)) {
+    return failed(
+      'unsupported',
+      `is a ${adapter.slots.join(' and ')} source and was asked for a ${slot} search.`,
+    );
+  }
+  if (!credential.apiKey) return failed('no_key', 'no operator key is configured.');
+  if (!base) return failed('no_base_url', 'no usable base URL is configured.');
+
+  const outcome = await adapter.search(
+    {
+      kind: slot,
+      query: query as FlightQueryInput | StayQueryInput,
+      market,
+    },
+    { credential, fetchImpl: ctx.fetchImpl!, now: ctx.now, tool: ctx },
+  );
+  if (!outcome.ok) return failed(outcome.reason, outcome.detail);
+
+  const provider = outcome.provider ?? fallbackName;
+  const retrievedAt = ctx.now.toISOString();
+  const okSource: ProviderSearchSource = {
+    ...source,
+    provider,
+    ok: true,
+    retrievedAt,
+    dropped: outcome.dropped ?? 0,
+  };
   const offers: ProviderOffer[] = [];
-  for (const raw of payload.data.offers) {
+  for (const raw of outcome.offers) {
     const parsed = providerOfferSchema.safeParse(raw);
     if (!parsed.success) {
       // An offer with no price the provider reported is not an offer. Dropping it
       // beats filling the gap with a number nobody said.
-      source.dropped += 1;
+      okSource.dropped += 1;
       continue;
     }
     if (offers.length >= MAX_OFFERS_PER_SEARCH) {
-      source.limited += 1;
+      okSource.limited += 1;
       continue;
     }
-    offers.push(normalizeOffer(parsed.data, slot, source));
+    offers.push(normalizeOffer(parsed.data, slot, okSource));
   }
-  source.offerCount = offers.length;
-  return { source, offers };
+  okSource.offerCount = offers.length;
+  return { source: okSource, offers };
 }
 
 function roundRobin<T>(groups: T[][], limit: number): T[] {
@@ -712,6 +715,8 @@ function normalizeOffer(
     holdRef: hold.ref,
     holdExpiresAt: hold.expiresAt,
     holdNote: hold.note,
+    adapter: source.adapter,
+    holdSupport: source.holdSupport,
   };
 }
 
@@ -781,16 +786,6 @@ function readHold(raw: unknown): {
 
 function refused(reason: ProviderHoldResult['reason'], note: string): ProviderHoldResult {
   return { confirmed: false, ref: null, expiresAt: null, reason, note };
-}
-
-const NOT_JSON = Symbol('not-json');
-
-async function readJson(response: Response): Promise<unknown | typeof NOT_JSON> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return NOT_JSON;
-  }
 }
 
 /** Date strings the traveler actually wrote, in the order they appeared. */

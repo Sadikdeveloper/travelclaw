@@ -4,7 +4,8 @@ Work in this order. Later tasks assume the earlier ones exist. Pick the first un
 
 This is an independent travel desk inspired by the OpenClaw monorepo idea (one gateway, workspace markdown, tools, channels, a chat UI). It is not a fork and not affiliated with OpenClaw. Skills, as markdown procedures, remain deferred pending the reviewed-workflow design in #25. Tools are functions we register. The traveler does not see a tool catalog.
 
-Checked on 2026-10-06, while adding the live turn and the read-only web tools.
+Checked on 2026-10-06, while adding the live turn, the read-only web tools, and the built-in
+vendor adapters (`serpapi`, `flightapi`) behind the provider lists.
 
 ## Done
 
@@ -31,6 +32,9 @@ Without a configured search source, flight and stay requests remain ordinary cha
 - [x] **Pairing auth.** Add a device token for non-loopback clients before any public deploy. Account sign-in does not replace this.
 - [x] **SQLite FTS memory search.** An FTS5 index over `memory_notes`, kept in step by triggers and reconciled on boot. Ranking is `bm25()` with the title weighted three to one, times a bounded recency factor; the kind filter stays. The prompt searches with the traveler's message instead of taking the last twelve notes, inside the same budget. Search stays local: no embeddings, no network. See [Memory](architecture.md#memory).
 - [x] **Per-agent workspace.** Extra agents share the desk files. Give each agent `workspace/agents/<id>/`. Each file falls back to the shared one when the agent folder has no override, `GET /api/workspace?agentId=` names the file each slot reads, and an agent id that tries to climb out of the workspace is refused.
+- [x] **Built-in vendor adapters.** `serpapi` (Google Flights and Google Hotels) and `flightapi` (one-way and round-trip) behind the same provider lists, with an `adapter` field, operator `cityCodes` aliases, and a `holdSupport: unsupported` disclosure for vendors that only quote prices. Arrived after the provider contract; see [provider adapters](provider-adapters.md#adding-one).
+- [ ] **More search from the current vendors.** Multi-city (FlightAPI.io `/multitrip`, SerpApi `type=3`), SerpApi booking options and price insights, Google Flights Deals for flexible dates, hotel property details, and the airport-facts tool. Each one is scoped in [What grows next](provider-adapters.md#what-grows-next).
+- [ ] **Restaurant desk.** Places first (a live source for the existing places tool), then a table hold only from a vendor that confirms one with a reference, then a `restaurant` slot. See [Restaurants](provider-adapters.md#restaurants).
 - [ ] **Telegram extension.** Implement `ChannelPlugin` behind `TELEGRAM_BOT_TOKEN`. Do not autoload unsigned code.
 - [ ] **Discord extension.** Same contract as Telegram.
 - [ ] **iCal export** for a planned trip.

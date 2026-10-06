@@ -301,6 +301,13 @@ export type TaskDecision = 'complete' | 'no' | 'still_working';
 export type OfferHoldState = 'none' | 'confirmed';
 
 /**
+ * Whether the source behind an offer can confirm a hold. `unsupported` is a
+ * vendor that only quotes prices: the desk refuses the ask instead of sending an
+ * offer id somewhere that cannot reserve anything.
+ */
+export type OfferHoldSupport = 'provider' | 'unsupported';
+
+/**
  * One offer a provider returned to a desk, stored as it arrived. Every number
  * here came from the provider: nothing is estimated, converted, or filled in.
  */
@@ -320,6 +327,8 @@ export interface OfferRecord {
   title: string;
   detail: string | null;
   hold: OfferHoldState;
+  /** `unsupported` sources never grow a hold button or a hold request. */
+  holdSupport: OfferHoldSupport;
   holdRef: string | null;
   holdExpiresAt: string | null;
   /** Set when the provider sent hold-shaped details it never confirmed. */

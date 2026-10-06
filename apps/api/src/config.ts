@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { isIP } from 'node:net';
 import proxyaddr from 'proxy-addr';
+import {
+  adapterFor,
+  isProviderAdapterId,
+  PROVIDER_ADAPTER_IDS,
+  type ProviderAdapterId,
+} from '@travelclaw/agent-core';
 import { GATEWAY_VERSION } from '@travelclaw/shared';
 
 export interface SearchProviderConfig {
@@ -10,8 +16,19 @@ export interface SearchProviderConfig {
   id: string;
   /** Friendly source label. A provider response can supply a more specific label. */
   name?: string;
+  /**
+   * Which built-in adapter translates to this source's own API. Defaults to
+   * `travelclaw`, the normalized contract an operator-hosted adapter implements.
+   */
+  adapter: ProviderAdapterId;
+  /** Filled from the adapter's documented origin when the entry omits one. */
   baseUrl: string;
   apiKey: string;
+  /**
+   * Operator aliases for a vendor that identifies places by code, not by name.
+   * Lowercased place → airport code or Google location id.
+   */
+  cityCodes?: Record<string, string>;
 }
 
 export interface AppConfig {
@@ -221,10 +238,12 @@ export function loadConfig(
     flightProviders: parseSearchProviders(
       env.TRAVELCLAW_FLIGHT_PROVIDERS_JSON,
       'TRAVELCLAW_FLIGHT_PROVIDERS_JSON',
+      'flight',
     ),
     stayProviders: parseSearchProviders(
       env.TRAVELCLAW_STAY_PROVIDERS_JSON,
       'TRAVELCLAW_STAY_PROVIDERS_JSON',
+      'stay',
     ),
     searchBookerCountry: normalizeCode(
       env.TRAVELCLAW_BOOKER_COUNTRY,
@@ -339,6 +358,7 @@ function normalizeCode(
 function parseSearchProviders(
   raw: string | undefined,
   envName: string,
+  slot: 'flight' | 'stay',
 ): SearchProviderConfig[] | null {
   if (raw === undefined || raw.trim() === '') return null;
 
@@ -362,7 +382,6 @@ function parseSearchProviders(
     const value = entry as Record<string, unknown>;
     const id = typeof value.id === 'string' ? value.id.trim() : '';
     const name = typeof value.name === 'string' ? value.name.trim() : undefined;
-    const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl.trim() : '';
     const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)) {
       throw new Error(`${envName}[${index}].id must be a short alphanumeric identifier.`);
@@ -371,12 +390,89 @@ function parseSearchProviders(
     if (name !== undefined && (!name || name.length > 80)) {
       throw new Error(`${envName}[${index}].name must be 1 to 80 characters.`);
     }
-    if (!baseUrl || baseUrl.length > 2048 || !apiKey || apiKey.length > 4096) {
-      throw new Error(`${envName}[${index}] needs a baseUrl and apiKey.`);
+
+    // An adapter is named, not implied: a typo must fail startup rather than
+    // silently fall back to a contract the vendor does not speak.
+    const requestedAdapter = typeof value.adapter === 'string' ? value.adapter.trim() : '';
+    if (requestedAdapter && !isProviderAdapterId(requestedAdapter)) {
+      throw new Error(
+        `${envName}[${index}].adapter must be one of: ${PROVIDER_ADAPTER_IDS.join(', ')}.`,
+      );
     }
+    const adapter = adapterFor(requestedAdapter || undefined)!;
+    if (!adapter.slots.includes(slot)) {
+      throw new Error(
+        `${envName}[${index}].adapter ${adapter.id} cannot serve a ${slot} search; it serves ${adapter.slots.join(', ')}.`,
+      );
+    }
+
+    const rawBaseUrl = typeof value.baseUrl === 'string' ? value.baseUrl.trim() : '';
+    const baseUrl = rawBaseUrl || adapter.defaultBaseUrl || '';
+    if (!baseUrl || baseUrl.length > 2048) {
+      throw new Error(
+        `${envName}[${index}] needs a baseUrl (this adapter has no default).`,
+      );
+    }
+    if (!apiKey || apiKey.length > 4096) {
+      throw new Error(`${envName}[${index}] needs an apiKey.`);
+    }
+
+    const cityCodes = parseCityCodes(value.cityCodes, envName, index);
     ids.add(id);
-    return { id, ...(name ? { name } : {}), baseUrl, apiKey };
+    return {
+      id,
+      ...(name ? { name } : {}),
+      adapter: adapter.id,
+      baseUrl,
+      apiKey,
+      ...(cityCodes ? { cityCodes } : {}),
+    };
   });
+}
+
+const MAX_CITY_CODES = 200;
+const CITY_CODE = /^[A-Z]{3}$/;
+const LOCATION_ID = /^\/[mg]\/[A-Za-z0-9_]+$/;
+
+/**
+ * Aliases are optional operator data: they let a vendor that needs a code be
+ * asked deterministically, without the desk guessing an airport from a city.
+ */
+function parseCityCodes(
+  raw: unknown,
+  envName: string,
+  index: number,
+): Record<string, string> | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${envName}[${index}].cityCodes must be an object of place → code.`);
+  }
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (!entries.length || entries.length > MAX_CITY_CODES) {
+    throw new Error(
+      `${envName}[${index}].cityCodes must contain 1 to ${MAX_CITY_CODES} aliases.`,
+    );
+  }
+  const codes: Record<string, string> = {};
+  for (const [place, value] of entries) {
+    const key = place.trim().toLowerCase();
+    const code = typeof value === 'string' ? value.trim() : '';
+    if (!key || key.length > 80) {
+      throw new Error(`${envName}[${index}].cityCodes has a place name that is too long.`);
+    }
+    if (CITY_CODE.test(code.toUpperCase())) {
+      codes[key] = code.toUpperCase();
+      continue;
+    }
+    if (LOCATION_ID.test(code)) {
+      codes[key] = code;
+      continue;
+    }
+    throw new Error(
+      `${envName}[${index}].cityCodes["${key}"] must be a 3-letter airport code or a Google location id.`,
+    );
+  }
+  return codes;
 }
 
 /** Fail startup closed instead of trusting arbitrary caller-supplied forwarding headers. */

@@ -154,6 +154,9 @@ CREATE TABLE IF NOT EXISTS offers (
   title TEXT NOT NULL,
   detail TEXT,
   hold TEXT NOT NULL DEFAULT 'none',
+  -- Whether the source behind this offer can confirm a hold at all. A value of
+  -- 'unsupported' means the vendor only quotes prices, so the UI offers no hold.
+  hold_support TEXT NOT NULL DEFAULT 'provider',
   hold_ref TEXT,
   hold_expires_at TEXT,
   hold_note TEXT,
