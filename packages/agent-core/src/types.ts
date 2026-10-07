@@ -56,6 +56,22 @@ export interface ToolResult<T = unknown> {
   /** Developer-facing reason, when a call was rejected. Never shown to the traveler. */
   warning?: string;
   source?: ToolSource;
+  /**
+   * Whether another attempt inside this same turn could plausibly succeed.
+   * `false` is a verdict about the cause, not a guess: a source that is not
+   * configured, a key the vendor refused, or a field only the traveler can
+   * supply will fail identically on a retry, so the turn asks for the missing
+   * piece instead of spending a round to learn that again. Absent means the
+   * tool did not say, and an unstated failure stays retryable.
+   */
+  retryable?: boolean;
+  /**
+   * Set when the desk refused to run the call at all — a per-turn limit, or a
+   * tool this turn already proved dead. Nothing executed, so this is not a
+   * failure and must not feed a failure count; it is the desk's own verdict,
+   * handed back so the model reads it as a stop signal rather than an error.
+   */
+  blocked?: boolean;
 }
 
 export interface OutlineDay {

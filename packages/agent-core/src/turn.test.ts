@@ -536,7 +536,7 @@ describe('the agentic turn', () => {
     expect(waiting[0]?.detail).toContain('Asking again in 1.2s');
   });
 
-  it('retries after a model announces an alternative instead of leaving that as the answer', async () => {
+  it('does not spend another round on a failure a retry cannot change', async () => {
     const replies: ModelCompletion[] = [
       {
         text: '',
@@ -548,12 +548,6 @@ describe('the agentic turn', () => {
         text: "The first search returned nothing. I'll try another query.",
         provider: 'openai',
         model: 'gpt-test',
-      },
-      {
-        text: '',
-        provider: 'openai',
-        model: 'gpt-test',
-        toolCalls: [call('web.search', { query: 'official Lisbon museum hours site' })],
       },
       {
         text: 'The search desk is offline, so no current hours could be checked.',
@@ -576,13 +570,89 @@ describe('the agentic turn', () => {
       },
     };
     const events: string[] = [];
+
+    const turn = await completeTurn(
+      request('Search the web for Lisbon museum opening hours'),
+      {
+        provider,
+        // Offline: no query of any shape would reach anything, so the failure
+        // is a fact about this desk rather than an experiment to repeat.
+        ctx,
+        toolRounds: 5,
+        onEvent: (event) => events.push(event.type),
+      },
+    );
+
+    // Search, then the pass that reads the refusal, then the grounded answer.
+    // The wasted second search the retry promise asked for never happens.
+    expect(calls).toHaveLength(3);
+    expect(calls[1].system).toContain('not successful, and a retry cannot change it');
+    expect(calls[1].system).toContain('do not call that tool again');
+    expect(calls[2].tools).toBeUndefined();
+    expect(turn.toolResults).toHaveLength(1);
+    expect(turn.toolResults[0].retryable).toBe(false);
+    expect(turn.reply).toBe(
+      'The search desk is offline, so no current hours could be checked.',
+    );
+    expect(turn.reply).not.toMatch(/I'll try another query/i);
+    // The promise reached the screen as it was written, so taking it back is
+    // visible rather than a silent swap.
+    expect(events).toContain('reply_reset');
+  });
+
+  it('retries after a model announces an alternative when a retry could differ', async () => {
+    const replies: ModelCompletion[] = [
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'Lisbon museum official opening hours' })],
+      },
+      {
+        text: "The first search returned nothing. I'll try another query.",
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.search', { query: 'official Lisbon museum hours site' })],
+      },
+      {
+        text: 'Neither search returned readable results, so the hours are unconfirmed.',
+        provider: 'openai',
+        model: 'gpt-test',
+      },
+    ];
+    const calls: ProviderCall[] = [];
+    const provider: ModelProvider & { calls: ProviderCall[] } = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      streams: true,
+      calls,
+      async complete(input) {
+        calls.push(input);
+        const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
+        if (reply.text) input.onDelta?.({ text: reply.text });
+        return reply;
+      },
+    };
+    // Online, and the page simply held no readable results: a different query is
+    // a real experiment, so the announced retry is allowed to run.
+    const impl = (async () =>
+      new Response('<html><body>nothing parseable here</body></html>', {
+        status: 200,
+      })) as typeof fetch;
+    const events: string[] = [];
     const liveReasoning: string[] = [];
 
     const turn = await completeTurn(
       request('Search the web for Lisbon museum opening hours'),
       {
         provider,
-        ctx,
+        ctx: { now: new Date('2026-10-06T09:00:00Z'), network: true, fetchImpl: impl },
         toolRounds: 5,
         onEvent: (event) => {
           events.push(event.type);
@@ -602,7 +672,7 @@ describe('the agentic turn', () => {
     expect(turn.toolResults).toHaveLength(2);
     expect(turn.toolResults.every((result) => !result.ok)).toBe(true);
     expect(turn.reply).toBe(
-      'The search desk is offline, so no current hours could be checked.',
+      'Neither search returned readable results, so the hours are unconfirmed.',
     );
     expect(turn.reply).not.toMatch(/I'll try another query/i);
   });

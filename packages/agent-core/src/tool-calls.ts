@@ -25,9 +25,28 @@ export interface ToolPlan {
   calls: PlannedToolCall[];
   /** Calls that never ran: unknown tool names, or arguments that did not validate. */
   rejected: ToolResult[];
+  /**
+   * Calls the desk refused before running them: a per-turn limit was reached, or
+   * this turn already proved the tool dead. Kept apart from `rejected` because
+   * nothing was wrong with the call itself — it is a verdict, not a malformed
+   * request, and it is shown to the model either way.
+   */
+  blocked: ToolResult[];
   /** Calls an earlier pass of this same turn already ran, and was not repeated. */
   repeated: number;
 }
+
+/**
+ * A per-turn ceiling for a tool that is cheap to call, easy to loop on, and
+ * never the source of a price. Hermes caps `web_search` for the same reason and
+ * with the same remedy: at the limit the call is refused with a sentence that
+ * says what to do instead, so a model that wanted to search again answers from
+ * what it already has. Three executions a turn is the whole budget; this stops
+ * one tool from spending it on the same kind of page three times.
+ */
+export const TOOL_CALL_LIMITS: Record<string, number> = {
+  'web.search': 2,
+};
 
 /**
  * The identity of a call inside one turn: the tool, and the arguments it was
@@ -46,6 +65,11 @@ export function toolCallKey(name: string, args: string | undefined): string {
  *
  * `remaining` is what is left of the ceiling when an earlier pass already ran
  * tools; without it the ceiling is the whole turn's budget.
+ *
+ * Two refusals happen here rather than in the tool: a call past a tool's
+ * per-turn limit, and a call to a tool this turn already failed for a reason a
+ * retry cannot fix. Both come back as a `blocked` result carrying a sentence for
+ * the model, which is how a loop gets named instead of merely starved.
  */
 export function planToolCalls(input: {
   text: string;
@@ -56,6 +80,8 @@ export function planToolCalls(input: {
   ran?: string[];
   /** Names of tools already run earlier in this turn, whatever they were asked. */
   ranTools?: string[];
+  /** Tools that failed for a reason a retry cannot fix, with that reason. */
+  dead?: Record<string, string>;
 }): ToolPlan {
   const ceiling = Math.max(
     0,
@@ -63,11 +89,17 @@ export function planToolCalls(input: {
   );
   const calls: PlannedToolCall[] = [];
   const rejected: ToolResult[] = [];
+  const blocked: ToolResult[] = [];
   const executedKeys = new Set<string>(input.ran ?? []);
   const executedNames = new Set<string>(input.ranTools ?? []);
   const rejectedNames = new Set<string>();
   let repeated = 0;
-  if (!ceiling) return { calls, rejected, repeated };
+  if (!ceiling) return { calls, rejected, blocked, repeated };
+
+  /** Executions of one tool this turn: the ones that ran, plus the ones queued here. */
+  const used = (name: string): number =>
+    (input.ranTools?.filter((ran) => ran === name).length ?? 0) +
+    calls.filter((call) => call.name === name).length;
 
   for (const call of input.modelCalls) {
     if (calls.length >= ceiling) break;
@@ -91,6 +123,28 @@ export function planToolCalls(input: {
       continue;
     }
     if (rejectedNames.has(tool.name)) continue;
+    const deadReason = input.dead?.[tool.name];
+    if (deadReason) {
+      blocked.push(
+        blockedCall({
+          name: tool.name,
+          summary: `Blocked ${tool.name}: it already failed this turn for a reason a retry cannot fix — ${deadReason} Ask the traveler for what is missing, or state the limit plainly, instead of calling it again.`,
+          warning: `${tool.name} is terminal this turn: ${deadReason}`,
+        }),
+      );
+      continue;
+    }
+    const limit = TOOL_CALL_LIMITS[tool.name];
+    if (limit !== undefined && used(tool.name) >= limit) {
+      blocked.push(
+        blockedCall({
+          name: tool.name,
+          summary: `Blocked ${tool.name}: this turn has already run it ${limit} time${limit === 1 ? '' : 's'}, which is the per-turn limit. This looks like a loop. Answer from the results already in context, and say plainly what they do not establish.`,
+          warning: `${tool.name} reached its per-turn limit of ${limit}`,
+        }),
+      );
+      continue;
+    }
     const parsed = parseToolArgs(tool, call.arguments);
     if (!parsed.ok) {
       rejectedNames.add(tool.name);
@@ -121,12 +175,17 @@ export function planToolCalls(input: {
     // A call that already ran is not run twice. A rejected model call is not
     // "already run": the router may cover it from the traveler's own words.
     if (!tool || executedNames.has(tool.name)) continue;
+    // A router pick is the desk's own choice, so a limit or a dead tool is
+    // dropped quietly: there is no request from the traveler to answer back to.
+    if (input.dead?.[name]) continue;
+    const limit = TOOL_CALL_LIMITS[name];
+    if (limit !== undefined && used(name) >= limit) continue;
     executedNames.add(tool.name);
     executedKeys.add(toolCallKey(tool.name, undefined));
     calls.push({ source: 'router', name: tool.name, hints: {} });
   }
 
-  return { calls, rejected, repeated };
+  return { calls, rejected, blocked, repeated };
 }
 
 /**
@@ -150,7 +209,11 @@ export async function runToolPlan(
     );
   }
   const executed = new Set(results.map((result) => result.name));
-  return [...results, ...plan.rejected.filter((item) => !executed.has(item.name))];
+  return [
+    ...results,
+    ...plan.blocked,
+    ...plan.rejected.filter((item) => !executed.has(item.name)),
+  ];
 }
 
 /** Announce, run, announce — one tool, one place that knows how. */
@@ -200,4 +263,18 @@ function rejection(input: { name: string; summary: string; warning: string }): T
     warning: input.warning,
     source: 'model',
   };
+}
+
+/**
+ * A call the desk refused before running it. It reads as `ok: false` because
+ * there is no result, but `blocked` keeps it out of every failure count: the
+ * tool did not fail, the desk declined, and the sentence in `summary` is what
+ * tells the model what to do instead.
+ */
+function blockedCall(input: {
+  name: string;
+  summary: string;
+  warning: string;
+}): ToolResult {
+  return { ...rejection(input), blocked: true };
 }

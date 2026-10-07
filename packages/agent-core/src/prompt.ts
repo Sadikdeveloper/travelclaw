@@ -48,9 +48,18 @@ export function assemblePrompt(
   const trip = input.activeTrip
     ? `Active trip: ${input.activeTrip.title} in ${input.activeTrip.destination}, ${input.activeTrip.startDate} to ${input.activeTrip.endDate}, status ${input.activeTrip.status}.`
     : 'No active trip is open.';
+  // A result the desk closed — it refused the call, or the cause cannot change
+  // this turn — gets one extra rule. Without it a model reads "not successful"
+  // as an invitation to try the same dead path with new arguments.
+  const closed = tools.some(
+    (tool) => !tool.ok && (tool.blocked || tool.retryable === false),
+  );
+  const closedRule = closed
+    ? ' A result marked blocked, or marked as one a retry cannot change, is final for this turn: do not call that tool again. Ask for the detail only the traveler has, or state the limit plainly, and answer from what did run.'
+    : '';
   const toolBlock = options.toolCalling
     ? tools.length
-      ? `Results already returned this turn:\n\n${renderToolResults(tools)}\n\nUse the results to decide what is still needed. If a call failed or returned no useful data and a different query, source, or tool could help, make that call now. Do not merely tell the traveler that you will try another approach, and do not repeat an identical call. If no meaningful alternative remains or a traveler detail is missing, explain the limitation and ask a concise follow-up. Otherwise write the final reply now. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.`
+      ? `Results already returned this turn:\n\n${renderToolResults(tools)}\n\nUse the results to decide what is still needed. If a call failed or returned no useful data and a different query, source, or tool could help, make that call now.${closedRule} Do not merely tell the traveler that you will try another approach, and do not repeat an identical call. If no meaningful alternative remains or a traveler detail is missing, explain the limitation and ask a concise follow-up. Otherwise write the final reply now. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.`
       : 'No tool has run yet. Call the tools that fit this request, then wait for their results. Do not narrate an intended search or other action instead of calling its tool. Never invent a price, a weather number, an availability, an entry ruling, or an opening time.'
     : `${tools.length ? renderToolResults(tools) : 'No tool ran.'}\n\nNo more tool calls are available in this answer. Do not promise future work. State what the results do and do not establish, and ask for a missing detail only when one is needed.`;
 
@@ -75,9 +84,22 @@ function renderToolResults(tools: ToolResult[]): string {
   return tools
     .map(
       (tool) =>
-        `### ${tool.name} (${tool.ok ? 'ok' : 'not successful'})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
+        `### ${tool.name} (${resultState(tool)})\n${tool.summary}\n${JSON.stringify(tool.data)}`,
     )
     .join('\n\n');
+}
+
+/**
+ * Why a result is what it is, in the model's copy of it. Three states matter
+ * because they call for three different next moves: an answer to use, a
+ * different attempt, or no attempt at all.
+ */
+function resultState(tool: ToolResult): string {
+  if (tool.ok) return 'ok';
+  if (tool.blocked) return 'blocked by the desk, nothing ran';
+  return tool.retryable === false
+    ? 'not successful, and a retry cannot change it'
+    : 'not successful';
 }
 
 function section(title: string, body: string): string {

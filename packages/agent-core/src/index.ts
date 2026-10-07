@@ -92,7 +92,7 @@ export {
   weatherOutlook,
 } from './tools';
 export type { ToolDefinition, ToolRunHooks } from './tools';
-export { mergeHints, planToolCalls, runToolPlan } from './tool-calls';
+export { mergeHints, planToolCalls, runToolPlan, TOOL_CALL_LIMITS } from './tool-calls';
 export type { PlannedToolCall, ToolPlan } from './tool-calls';
 export {
   firstUrlIn,

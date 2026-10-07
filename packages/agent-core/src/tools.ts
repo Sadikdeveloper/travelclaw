@@ -450,6 +450,7 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
           ok: false,
           summary: `Web search did not return results: ${outcome.reason}`,
           data: null,
+          ...(outcome.retryable === false ? { retryable: false } : {}),
         };
       }
       const { data } = outcome;
@@ -923,6 +924,8 @@ function missingFareFields(name: string, missing: string[]): ToolResult {
     summary: `No source was called: the search still needs ${missing.join(', ')}. A web page is not a fare, so no price is quoted until those are known.`,
     data: null,
     warning: `${name}: missing ${missing.join(', ')}`,
+    // Only the traveler can supply these; the same call would fail identically.
+    retryable: false,
   };
 }
 
@@ -942,6 +945,7 @@ function offerSearchResult(
       data: null,
       // Developer-facing, and already scrubbed by the adapter: no key, no header.
       warning: `${kind} search failed: ${result.reason} (${result.detail})`,
+      retryable: !TERMINAL_FAILURE_REASONS.has(result.reason),
     };
   }
   const offers = result.offers.slice(0, MAX_OFFERS_PER_SEARCH).map(toSearchOffer);
@@ -1031,6 +1035,20 @@ function stayQueryLabel(query: StayQuery): string {
   const party = query.travelers === 1 ? '1 traveler' : `${query.travelers} travelers`;
   return `${query.destination}, ${query.checkIn} to ${query.checkOut}, ${party}`;
 }
+
+/**
+ * The refusals a retry cannot undo. Hermes splits its tools the same way — a
+ * failure that is a fact about the install is not an experiment to repeat — so
+ * a turn spends its remaining rounds on something that could differ: another
+ * source, another date, or a question back to the traveler.
+ */
+const TERMINAL_FAILURE_REASONS = new Set<ProviderFailureReason>([
+  'no_key',
+  'no_base_url',
+  'unauthorized',
+  'bad_query',
+  'unsupported',
+]);
 
 /** One traveler-facing sentence per way a source can refuse, no key in any of them. */
 const FARE_FAILURE: Record<ProviderFailureReason, string> = {
