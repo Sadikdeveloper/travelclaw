@@ -1,4 +1,4 @@
-import { authHeaders, connectorBase, fetchWithTimeout } from './http';
+import { authHeaders, connectorBase, fetchWithRetry, SEARCH_RETRY } from './http';
 import type { ToolContext } from './types';
 
 /**
@@ -107,11 +107,12 @@ async function searchConfiguredProvider(
     const url = new URL(`${base}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('count', String(count));
-    const response = await fetchWithTimeout(
+    const response = await fetchWithRetry(
       ctx.fetchImpl!,
       url.toString(),
       SEARCH_TIMEOUT_MS,
       { headers: { Accept: 'application/json', ...authHeaders(connector.apiKey) } },
+      { ...SEARCH_RETRY, signal: ctx.signal },
     );
     if (!response.ok) {
       if (response.status === 401 || response.status === 403)
@@ -186,7 +187,7 @@ async function searchDuckDuckGo(
   ctx: ToolContext,
 ): Promise<WebSearchResult[]> {
   try {
-    const response = await fetchWithTimeout(
+    const response = await fetchWithRetry(
       ctx.fetchImpl!,
       'https://html.duckduckgo.com/html/',
       SEARCH_TIMEOUT_MS,
@@ -200,6 +201,7 @@ async function searchDuckDuckGo(
         body: new URLSearchParams({ q: query }).toString(),
         redirect: 'error',
       },
+      { ...SEARCH_RETRY, signal: ctx.signal },
     );
     if (!response.ok) return [];
     const html = (await response.text()).slice(0, 600_000);
@@ -268,7 +270,7 @@ export async function webFetch(rawUrl: string, ctx: ToolContext): Promise<WebFet
     };
   }
   try {
-    const response = await fetchWithTimeout(
+    const response = await fetchWithRetry(
       ctx.fetchImpl,
       url.toString(),
       FETCH_TIMEOUT_MS,
@@ -279,6 +281,7 @@ export async function webFetch(rawUrl: string, ctx: ToolContext): Promise<WebFet
         },
         redirect: 'error',
       },
+      { ...SEARCH_RETRY, signal: ctx.signal },
     );
     if (!response.ok) {
       return { ok: false, reason: `That page answered HTTP ${response.status}.` };

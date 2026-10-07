@@ -9,6 +9,7 @@ import type {
   ModelProvider,
   ModelToolCall,
   ModelToolSpec,
+  TurnEvent,
   TurnRequest,
 } from './types';
 
@@ -454,6 +455,78 @@ describe('the agentic turn', () => {
     ]);
     expect(turn.reply).toBe('November is cool, quiet, and wet. Pack a shell.');
     expect(calls).toContain('https://example.org/lisbon');
+  });
+
+  it('hands the tools the turn’s Stop, so a stopped turn stops the call', async () => {
+    const provider = scriptedProvider([
+      {
+        text: '',
+        provider: 'openai',
+        model: 'gpt-test',
+        toolCalls: [call('web.fetch', { url: 'https://example.org/lisbon' })],
+      },
+      { text: 'The page would not load.', provider: 'openai', model: 'gpt-test' },
+    ]);
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const abortedWithIt: boolean[] = [];
+    const impl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal ?? undefined;
+      if (signal && signals.length === 0) {
+        // Stop the turn mid-call. The signal the tool was given has to follow
+        // it, or a stopped turn keeps a vendor call — and a retry — alive.
+        controller.abort();
+        abortedWithIt.push(signal.aborted);
+      }
+      signals.push(signal);
+      return new Response('upstream error', { status: 503 });
+    }) as typeof fetch;
+
+    // A stopped turn ends the turn loop itself; what is under test here is
+    // what happened to the call that was already in flight.
+    await expect(
+      completeTurn(request('What is Lisbon like in November?'), {
+        provider,
+        ctx: { now: new Date('2026-10-06T09:00:00Z'), network: true, fetchImpl: impl },
+        signal: controller.signal,
+        toolRounds: 1,
+      }),
+    ).rejects.toBeTruthy();
+
+    expect(abortedWithIt).toEqual([true]);
+    // The page answered 503, which is normally worth another ask. Not after
+    // Stop: the retry is abandoned while it is still this turn's call.
+    expect(signals).toHaveLength(1);
+  });
+
+  it('shows the wait when the model is going to ask again', async () => {
+    // A provider that waits before its first answer, the way a rate limit does.
+    const provider: ModelProvider = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      async complete(input) {
+        input.onWait?.({ attempt: 1, delayMs: 1_200, reason: 'The model did not answer.' });
+        return { text: 'November is cool and wet.', provider: 'openai', model: 'gpt-test' };
+      },
+    };
+    const events: TurnEvent[] = [];
+
+    await completeTurn(request('What is Lisbon like in November?'), {
+      provider,
+      ctx,
+      onEvent: (event) => events.push(event),
+    });
+
+    const waiting = events.filter(
+      (event): event is Extract<TurnEvent, { type: 'stage' }> =>
+        event.type === 'stage' && event.id === 'retry',
+    );
+    // One note for the wait and one closing it: a traveler can see the desk is
+    // waiting instead of watching a turn that looks hung, and the closed step
+    // does not spin forever in a trail that has finished.
+    expect(waiting.map((stage) => stage.state)).toEqual(['running', 'done']);
+    expect(waiting[0]?.detail).toContain('Asking again in 1.2s');
   });
 
   it('retries after a model announces an alternative instead of leaving that as the answer', async () => {

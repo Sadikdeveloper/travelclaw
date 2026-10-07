@@ -3,10 +3,11 @@ import {
   authHeaders,
   connectorBase,
   FetchTimeoutError,
-  fetchWithTimeout,
+  fetchWithRetry,
   NOT_JSON,
   readJson,
   scrubSecrets,
+  SEARCH_RETRY,
   SEARCH_TIMEOUT_MS,
 } from '../http';
 import { parseIsoDate } from '../dates';
@@ -435,13 +436,14 @@ async function serpApiFetch(
 
   let response: Response;
   try {
-    response = await fetchWithTimeout(
+    response = await fetchWithRetry(
       ctx.fetchImpl,
       `${base}/search?${search}`,
       SEARCH_TIMEOUT_MS,
       {
         headers,
       },
+      { ...SEARCH_RETRY, signal: ctx.tool.signal },
     );
   } catch (error) {
     if (error instanceof FetchTimeoutError) {

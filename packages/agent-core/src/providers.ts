@@ -402,6 +402,12 @@ export async function requestProviderHold(
 
   let response: Response;
   try {
+    // Deliberately `fetchWithTimeout`, not `fetchWithRetry`. A hold changes
+    // state, and this desk has no idempotency key to offer the source, so a
+    // request that timed out may already have been honoured: retrying it can
+    // create a second hold the traveler never asked for, which is worse than
+    // one that did not go through. The reply says no hold exists either way,
+    // and the traveler can ask again — once — with a reference to point at.
     response = await fetchWithTimeout(
       ctx.fetchImpl,
       `${target.baseUrl}/holds`,

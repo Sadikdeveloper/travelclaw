@@ -1,4 +1,37 @@
 export { parseIsoDate, addDays, eachDate, inclusiveDayCount } from './dates';
+export {
+  abortError,
+  backoffMs,
+  DEFAULT_RETRY_POLICY,
+  isAbortError,
+  retryPolicy,
+  sleep,
+  withRetry,
+} from './retry';
+export type {
+  RetryAttemptContext,
+  RetryAttemptInfo,
+  RetryOutcome,
+  RetryPolicy,
+  WithRetryOptions,
+} from './retry';
+export {
+  canReplayBody,
+  fetchWithRetry,
+  fetchWithTimeout,
+  FetchTimeoutError,
+  HttpStatusError,
+  isRetryableStatus,
+  isTransientFetchError,
+  LOOKUP_RETRY,
+  pacingMs,
+  readPacingHint,
+  RETRYABLE_STATUSES,
+  retryAfterHintMs,
+  retryAfterMs,
+  SEARCH_RETRY,
+} from './http';
+export type { FetchRetryOptions } from './http';
 export { DESTINATIONS, findDestination, findDestinationByName } from './destinations';
 export { deskName, planAgentDesks } from './desks';
 export type { DeskKind } from './desks';

@@ -3,9 +3,10 @@ import {
   authHeaders,
   connectorBase,
   FetchTimeoutError,
-  fetchWithTimeout,
+  fetchWithRetry,
   NOT_JSON,
   readJson,
+  SEARCH_RETRY,
   SEARCH_TIMEOUT_MS,
 } from '../http';
 import type { FlightQueryInput, ProviderAdapter, StayQueryInput } from './types';
@@ -53,11 +54,12 @@ export const travelclawAdapter: ProviderAdapter = {
     const path = input.kind === 'flight' ? '/search/flights' : '/search/stays';
     let response: Response;
     try {
-      response = await fetchWithTimeout(
+      response = await fetchWithRetry(
         ctx.fetchImpl,
         `${base}${path}?${params}`,
         SEARCH_TIMEOUT_MS,
         { headers: { ...authHeaders(ctx.credential.apiKey), Accept: 'application/json' } },
+        { ...SEARCH_RETRY, signal: ctx.tool.signal },
       );
     } catch (error) {
       if (error instanceof FetchTimeoutError) {

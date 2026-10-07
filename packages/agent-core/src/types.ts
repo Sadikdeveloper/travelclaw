@@ -302,6 +302,14 @@ export interface ModelProvider {
     signal?: AbortSignal;
     /** Called as the provider streams. Ignored by a provider that cannot stream. */
     onDelta?: (delta: ModelDelta) => void;
+    /**
+     * Called while the call is waiting to be tried again, with how long it will
+     * wait. The desk shows one indicator for the whole wait: a pause the
+     * traveler did not ask for is a pause the traveler should be able to see,
+     * and it stays cancellable throughout. A call that never retries never
+     * calls this.
+     */
+    onWait?: (info: { attempt: number; delayMs: number; reason: string }) => void;
   }): Promise<ModelCompletion>;
 }
 
@@ -345,6 +353,12 @@ export interface ToolContext {
   network: boolean;
   fetchImpl?: typeof fetch;
   connectors?: ToolConnectors;
+  /**
+   * The turn's Stop. Passed to every call a tool makes so a retry cannot
+   * outlive the traveler who asked for it — a stopped turn ends the wait
+   * between two attempts as well as the attempt itself.
+   */
+  signal?: AbortSignal;
 }
 
 export interface JsonSchemaObject {

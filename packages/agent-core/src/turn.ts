@@ -104,6 +104,13 @@ export async function completeTurn(
     state: 'done',
   });
 
+  // The tools this turn runs share its Stop, so a retried vendor call ends when
+  // the traveler ends the turn.
+  const ctx: ToolContext = deps.signal ? { ...deps.ctx, signal: deps.signal } : deps.ctx;
+  // And a wait the model asks for is shown as a wait, not as a pause in which
+  // nothing appears to be happening.
+  const provider = waitingOutLoud(deps.provider, emit);
+
   const toolRounds = Math.max(1, Math.min(deps.toolRounds ?? 1, 5));
   const routerOnly = command?.name === 'remember' || deps.provider.usesTools !== true;
   // Did the answer reach the screen as the model wrote it? A round that turned
@@ -121,7 +128,7 @@ export async function completeTurn(
         : 'Nothing on this desk needed a tool.',
       state: 'done',
     });
-    toolResults = await runTools(text, routerNames, deps.ctx, toolHooks(emit, 0));
+    toolResults = await runTools(text, routerNames, ctx, toolHooks(emit, 0));
   } else {
     const looped = await runModelRounds({
       input,
@@ -131,6 +138,8 @@ export async function completeTurn(
       history,
       text,
       routerNames,
+      ctx,
+      provider,
       rounds: toolRounds,
       answered,
     });
@@ -181,7 +190,7 @@ export async function completeTurn(
   });
 
   deps.signal?.throwIfAborted();
-  const completion = await deps.provider.complete({
+  const completion = await provider.complete({
     system: assemblePrompt(input, toolResults, { toolCalling: false }),
     history,
     user: userText,
@@ -231,6 +240,10 @@ async function runModelRounds(input: {
   history: TurnRequest['history'];
   text: string;
   routerNames: string[];
+  /** The tool context, carrying this turn's Stop. */
+  ctx: ToolContext;
+  /** The provider, wrapped so a retry is visible while it waits. */
+  provider: ModelProvider;
   rounds: number;
   answered: { streamed: boolean };
 }): Promise<{ results: ToolResult[]; answered?: ModelCompletion }> {
@@ -246,7 +259,7 @@ async function runModelRounds(input: {
     deps.signal?.throwIfAborted();
     const first = round === 0;
     const roundStreamed = { streamed: false };
-    const completion = await deps.provider.complete({
+    const completion = await input.provider.complete({
       system: assemblePrompt(input.input, results, { toolCalling: true }),
       history: input.history,
       user: input.userText,
@@ -336,7 +349,7 @@ async function runModelRounds(input: {
       state: 'done',
     });
 
-    const roundResults = await runToolPlan(plan, text, deps.ctx, toolHooks(emit, index));
+    const roundResults = await runToolPlan(plan, text, input.ctx, toolHooks(emit, index));
     index += plan.calls.length;
     results.push(...roundResults);
     ran.push(...plan.calls.map((call) => toolCallKey(call.name, call.args)));
@@ -392,6 +405,54 @@ function toolHooks(emit: TurnEventSink, startIndex: number): ToolRunHooks {
       });
     },
   };
+}
+
+/**
+ * A model call that is going to wait and ask again says so, once, and closes
+ * the note when the answer lands. OpenClaw shows the same single transient
+ * indicator; a traveler who can see the desk is waiting does not press Stop or
+ * reload, and Stop keeps working throughout the wait anyway.
+ */
+function waitingOutLoud(provider: ModelProvider, emit: TurnEventSink): ModelProvider {
+  return {
+    ...provider,
+    complete: async (input) => {
+      let attempt = 0;
+      try {
+        return await provider.complete({
+          ...input,
+          onWait: (info) => {
+            attempt = info.attempt;
+            input.onWait?.(info);
+            emit({
+              type: 'stage',
+              id: 'retry',
+              label: 'Waiting to ask again',
+              detail: `${info.reason} Asking again in ${seconds(info.delayMs)}.`,
+              state: 'running',
+            });
+          },
+        });
+      } finally {
+        // Left open, the step would still be spinning in a trail that has
+        // finished.
+        if (attempt) {
+          emit({
+            type: 'stage',
+            id: 'retry',
+            label: 'Asked again',
+            detail: `Finished on attempt ${attempt + 1}.`,
+            state: 'done',
+          });
+        }
+      }
+    },
+  };
+}
+
+/** `1200` → `1.2s`, the way a person reads a wait. */
+function seconds(ms: number): string {
+  return `${Math.max(0.1, Math.round(ms / 100) / 10)}s`;
 }
 
 /**
