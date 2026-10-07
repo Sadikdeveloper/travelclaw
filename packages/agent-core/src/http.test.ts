@@ -5,6 +5,9 @@ import {
   fetchWithRetry,
   isRetryableStatus,
   isTransientFetchError,
+  pacingMs,
+  readPacingHint,
+  retryAfterHintMs,
   retryAfterMs,
 } from './http';
 
@@ -42,15 +45,16 @@ function hang() {
 }
 
 describe('isRetryableStatus', () => {
-  it.each([408, 425, 429, 500, 502, 503, 504])('retries HTTP %i', (status) => {
+  it.each([408, 409, 425, 429, 500, 502, 503, 504])('retries HTTP %i', (status) => {
     expect(isRetryableStatus(status)).toBe(true);
   });
 
-  it.each([400, 401, 403, 404, 409, 422])(
+  it.each([400, 401, 402, 403, 404, 422])(
     'answers HTTP %i instead of retrying it',
     (status) => {
-      // 401 and 403 in particular: a vendor that refused the key is not going to
-      // change its mind inside one turn, and retrying only spends the rate limit.
+      // 401 and 403 are authentication answers and 402 a billing one; OpenClaw
+      // keeps all three out of its transient retry budget, and so does this
+      // desk. None of them will change inside one turn.
       expect(isRetryableStatus(status)).toBe(false);
     },
   );
@@ -69,11 +73,65 @@ describe('retryAfterMs', () => {
     expect(retryAfterMs(response, now)).toBe(5_000);
   });
 
-  it('ignores a header it cannot read, and a date already in the past', () => {
+  it('reads the millisecond spelling', () => {
+    const response = json({}, 429, { 'retry-after-ms': '1500' });
+    expect(retryAfterMs(response)).toBe(1_500);
+  });
+
+  it('carries no wait when the header names none that is usable', () => {
     expect(retryAfterMs(json({}, 429, { 'Retry-After': 'soon' }))).toBeNull();
     expect(retryAfterMs(json({}, 429), Date.parse('2026-10-06T12:00:00Z'))).toBeNull();
+    // Zero, and a date already in the past, are not "retry now": an expired
+    // cooldown carries no information, and reading it as zero hot-loops the
+    // provider back to back.
+    expect(retryAfterMs(json({}, 429, { 'Retry-After': '0' }))).toBeNull();
     const past = json({}, 429, { 'Retry-After': 'Mon, 05 Oct 2026 12:00:00 GMT' });
-    expect(retryAfterMs(past, Date.parse('2026-10-06T12:00:00Z'))).toBe(0);
+    expect(retryAfterMs(past, Date.parse('2026-10-06T12:00:00Z'))).toBeNull();
+  });
+
+  it('prefers the headers, and reads the body only when they are silent', () => {
+    const headered = json({}, 429, { 'Retry-After': '2' });
+    expect(pacingMs(headered, 'please try again in 30s')).toBe(2_000);
+    expect(pacingMs(json({}, 429), 'please try again in 30s')).toBe(30_000);
+    expect(pacingMs(json({}, 429), 'no wait named here')).toBeNull();
+  });
+});
+
+describe('retryAfterHintMs', () => {
+  it.each([
+    ['please retry after 300ms', 300],
+    ['Rate limit reached. Retry after 3 seconds.', 3_000],
+    ['Please try again in 2s', 2_000],
+    ['quotaResetDelay: "1234ms"', 1_234],
+    ["{'resets_in_seconds': 90}", 90_000],
+    ['Your quota resets in 2h', 7_200_000],
+  ])('reads %s', (message, expected) => {
+    expect(retryAfterHintMs(message)).toBe(expected);
+  });
+
+  it('prefers an explicit retry over a quota window in the same message', () => {
+    // A body carrying both describes a short throttle inside a long window.
+    // The shorter, explicit wait is the one the provider is asking for.
+    expect(retryAfterHintMs('resets in 4h. Retry after 5s.')).toBe(5_000);
+  });
+
+  it('names no wait when none is named', () => {
+    expect(retryAfterHintMs('upstream error')).toBeNull();
+    expect(retryAfterHintMs('')).toBeNull();
+    expect(retryAfterHintMs(undefined)).toBeNull();
+  });
+});
+
+describe('readPacingHint', () => {
+  it('reads an error body only as far as it needs to', async () => {
+    const body = `${'x'.repeat(10_000)} try again in 1s`;
+    const capped = await readPacingHint(new Response(body, { status: 503 }), 2_048);
+    // The hint sits past the cap, so nothing is found — which is the point: a
+    // vendor that answers a 503 with a wall of text is not read to the end.
+    expect(capped).toHaveLength(2_048);
+    expect(retryAfterHintMs(capped)).toBeNull();
+    const full = await readPacingHint(new Response(body, { status: 503 }), 20_000);
+    expect(retryAfterHintMs(full)).toBe(1_000);
   });
 });
 
@@ -234,7 +292,7 @@ describe('fetchWithRetry', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('waits as long as the vendor asked, when that fits the budget', async () => {
+  it('waits as long as the vendor asked, even past its own backoff cap', async () => {
     const { fetchImpl, calls } = fetchResponding(
       json({}, 429, { 'Retry-After': '1' }),
       json({ ok: true }),
@@ -248,8 +306,35 @@ describe('fetchWithRetry', () => {
       {
         attempts: 2,
         baseDelayMs: 1,
-        maxDelayMs: 2_000,
-        deadlineMs: 5_000,
+        maxDelayMs: 100,
+        maxWaitMs: 5_000,
+        deadlineMs: 6_000,
+        jitter: 0,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(2);
+    // A 100ms backoff ceiling did not shorten a one-second ask.
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
+  });
+
+  it('reads the wait out of an error body when no header names one', async () => {
+    const { fetchImpl, calls } = fetchResponding(
+      json({ error: 'rate limited, please try again in 1s' }, 429),
+      json({ ok: true }),
+    );
+    const startedAt = Date.now();
+    const response = await fetchWithRetry(
+      fetchImpl,
+      'https://fares.example/search',
+      1_000,
+      {},
+      {
+        attempts: 2,
+        baseDelayMs: 1,
+        maxDelayMs: 100,
+        maxWaitMs: 5_000,
+        deadlineMs: 6_000,
         jitter: 0,
       },
     );
@@ -258,7 +343,7 @@ describe('fetchWithRetry', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
   });
 
-  it('gives up rather than waiting longer than it will ever wait', async () => {
+  it('gives up rather than sitting out a longer wait than it will take', async () => {
     // An hour is an answer, not a schedule: a desk that waits it out has
     // stopped serving the traveler in front of it.
     const { fetchImpl, calls } = fetchResponding(json({}, 429, { 'Retry-After': '3600' }));
@@ -271,6 +356,7 @@ describe('fetchWithRetry', () => {
         attempts: 3,
         baseDelayMs: 1,
         maxDelayMs: 900,
+        maxWaitMs: 2_000,
         jitter: 0,
       },
     );

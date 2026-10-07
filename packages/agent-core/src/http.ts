@@ -1,10 +1,4 @@
-import {
-  abortError,
-  retryPolicy,
-  withRetry,
-  type RetryPolicy,
-  type WithRetryOptions,
-} from './retry';
+import { abortError, withRetry, type RetryPolicy, type WithRetryOptions } from './retry';
 
 /**
  * The three things every connector call shares. Kept in one place so a tool and
@@ -150,6 +144,7 @@ export function providerHost(baseUrl: string): string {
  */
 export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([
   408, // request timeout
+  409, // conflict: OpenClaw's transient list; every call retried here is a read
   425, // too early: a TLS handshake retried before it was replayable
   429, // rate limited
   500,
@@ -178,19 +173,133 @@ export class HttpStatusError extends Error {
 }
 
 /**
- * `Retry-After` in ms: seconds, or an HTTP date. `null` when the header is
- * absent or cannot be read, `0` when the date it names has already passed. Not
- * clamped here — the caller decides how long it is willing to wait, and a
- * vendor that asks for an hour is answered by giving up, not by waiting.
+ * What the other end asked us to wait, in ms: `retry-after-ms` first (the
+ * millisecond spelling some gateways send), then `Retry-After` as seconds or an
+ * HTTP date.
+ *
+ * `null` when there is no usable wait — absent, unreadable, zero, or a date
+ * already in the past. An expired cooldown is not "retry now": Hermes treats it
+ * as no information at all, because reading it as a zero-second wait hot-loops
+ * the provider. The caller falls back to its own backoff instead.
  */
 export function retryAfterMs(response: Response, now = Date.now()): number | null {
-  const raw = response.headers?.get?.('retry-after');
-  if (typeof raw !== 'string' || !raw.trim()) return null;
-  const trimmed = raw.trim();
-  if (/^\d+$/.test(trimmed)) return Math.max(0, Number(trimmed) * 1000);
-  const at = Date.parse(trimmed);
+  const header = (name: string): string | null => {
+    const value = response.headers?.get?.(name);
+    return typeof value === 'string' ? value.trim() : null;
+  };
+  const milliseconds = header('retry-after-ms');
+  if (milliseconds !== null && /^\d+(?:\.\d+)?$/.test(milliseconds)) {
+    return positive(Number(milliseconds));
+  }
+  const seconds = header('retry-after');
+  if (seconds === null || !seconds) return null;
+  if (/^\d+(?:\.\d+)?$/.test(seconds)) return positive(Number(seconds) * 1_000);
+  const at = Date.parse(seconds);
   if (!Number.isFinite(at)) return null;
-  return Math.max(0, at - now);
+  return positive(at - now);
+}
+
+function positive(ms: number): number | null {
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+/**
+ * Free-text pacing hints, the way Hermes reads them out of provider error
+ * bodies: an explicit "retry after 300ms" wins over a quota's "resets in 4h",
+ * because a body carrying both describes a short throttle inside a long window
+ * and the shorter wait is the one the provider is actually asking for.
+ */
+const PACING_HINTS: Array<{
+  pattern: RegExp;
+  toMs: (match: RegExpMatchArray) => number | null;
+}> = [
+  {
+    pattern:
+      /retry(?:\s+after)?\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?)\b/i,
+    toMs: (match) => scale(match),
+  },
+  {
+    pattern:
+      /try\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?)\b/i,
+    toMs: (match) => scale(match),
+  },
+  {
+    pattern: /quotaResetDelay["'\s:]+(\d+(?:\.\d+)?)\s*(ms|s)\b/i,
+    toMs: (match) => scale(match),
+  },
+  {
+    pattern: /resets_in_seconds\W{1,4}(\d+(?:\.\d+)?)/i,
+    toMs: (match) => positive(Number(match[1]) * 1_000),
+  },
+  {
+    pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hours?)\b/i,
+    toMs: (match) => positive(Number(match[1]) * 3_600_000),
+  },
+];
+
+/** `(\d+)(ms|s)` → ms. The unit is required, so "retry after 5" is not a wait. */
+function scale(match: RegExpMatchArray): number | null {
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return null;
+  return positive(/^ms|milliseconds?$/i.test(match[2] ?? '') ? value : value * 1_000);
+}
+
+/**
+ * The wait a provider asked for in the prose of an error message or body, in
+ * ms, or `null` when it named none.
+ */
+export function retryAfterHintMs(message: string | null | undefined): number | null {
+  if (typeof message !== 'string' || !message) return null;
+  for (const hint of PACING_HINTS) {
+    const match = hint.pattern.exec(message);
+    if (!match) continue;
+    const ms = hint.toMs(match);
+    if (ms !== null) return ms;
+  }
+  return null;
+}
+
+/**
+ * A bounded peek at an error body, taken only to read a pacing hint out of it.
+ * Capped rather than `response.text()`, so a vendor that answers a 503 with a
+ * hundred megabytes cannot turn one retry into an outage. Never logged and
+ * never surfaced: providers echo request details in error bodies, and this
+ * desk's rule is that a vendor's message is reported as a shape failure, not
+ * repeated.
+ */
+export async function readPacingHint(
+  response: Response,
+  limit = 2_048,
+): Promise<string | null> {
+  const body = response.body;
+  if (!body) return null;
+  try {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    try {
+      while (text.length < limit) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    return text.slice(0, limit);
+  } catch {
+    return null;
+  }
+}
+
+/** The wait a response asked for: its headers first, then the prose of its body. */
+export function pacingMs(
+  response: Response,
+  body: string | null,
+  now?: number,
+): number | null {
+  return retryAfterMs(response, now) ?? retryAfterHintMs(body);
 }
 
 /**
@@ -228,11 +337,15 @@ export function canReplayBody(body: unknown): boolean {
   return false;
 }
 
-/** A rate or forecast lookup. Cheap, with a labeled desk fallback behind it. */
+/**
+ * A rate or forecast lookup. Cheap, with a labeled desk fallback behind it, so
+ * it will not sit long even if a vendor asks it to.
+ */
 export const LOOKUP_RETRY: Partial<RetryPolicy> = {
   attempts: 2,
   baseDelayMs: 120,
   maxDelayMs: 400,
+  maxWaitMs: 1_000,
   deadlineMs: 5_200,
 };
 
@@ -241,6 +354,7 @@ export const SEARCH_RETRY: Partial<RetryPolicy> = {
   attempts: 2,
   baseDelayMs: 250,
   maxDelayMs: 900,
+  maxWaitMs: 3_000,
   deadlineMs: 12_000,
 };
 
@@ -293,7 +407,10 @@ export async function fetchWithRetry(
       );
       if (retryOnStatus(response.status)) {
         last = response;
-        const wait = retryAfterMs(response);
+        // What the vendor asked for is worth reading before the body is
+        // dropped: a 429 that says "try again in 300ms" is naming the wait the
+        // desk is about to keep anyway.
+        const wait = pacingMs(response, await readPacingHint(response));
         await response.body?.cancel().catch(() => {});
         throw new HttpStatusError(response.status, wait);
       }
@@ -302,14 +419,8 @@ export async function fetchWithRetry(
     {
       ...retry,
       ...(attempts ? { attempts } : {}),
-      shouldRetry: (error) => {
-        if (error instanceof HttpStatusError) {
-          // A vendor that asks for longer than this desk will ever wait has
-          // answered: retrying sooner would be ignoring what it said.
-          return error.retryAfterMs === null || error.retryAfterMs <= policyMaxDelay(retry);
-        }
-        return isTransientFetchError(error);
-      },
+      shouldRetry: (error) =>
+        error instanceof HttpStatusError ? true : isTransientFetchError(error),
       delayFor: (error) =>
         error instanceof HttpStatusError ? error.retryAfterMs : undefined,
     },
@@ -320,8 +431,4 @@ export async function fetchWithRetry(
   // the call site already knows how to say which status came back.
   if (last) return last;
   throw outcome.error;
-}
-
-function policyMaxDelay(options: WithRetryOptions): number {
-  return retryPolicy(options).maxDelayMs;
 }

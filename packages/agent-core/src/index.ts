@@ -24,7 +24,10 @@ export {
   isRetryableStatus,
   isTransientFetchError,
   LOOKUP_RETRY,
+  pacingMs,
+  readPacingHint,
   RETRYABLE_STATUSES,
+  retryAfterHintMs,
   retryAfterMs,
   SEARCH_RETRY,
 } from './http';

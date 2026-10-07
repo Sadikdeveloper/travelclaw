@@ -9,6 +9,7 @@ import type {
   ModelProvider,
   ModelToolCall,
   ModelToolSpec,
+  TurnEvent,
   TurnRequest,
 } from './types';
 
@@ -496,6 +497,36 @@ describe('the agentic turn', () => {
     // The page answered 503, which is normally worth another ask. Not after
     // Stop: the retry is abandoned while it is still this turn's call.
     expect(signals).toHaveLength(1);
+  });
+
+  it('shows the wait when the model is going to ask again', async () => {
+    // A provider that waits before its first answer, the way a rate limit does.
+    const provider: ModelProvider = {
+      id: 'openai',
+      model: 'gpt-test',
+      usesTools: true,
+      async complete(input) {
+        input.onWait?.({ attempt: 1, delayMs: 1_200, reason: 'The model did not answer.' });
+        return { text: 'November is cool and wet.', provider: 'openai', model: 'gpt-test' };
+      },
+    };
+    const events: TurnEvent[] = [];
+
+    await completeTurn(request('What is Lisbon like in November?'), {
+      provider,
+      ctx,
+      onEvent: (event) => events.push(event),
+    });
+
+    const waiting = events.filter(
+      (event): event is Extract<TurnEvent, { type: 'stage' }> =>
+        event.type === 'stage' && event.id === 'retry',
+    );
+    // One note for the wait and one closing it: a traveler can see the desk is
+    // waiting instead of watching a turn that looks hung, and the closed step
+    // does not spin forever in a trail that has finished.
+    expect(waiting.map((stage) => stage.state)).toEqual(['running', 'done']);
+    expect(waiting[0]?.detail).toContain('Asking again in 1.2s');
   });
 
   it('retries after a model announces an alternative instead of leaving that as the answer', async () => {

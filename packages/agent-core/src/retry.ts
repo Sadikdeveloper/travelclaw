@@ -37,8 +37,17 @@ export interface RetryPolicy {
   attempts: number;
   /** Pause before the second try; each further try doubles it, capped by `maxDelayMs`. */
   baseDelayMs: number;
-  /** Upper bound on one pause. Also the cap on a vendor's `Retry-After`. */
+  /** Ceiling on the desk's own backoff. It never caps what a vendor asked for. */
   maxDelayMs: number;
+  /**
+   * The longest pause this call will sit through, from any source — the desk's
+   * backoff or the vendor's own schedule. A vendor asking for longer than this
+   * ends the call instead of holding it: an attended turn that waits minutes has
+   * stopped serving the person watching it. OpenClaw (`maxRetryDelayMs`) and
+   * Hermes (`LIVE_RETRY_WAIT_CAP_S`) draw the same line, past which a run goes
+   * to its fallback rather than sitting out the wait.
+   */
+  maxWaitMs: number;
   /** Wall-clock budget covering every try and every pause between them. */
   deadlineMs: number;
   /**
@@ -53,6 +62,7 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   attempts: 3,
   baseDelayMs: 150,
   maxDelayMs: 1_000,
+  maxWaitMs: 5_000,
   deadlineMs: 8_000,
   jitter: 0.5,
 };
@@ -62,15 +72,15 @@ export function retryPolicy(overrides: Partial<RetryPolicy> = {}): RetryPolicy {
   const merged = { ...DEFAULT_RETRY_POLICY, ...overrides };
   const attempts = Math.floor(merged.attempts);
   const baseDelayMs = Math.max(0, merged.baseDelayMs);
-  const maxDelayMs = Math.max(0, merged.maxDelayMs);
+  const maxDelayMs = Math.max(baseDelayMs, Math.max(0, merged.maxDelayMs));
+  const maxWaitMs = Math.max(maxDelayMs, Math.max(0, merged.maxWaitMs));
   return {
     attempts: Number.isFinite(attempts) ? Math.max(1, attempts) : 1,
     baseDelayMs: Number.isFinite(baseDelayMs) ? baseDelayMs : 0,
-    maxDelayMs: Number.isFinite(maxDelayMs)
-      ? Math.max(baseDelayMs, maxDelayMs)
-      : baseDelayMs,
+    maxDelayMs: Number.isFinite(maxDelayMs) ? maxDelayMs : baseDelayMs,
+    maxWaitMs: Number.isFinite(maxWaitMs) ? maxWaitMs : maxDelayMs,
     deadlineMs: Number.isFinite(merged.deadlineMs) ? Math.max(0, merged.deadlineMs) : 0,
-    jitter: Math.min(1, Math.max(0, merged.jitter)),
+    jitter: Number.isFinite(merged.jitter) ? Math.min(1, Math.max(0, merged.jitter)) : 0.5,
   };
 }
 
@@ -140,8 +150,10 @@ export interface RetryAttemptInfo {
   /** 1-based: the try that just failed. */
   attempt: number;
   error: unknown;
-  /** The pause that follows, in ms. Absent when the budget had no room for one. */
+  /** The pause that follows, in ms. */
   delayMs: number;
+  /** What the other end asked us to wait, in ms, when it said. */
+  providerWaitMs: number | null;
   /** Wall-clock ms left in the budget. */
   remainingMs: number;
 }
@@ -152,8 +164,14 @@ export interface WithRetryOptions extends Partial<RetryPolicy> {
   /** Whether a failure deserves another try. Aborts are never retried. */
   shouldRetry?: (error: unknown, attempt: number) => boolean;
   /**
-   * A vendor's own schedule, when the failure came with one (`Retry-After`).
-   * Returned in ms; the engine clamps it to `maxDelayMs` and to the budget.
+   * A vendor's own schedule, when the failure came with one: a `Retry-After`
+   * header, a `retry-after-ms` header, or a "try again in 300ms" hint in an
+   * error body. Returned in ms.
+   *
+   * It is a **floor, not a suggestion** — the wait is the larger of this and
+   * the desk's backoff, which is how OpenClaw and Hermes both treat provider
+   * pacing. The only things that override it are `maxWaitMs` (the desk will not
+   * sit through a longer wait, whatever the vendor asks) and the deadline.
    */
   delayFor?: (error: unknown) => number | null | undefined;
   onRetry?: (info: RetryAttemptInfo) => void;
@@ -226,16 +244,21 @@ export async function withRetry<T>(
 
     const remainingMs = remaining(policy, startedAt, now);
     const asked = options.delayFor?.(error);
-    const delayMs =
-      typeof asked === 'number' && Number.isFinite(asked)
-        ? Math.min(Math.max(0, asked), policy.maxDelayMs)
-        : backoffMs(attempt, policy, random);
+    const providerWaitMs =
+      typeof asked === 'number' && Number.isFinite(asked) && asked > 0 ? asked : null;
+    // Asking too soon is how a rate limit is tripped twice. So the vendor's
+    // schedule wins over the desk's own backoff, and the desk's cap does not
+    // quietly shorten it.
+    if (providerWaitMs !== null && providerWaitMs > policy.maxWaitMs) {
+      return { ok: false, error, attempts: attempt, waitedMs, aborted: false };
+    }
+    const delayMs = Math.max(backoffMs(attempt, policy, random), providerWaitMs ?? 0);
     // A pause longer than the time left buys a try that would be cut off
     // mid-flight. Give the answer up instead of spending it.
     if (remainingMs <= delayMs) {
       return { ok: false, error, attempts: attempt, waitedMs, aborted: false };
     }
-    options.onRetry?.({ attempt, error, delayMs, remainingMs });
+    options.onRetry?.({ attempt, error, delayMs, providerWaitMs, remainingMs });
     try {
       await wait(delayMs, options.signal);
       waitedMs += delayMs;

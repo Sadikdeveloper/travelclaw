@@ -310,14 +310,14 @@ the secret.
 Every outbound call the desk makes — the model, the rate and forecast lookups,
 `web.search` and `web.fetch`, and each flight or stay source — goes through one
 retry engine in `packages/agent-core`. A retry is jittered, bounded by a
-wall-clock budget rather than a count, honours `Retry-After` up to a cap, and
-stops the instant the traveler presses Stop.
-
-It is also deliberately refused where repeating a request is worse than losing
-it: a hold (there is no idempotency key, so a retry could create two),
-browser-worker actions, a model stream that has already written a word, and a
-request whose body cannot be sent twice. See [retries](retries.md) for the rules,
-the budgets, and where each one applies.
+wall-clock budget rather than a count, and stops the instant the traveler
+presses Stop. What the other end asked us to wait — a `Retry-After` header or a
+"try again in 300ms" hint in an error body — is a floor rather than a
+suggestion, up to the longest wait a traveler should ever be sat through. The
+wait itself is shown in the process trail, and a call is never retried into
+non-idempotent work: a hold, a browser action, or a stream that has already
+written a word. See [retries](retries.md) for the rules, the budgets, how they
+compare with OpenClaw and Hermes, and where each one applies.
 
 ## Flight and stay search
 

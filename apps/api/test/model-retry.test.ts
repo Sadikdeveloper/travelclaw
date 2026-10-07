@@ -144,7 +144,7 @@ describe('model call retries', () => {
     expect(completion.text).toBe('Desk fallback.');
   });
 
-  it('gives up asking for longer than it will ever wait', async () => {
+  it('gives up asking for longer than a traveler will wait', async () => {
     const calls = fetchQueue(
       jsonResponse({ error: { message: 'slow down' } }, 429, { 'Retry-After': '3600' }),
     );
@@ -156,8 +156,86 @@ describe('model call retries', () => {
       fallback: 'Desk fallback.',
     });
 
+    // The budget had room; the desk's patience did not. An hour is a quota
+    // window, not a schedule for a turn somebody is watching.
     expect(calls).toHaveLength(1);
     expect(completion.text).toBe('Desk fallback.');
+  });
+
+  it('waits out a short ask, even though its own backoff is shorter', async () => {
+    const calls = fetchQueue(
+      jsonResponse({ error: { message: 'slow down' } }, 429, { 'Retry-After': '1' }),
+      jsonResponse({ choices: [{ message: { content: 'Hello from Flash.' } }] }),
+    );
+    const waits: number[] = [];
+
+    const startedAt = Date.now();
+    const completion = await service()
+      .providerFor(flash)
+      .complete({
+        system: 'Be concise.',
+        history: [],
+        user: 'Hello',
+        fallback: 'Desk fallback.',
+        onWait: (info) => waits.push(info.delayMs),
+      });
+
+    // Asking sooner than the provider asked is how a rate limit is tripped
+    // twice, so the header is a floor rather than a suggestion.
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).toBeGreaterThanOrEqual(1_000);
+    expect(calls).toHaveLength(2);
+    expect(completion.text).toBe('Hello from Flash.');
+  });
+
+  it('reads a wait out of an error body when no header names one', async () => {
+    const calls = fetchQueue(
+      jsonResponse({ error: { message: 'slow down, please try again in 1s' } }, 429),
+      jsonResponse({ choices: [{ message: { content: 'Hello from Flash.' } }] }),
+    );
+    const waits: number[] = [];
+
+    const startedAt = Date.now();
+    const completion = await service()
+      .providerFor(flash)
+      .complete({
+        system: 'Be concise.',
+        history: [],
+        user: 'Hello',
+        fallback: 'Desk fallback.',
+        onWait: (info) => waits.push(info.delayMs),
+      });
+
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).toBeGreaterThanOrEqual(1_000);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
+    expect(calls).toHaveLength(2);
+    expect(completion.text).toBe('Hello from Flash.');
+  });
+
+  it('says what the wait is for, so a traveler can see the turn is alive', async () => {
+    const calls = fetchQueue(
+      () => jsonResponse({ error: { message: 'busy' } }, 503),
+      jsonResponse({ choices: [{ message: { content: 'Hello from Flash.' } }] }),
+    );
+    const notices: Array<{ attempt: number; reason: string }> = [];
+
+    await service()
+      .providerFor(flash)
+      .complete({
+        system: 'Be concise.',
+        history: [],
+        user: 'Hello',
+        fallback: 'Desk fallback.',
+        onWait: (info) => notices.push({ attempt: info.attempt, reason: info.reason }),
+      });
+
+    expect(calls).toHaveLength(2);
+    // One notice for the wait, naming why — rather than a turn that looks hung.
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.attempt).toBe(1);
+    expect(notices[0]?.reason).toMatch(/did not answer/i);
   });
 
   it('falls back to the desk rendering once the retries are spent', async () => {

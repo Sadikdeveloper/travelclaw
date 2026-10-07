@@ -5,7 +5,9 @@ import {
   isRetryableStatus,
   isTransientFetchError,
   mockProvider,
-  retryAfterMs,
+  pacingMs,
+  readPacingHint,
+  retryAfterHintMs,
   withRetry,
   type ModelCompletion,
   type ModelDelta,
@@ -51,6 +53,11 @@ const MODEL_RETRY: Partial<RetryPolicy> = {
   attempts: 3,
   baseDelayMs: 400,
   maxDelayMs: MODEL_RETRY_MAX_DELAY_MS,
+  // The desk will wait out a provider's own schedule up to this, because a
+  // traveler watching an answer being written notices twenty seconds and does
+  // not notice two. Past it, the turn takes the desk rendering rather than
+  // sitting through a quota window.
+  maxWaitMs: 20_000,
   deadlineMs: 45_000,
 };
 
@@ -268,10 +275,12 @@ export class ModelService {
               );
             }
             if (isRetryableStatus(response.status)) {
-              // Discard the body nobody will read: an unconsumed one keeps the
-              // connection it rode in on.
+              // What the vendor asked us to wait is worth reading before the
+              // body is dropped: a 429 whose body says "try again in 300ms" is
+              // naming the wait this call is about to keep anyway.
+              const body = await readPacingHint(response);
               await response.body?.cancel().catch(() => {});
-              throw new HttpStatusError(response.status, retryAfterMs(response));
+              throw new HttpStatusError(response.status, pacingMs(response, body));
             }
             return { text: input.fallback, ...DESK };
           }
@@ -317,12 +326,25 @@ export class ModelService {
           }
           return isTransientFetchError(error);
         },
-        delayFor: (error) =>
-          error instanceof HttpStatusError ? error.retryAfterMs : undefined,
-        onRetry: (info) =>
+        // A provider's own schedule, whether it arrived as a header, in the
+        // prose of an error body, or in an upstream error frame mid-stream.
+        delayFor: (error) => {
+          if (error instanceof HttpStatusError) return error.retryAfterMs;
+          if (error instanceof ModelStreamError) return retryAfterHintMs(error.message);
+          return undefined;
+        },
+        onRetry: (info) => {
           this.logger.warn(
-            `Model ${providerName}/${modelName} attempt ${info.attempt} failed (${describeError(info.error)}); trying again in ${info.delayMs}ms.`,
-          ),
+            `Model ${providerName}/${modelName} attempt ${info.attempt} failed (${describeError(info.error)}); waiting ${info.delayMs}ms${info.providerWaitMs === null ? '' : ' as the provider asked'}.`,
+          );
+          // The traveler is watching the answer being written, so a wait is
+          // shown as a wait rather than as a silence.
+          input.onWait?.({
+            attempt: info.attempt,
+            delayMs: info.delayMs,
+            reason: describeWait(info),
+          });
+        },
       },
     );
 
@@ -480,6 +502,16 @@ export class ModelService {
     this.modelListCache.set(cacheKey, notice);
     return notice;
   }
+}
+
+/**
+ * Why the desk is waiting, in one line a traveler can read. The provider's own
+ * ask when it named one, so a throttle is told apart from a dropped answer.
+ */
+function describeWait(info: { providerWaitMs: number | null }): string {
+  return info.providerWaitMs === null
+    ? 'The model did not answer.'
+    : `The model asked for ${Math.round(info.providerWaitMs / 100) / 10}s.`;
 }
 
 /** A one-line reason for a log. Never a response body: providers echo requests. */

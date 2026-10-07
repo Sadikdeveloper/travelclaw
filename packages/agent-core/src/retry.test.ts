@@ -69,10 +69,18 @@ describe('retryPolicy', () => {
     expect(retryPolicy({ jitter: -1 }).jitter).toBe(0);
     expect(retryPolicy({ jitter: 4 }).jitter).toBe(1);
     expect(retryPolicy({ deadlineMs: -1 }).deadlineMs).toBe(0);
+    // The wait cap can never be shorter than the backoff ceiling.
+    expect(retryPolicy({ maxDelayMs: 900, maxWaitMs: 100 }).maxWaitMs).toBe(900);
   });
 
   it('fills in what a call site left out', () => {
     expect(retryPolicy({ attempts: 2 })).toEqual({ ...DEFAULT_RETRY_POLICY, attempts: 2 });
+  });
+
+  it('never caps a vendor’s ask below the desk’s own backoff ceiling', () => {
+    const policy = retryPolicy({ maxDelayMs: 900, maxWaitMs: 3_000 });
+    expect(policy.maxDelayMs).toBe(900);
+    expect(policy.maxWaitMs).toBe(3_000);
   });
 });
 
@@ -186,15 +194,71 @@ describe('withRetry', () => {
     const outcome = await withRetry(operation, {
       attempts: 2,
       baseDelayMs: 50,
-      maxDelayMs: 5_000,
+      maxDelayMs: 750,
+      maxWaitMs: 5_000,
       jitter: 0,
       delayFor: () => 2_000,
       wait: async (ms) => {
         waits.push(ms);
       },
     });
+    // The cap on the desk's backoff does not shorten what the vendor asked
+    // for. Asking sooner is how a rate limit gets tripped twice.
     expect(outcome).toMatchObject({ ok: true, attempts: 2, waitedMs: 2_000 });
     expect(waits).toEqual([2_000]);
+  });
+
+  it('takes the longer of the vendor’s ask and its own backoff', async () => {
+    const { operation } = flaky(1, 'ok');
+    const waits: number[] = [];
+    const outcome = await withRetry(operation, {
+      attempts: 2,
+      baseDelayMs: 500,
+      maxDelayMs: 500,
+      maxWaitMs: 5_000,
+      jitter: 0,
+      delayFor: () => 50,
+      wait: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    // A 50ms ask is not a licence to retry in 50ms: the desk keeps its own
+    // pace, which Hermes composes the same way.
+    expect(outcome).toMatchObject({ ok: true, attempts: 2, waitedMs: 500 });
+    expect(waits).toEqual([500]);
+  });
+
+  it('ends the call rather than sitting out a wait longer than it will take', async () => {
+    const { operation } = flaky(99, 'never');
+    const outcome = await withRetry(operation, {
+      attempts: 3,
+      baseDelayMs: 50,
+      maxDelayMs: 50,
+      maxWaitMs: 2_000,
+      deadlineMs: 60_000,
+      jitter: 0,
+      delayFor: () => 3_600_000,
+      wait: async () => {},
+    });
+    // An hour is not a schedule for a turn somebody is watching. The budget had
+    // room; the desk's own patience did not.
+    expect(outcome).toMatchObject({ ok: false, attempts: 1, waitedMs: 0 });
+  });
+
+  it('reports what the other end asked for', async () => {
+    const { operation } = flaky(1, 'ok');
+    const notices: Array<number | null> = [];
+    await withRetry(operation, {
+      attempts: 2,
+      baseDelayMs: 10,
+      maxDelayMs: 10,
+      maxWaitMs: 5_000,
+      jitter: 0,
+      delayFor: () => 1_500,
+      onRetry: (info) => notices.push(info.providerWaitMs),
+      wait: async () => {},
+    });
+    expect(notices).toEqual([1_500]);
   });
 
   it('reports a failure as aborted when Stop arrives during the pause', async () => {
