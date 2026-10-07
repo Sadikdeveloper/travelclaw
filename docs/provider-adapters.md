@@ -31,6 +31,11 @@ same zod schema the operator-hosted contract uses, caps the result at
 confidence therefore proves nothing: it cannot widen what the desk is willing to
 show or hold.
 
+One adapter serves both callers of that layer, so a vendor is wired once: the
+Flight and Stay desks store what it priced as offers the traveler can hold, and
+the `flights.search` / `stays.search` tools hand the same offers to a model turn
+to narrate. Neither caller can produce a price the adapter did not return.
+
 ### The three rules
 
 1. **A price comes from the vendor or the offer does not exist.** No estimate, no

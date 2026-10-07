@@ -1,15 +1,36 @@
-import { MAX_OUTLINE_DAYS } from '@travelclaw/shared';
+import {
+  MAX_OUTLINE_DAYS,
+  offerCarriers,
+  offerFactsLine,
+  offerRoute,
+} from '@travelclaw/shared';
 import { z } from 'zod';
 import { eachDate, inclusiveDayCount } from './dates';
+import type { DeskKind } from './desks';
 import { findDestinationByName } from './destinations';
 import { extractHints } from './extract';
 import { authHeaders, connectorBase, fetchWithRetry, LOOKUP_RETRY } from './http';
+import { searchMarketFrom } from './market';
+import {
+  flightQueryFrom,
+  MAX_OFFERS_PER_SEARCH,
+  searchFlights,
+  searchStays,
+  stayQueryFrom,
+  type FlightQuery,
+  type ProviderFailureReason,
+  type ProviderOffer,
+  type ProviderSearchResult,
+  type StayQuery,
+} from './providers';
 import { zodToJsonSchema } from './tool-args';
 import { firstUrlIn, MAX_WEB_RESULTS, searchQueryFrom, webFetch, webSearch } from './web';
 import type {
   BudgetData,
   CurrencyData,
   ModelToolSpec,
+  OfferSearchData,
+  OfferSearchOffer,
   OutlineData,
   PackingData,
   PlacesData,
@@ -347,9 +368,40 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'flights.search',
+    description:
+      'Search real flight fares with the configured fare sources and return what they priced: airline, route, stops, duration, price and when it was read. This is the only source of a flight price on this desk — call it before answering anything about fares, and never quote a fare from web.search, a blog, or memory.',
+    label: 'flight search',
+    triggers: ['flight', 'airfare', 'airline', 'fare', 'one way to', 'round trip to'],
+    args: z.object({
+      origin: cityArg.optional().describe('Origin city or airport code'),
+      destination: cityArg.optional().describe('Destination city or airport code'),
+      departDate: isoDateArg.optional().describe('Departure date, YYYY-MM-DD'),
+      returnDate: isoDateArg
+        .optional()
+        .describe('Return date, only when the traveler gave one'),
+      travelers: travelersArg.optional(),
+    }),
+    run: async (input, ctx) => runFlightSearch(input, ctx),
+  },
+  {
+    name: 'stays.search',
+    description:
+      'Search real room rates with the configured stay sources and return what they priced: property, room, nights, rating, price and when it was read. This is the only source of a room rate on this desk — call it before answering anything about hotel prices, and never quote a rate from web.search, a blog, or memory.',
+    label: 'stay search',
+    triggers: ['hotel', 'hostel', 'airbnb', 'guesthouse', 'accommodation', 'room rate'],
+    args: z.object({
+      destination: cityArg.optional().describe('City the traveler is staying in'),
+      checkIn: isoDateArg.optional().describe('Check-in date, YYYY-MM-DD'),
+      checkOut: isoDateArg.optional().describe('Check-out date, YYYY-MM-DD'),
+      travelers: travelersArg.optional(),
+    }),
+    run: async (input, ctx) => runStaySearch(input, ctx),
+  },
+  {
     name: 'web.search',
     description:
-      'Search the public web for current information (news, prices, opening times, an event, a route) and return result titles, URLs and snippets.',
+      'Search the public web for current information (news, opening times, an event, a route) and return result titles, URLs and snippets. Not a price source: call flights.search or stays.search for fares and room rates, and say so when those cannot answer.',
     label: 'web search',
     triggers: [
       'search the web',
@@ -462,6 +514,12 @@ export function routeTools(
 ): string[] {
   const lower = text.toLowerCase();
   const hinted = extractHints(text);
+  // A fare or a room rate is a price, and a web snippet is not one. When the
+  // message asks for either, the desk's own search tools own the turn: routing
+  // `web.search` alongside them is exactly how a blog post ends up quoted as a
+  // fare. The model may still ask for a page by name; the deterministic router
+  // does not volunteer one for a price.
+  const priceQuestion = FARE_ASK.test(text) || ROOM_ASK.test(text);
   const scored = tools
     .map((tool) => {
       const triggerHit = tool.triggers.some((trigger) =>
@@ -471,6 +529,7 @@ export function routeTools(
       return { name: tool.name, score: (triggerHit ? 2 : 0) + (structured ? 3 : 0) };
     })
     .filter((item) => item.score > 0)
+    .filter((item) => !(priceQuestion && item.name === 'web.search'))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
   const names: string[] = [];
@@ -480,6 +539,14 @@ export function routeTools(
   }
   return names;
 }
+
+/**
+ * The asks that are prices rather than prose. Deliberately narrower than
+ * `planAgentDesks`: "how long should I stay in Lisbon" is a planning question
+ * and keeps the web tools, while "a hotel in Lisbon from …" is not.
+ */
+const FARE_ASK = /\b(flights?|airfares?|air fares?|airlines?|cheapest fares?)\b/i;
+const ROOM_ASK = /\b(hotels?|hostels?|airbnbs?|guesthouses?|accommodation|room rates?)\b/i;
 
 function structuredHit(name: string, hints: TripHints, lower: string): boolean {
   if (
@@ -495,6 +562,12 @@ function structuredHit(name: string, hints: TripHints, lower: string): boolean {
   if (name === 'currency.convert')
     return Boolean(hints.amount && hints.fromCurrency && hints.toCurrency);
   if (name === 'memory.remember') return Boolean(hints.rememberText);
+  // A fare tool earns its structured points when the message asks about flying
+  // (or a room) and names at least one end of the trip. The trigger words alone
+  // already run it; a named place makes it the turn's first call.
+  if (name === 'flights.search')
+    return FARE_ASK.test(lower) && Boolean(hints.origin || hints.destination);
+  if (name === 'stays.search') return ROOM_ASK.test(lower) && Boolean(hints.destination);
   // A link in the message is the traveler pointing at a page; a search needs the
   // words that ask for one, so "I read about it online" stays a normal turn.
   if (name === 'web.fetch') return Boolean(firstUrlIn(lower));
@@ -804,6 +877,177 @@ export function suggestPlaces(hints: TripHints): PlacesData {
   }
   return { destination: profile.name, known: true, places: places.slice(0, 4) };
 }
+
+/**
+ * The only two tools on the desk that return a price, and the reason a fare
+ * question is never answered from a web snippet. Both go through the same
+ * provider layer the flight and stay desks use, so what a turn shows is what a
+ * desk would have shown: priced by a vendor, timestamped, nothing padded. When
+ * no source answers — no key, a refusal, a timeout, an unreadable payload — the
+ * result says that in words a traveler can act on, and the turn keeps the price
+ * unknown instead of borrowing one from a blog post.
+ */
+async function runFlightSearch(input: ToolInput, ctx: ToolContext): Promise<ToolResult> {
+  const draft = flightQueryFrom(input.text, fareHints(input.hints));
+  if (!draft.query) {
+    return missingFareFields('flights.search', draft.missing);
+  }
+  const query = { ...draft.query, ...searchMarketFrom(input.text) };
+  const result = await searchFlights(query, ctx);
+  return offerSearchResult('flights.search', 'flight', flightQueryLabel(query), result);
+}
+
+async function runStaySearch(input: ToolInput, ctx: ToolContext): Promise<ToolResult> {
+  const draft = stayQueryFrom(input.text, fareHints(input.hints));
+  if (!draft.query) {
+    return missingFareFields('stays.search', draft.missing);
+  }
+  const query = { ...draft.query, ...searchMarketFrom(input.text) };
+  const result = await searchStays(query, ctx);
+  return offerSearchResult('stays.search', 'stay', stayQueryLabel(query), result);
+}
+
+/**
+ * Fold a fare tool's own argument names into the hints the query builders read,
+ * so a model call saying `departDate` and a router call saying `startDate` reach
+ * the same code. Nothing is invented here: a missing date stays missing.
+ */
+function fareHints(hints: TripHints): TripHints {
+  return { ...hints, startDate: hints.startDate ?? hints.departDate ?? hints.checkIn };
+}
+
+function missingFareFields(name: string, missing: string[]): ToolResult {
+  return {
+    name,
+    ok: false,
+    summary: `No source was called: the search still needs ${missing.join(', ')}. A web page is not a fare, so no price is quoted until those are known.`,
+    data: null,
+    warning: `${name}: missing ${missing.join(', ')}`,
+  };
+}
+
+function offerSearchResult(
+  name: string,
+  kind: DeskKind,
+  label: string,
+  result: ProviderSearchResult,
+): ToolResult {
+  const noun = kind === 'flight' ? 'flight' : 'stay';
+  if (!result.ok) {
+    const reason = FARE_FAILURE[result.reason] ?? 'The configured source did not answer.';
+    return {
+      name,
+      ok: false,
+      summary: `${reason.replace('{noun}', noun)} Nothing was priced for ${label}, and a web page is not a fare.`,
+      data: null,
+      // Developer-facing, and already scrubbed by the adapter: no key, no header.
+      warning: `${kind} search failed: ${result.reason} (${result.detail})`,
+    };
+  }
+  const offers = result.offers.slice(0, MAX_OFFERS_PER_SEARCH).map(toSearchOffer);
+  const retrievedAt =
+    offers[0]?.retrievedAt ??
+    result.sources.find((source) => source.retrievedAt)?.retrievedAt ??
+    '';
+  const answered = result.sources.filter((source) => source.ok);
+  const failed = result.sources.filter((source) => !source.ok);
+  const data: OfferSearchData = {
+    kind,
+    query: label,
+    retrievedAt,
+    sources: result.sources.map((source) => ({
+      provider: source.provider,
+      adapter: source.adapter,
+      ok: source.ok,
+      offers: source.offerCount,
+      ...(source.reason ? { reason: source.reason } : {}),
+    })),
+    offers,
+    dropped: result.dropped,
+    limited: result.limited,
+  };
+  if (!offers.length) {
+    return {
+      name,
+      ok: true,
+      summary: `${answered.map((source) => source.provider).join(', ') || 'The configured source'} answered with no ${noun} offers for ${label}. That is an empty answer, not a price.`,
+      data,
+    };
+  }
+  const lows = lowestPerCurrency(offers);
+  const summary = [
+    `${offers.length} live ${noun} offer${offers.length === 1 ? '' : 's'} for ${label} from ${[...new Set(answered.map((source) => source.provider))].join(', ')}.`,
+    lows.length ? `Lowest priced ${lows.join(', ')}.` : '',
+    failed.length
+      ? `${failed.length} of ${result.sources.length} sources failed, so this is partial coverage.`
+      : '',
+    `Read at ${retrievedAt}. Prices are the vendor's, not a booking.`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return { name, ok: true, summary, data };
+}
+
+function toSearchOffer(offer: ProviderOffer): OfferSearchOffer {
+  const flight = offer.facts?.kind === 'flight' ? offer.facts : null;
+  return {
+    provider: offer.provider,
+    adapter: offer.adapter,
+    currency: offer.currency,
+    amount: offer.totalAmount,
+    title: offer.title,
+    detail: offer.detail,
+    factsLine: offer.facts ? offerFactsLine(offer.facts) : null,
+    route: flight ? offerRoute(flight) : null,
+    carriers: flight ? offerCarriers(flight) : [],
+    retrievedAt: offer.retrievedAt,
+    hold: offer.hold,
+    holdRef: offer.holdRef,
+    holdSupport: offer.holdSupport,
+  };
+}
+
+/**
+ * The cheapest offer in each currency the sources priced in. Vendors rank
+ * locally and may use different currencies, so there is no single "cheapest"
+ * across them — one low per currency is the honest arithmetic.
+ */
+function lowestPerCurrency(offers: OfferSearchOffer[]): string[] {
+  const lowest = new Map<string, number>();
+  for (const offer of offers) {
+    const seen = lowest.get(offer.currency);
+    if (seen === undefined || offer.amount < seen) lowest.set(offer.currency, offer.amount);
+  }
+  return [...lowest].map(([currency, amount]) => `${amount.toFixed(2)} ${currency}`);
+}
+
+function flightQueryLabel(query: FlightQuery): string {
+  const legs = query.returnDate ? `, returning ${query.returnDate}` : '';
+  const party = query.travelers === 1 ? '1 traveler' : `${query.travelers} travelers`;
+  return `${query.origin} → ${query.destination} on ${query.departDate}${legs}, ${party}`;
+}
+
+function stayQueryLabel(query: StayQuery): string {
+  const party = query.travelers === 1 ? '1 traveler' : `${query.travelers} travelers`;
+  return `${query.destination}, ${query.checkIn} to ${query.checkOut}, ${party}`;
+}
+
+/** One traveler-facing sentence per way a source can refuse, no key in any of them. */
+const FARE_FAILURE: Record<ProviderFailureReason, string> = {
+  no_key: 'No {noun} source is configured on this desk, so nothing was priced.',
+  no_base_url:
+    'The configured {noun} source has no endpoint on this desk, so nothing was priced.',
+  unauthorized: 'The configured {noun} source refused the desk key, so nothing was priced.',
+  http_error: 'The configured {noun} source returned an error, so nothing was priced.',
+  timeout: 'The configured {noun} source did not answer in time, so nothing was priced.',
+  network_error:
+    'The configured {noun} source could not be reached, so nothing was priced.',
+  bad_payload:
+    'The configured {noun} source answered in a shape the desk could not read, so nothing was priced.',
+  bad_query:
+    'The configured {noun} source needs an airport code the desk does not have for that city.',
+  unsupported: 'The configured {noun} source cannot answer that kind of search.',
+};
 
 export async function convertCurrency(
   amount: number,

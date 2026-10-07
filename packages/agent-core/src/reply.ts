@@ -1,6 +1,7 @@
 import type {
   BudgetData,
   CurrencyData,
+  OfferSearchData,
   OutlineData,
   PackingData,
   PlacesData,
@@ -49,6 +50,9 @@ export function renderResult(result: ToolResult): string {
       return renderVisa(result.data as VisaData);
     case 'memory.remember':
       return `I will keep that: ${result.summary}`;
+    case 'flights.search':
+    case 'stays.search':
+      return renderOfferSearch(result.data as OfferSearchData);
     case 'web.search':
       return renderWebSearch(result.data as WebSearchData);
     case 'web.fetch':
@@ -56,6 +60,36 @@ export function renderResult(result: ToolResult): string {
     default:
       return result.summary;
   }
+}
+
+/**
+ * The desk's own rendering of a live fare search, used when no model narrates
+ * the result. Every number is the vendor's, with the source and the moment it
+ * was read beside it, so a price never appears without its provenance.
+ */
+function renderOfferSearch(data: OfferSearchData): string {
+  const noun = data.kind === 'flight' ? 'flight' : 'stay';
+  if (!data.offers.length) {
+    return `The configured sources answered with no ${noun} offers for ${data.query}. That is an empty answer, not a price.`;
+  }
+  const lines = data.offers.map((offer) => {
+    const facts = [offer.route, offer.factsLine, offer.carriers.join(' / ')]
+      .filter(Boolean)
+      .join(' · ');
+    const price = `**${offer.amount.toFixed(2)} ${offer.currency}**`;
+    return `- ${price} — ${offer.title}${facts ? ` (${facts})` : ''} via ${offer.provider}${offer.detail ? `\n  ${offer.detail}` : ''}`;
+  });
+  const failed = data.sources.filter((source) => !source.ok);
+  return [
+    `${data.offers.length} live ${noun} offer${data.offers.length === 1 ? '' : 's'} for ${data.query}, read at ${data.retrievedAt}.`,
+    ...lines,
+    failed.length
+      ? `${failed.length} of ${data.sources.length} sources failed, so this is partial coverage.`
+      : '',
+    'These are the vendor’s prices at the moment they were read. Nothing is booked.',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function renderWebSearch(data: WebSearchData): string {

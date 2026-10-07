@@ -58,7 +58,11 @@ The chat UI watches the turn instead of waiting for it. `POST /api/sessions/:id/
 (and `POST /api/chat/stream`) answer with Server-Sent Events on the same request: the model's
 thinking, every step in order — what it chose to run, each tool with its arguments and its
 result, browser steps — and the reply as it is written. Stop cancels the model call and saves
-nothing half-written. Two read-only tools reach the public web for a grounded answer:
+nothing half-written. Prices come from `flights.search` and `stays.search`, which call the
+configured vendor adapters (SerpApi, FlightAPI.io, or your own normalized contract) and return
+only what a vendor actually priced, with its name and the moment it was read; the web tools are
+never a price source, and a fare with no source behind it is reported as unknown. Two read-only
+tools reach the public web for a grounded answer:
 `web.search` and `web.fetch`, with an operator `search` connector when one is configured and a
 keyless DuckDuckGo tier otherwise. See [architecture](docs/architecture.md#reading-the-public-web).
 

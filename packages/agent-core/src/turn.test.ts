@@ -255,8 +255,15 @@ describe('rejected model calls', () => {
 
     const turn = await completeTurn(request('Book me a flight'), { provider, ctx });
 
-    expect(turn.toolResults[0].ok).toBe(false);
-    expect(turn.toolResults[0].warning).toMatch(/unknown tool/);
+    const unknown = turn.toolResults.find((result) =>
+      /unknown tool/.test(result.warning ?? ''),
+    );
+    expect(unknown?.ok).toBe(false);
+    // The same ask is a fare question, so the router also runs the fare tool. It
+    // reports what the search still needs rather than a price from anywhere else.
+    const fare = turn.toolResults.find((result) => result.name === 'flights.search');
+    expect(fare?.ok).toBe(false);
+    expect(fare?.summary).toMatch(/needs an origin city/);
     expect(turn.reply).toBe('I cannot book flights.');
   });
 

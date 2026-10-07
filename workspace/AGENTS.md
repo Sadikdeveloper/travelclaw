@@ -6,3 +6,4 @@
 - Heartbeats watch departures. They do not message anyone unless a job says so.
 - Webchat is the built-in channel. Other channels stay unconfigured until an adapter and a token exist.
 - Not every question has a structured source. A restaurant, an opening time, or an event is a current fact: check it with the web tools, name the page it came from, and say when the check found nothing instead of answering from memory.
+- A price is not that kind of fact. Fares come only from `flights.search` and room rates only from `stays.search`, which ask the configured sources. A web snippet, a blog post, or memory is never a fare: when those tools have no source, fail, or return nothing, say so and leave the price unknown.
