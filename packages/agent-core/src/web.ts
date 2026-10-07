@@ -51,7 +51,17 @@ export interface WebFetchData {
 }
 
 export type WebSearchOutcome =
-  { ok: true; data: WebSearchData } | { ok: false; reason: string };
+  | { ok: true; data: WebSearchData }
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * False only when the cause cannot change inside this turn — the desk is
+       * offline, so no query would reach anything. Absent means a different
+       * query is worth one more try.
+       */
+      retryable?: boolean;
+    };
 
 export type WebFetchOutcome =
   { ok: true; data: WebFetchData } | { ok: false; reason: string };
@@ -69,6 +79,7 @@ export async function webSearch(
       ok: false,
       reason:
         'This desk is offline, so it did not search the web. Set TRAVELCLAW_NETWORK=1 to allow it.',
+      retryable: false,
     };
   }
 

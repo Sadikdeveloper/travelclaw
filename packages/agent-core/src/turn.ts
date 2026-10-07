@@ -276,9 +276,11 @@ async function runModelRounds(input: {
       remaining: Math.max(0, MAX_TOOLS_PER_TURN - results.length),
       ran,
       ranTools,
+      dead: deadTools(results),
     });
 
-    const requestedWork = plan.calls.length > 0 || plan.rejected.length > 0;
+    const requestedWork =
+      plan.calls.length > 0 || plan.rejected.length > 0 || plan.blocked.length > 0;
     if (requestedWork) {
       // The model wrote prose and then chose work instead. Take the draft back
       // rather than leaving words on screen that the turn is not going to keep.
@@ -287,7 +289,7 @@ async function runModelRounds(input: {
     }
 
     if (!requestedWork) {
-      if (results.some((result) => !result.ok) && isRetryAnnouncement(completion.text)) {
+      if (canRetry(results) && isRetryAnnouncement(completion.text)) {
         // A promise to retry is not the retry itself. Keep it out of the saved
         // answer, show a short action summary in the live process, and ask again
         // while this turn still has room for another distinct tool call.
@@ -306,6 +308,16 @@ async function runModelRounds(input: {
           text: 'The last result was not useful. I’m checking whether another available approach can help.',
         });
         if (round + 1 < input.rounds && results.length < MAX_TOOLS_PER_TURN) continue;
+        break;
+      }
+
+      // Nothing left that could differ, and the model still promised another
+      // attempt. That sentence is not an answer: take the draft back so the
+      // narration pass writes the grounded result instead of saving a promise
+      // the desk knows it cannot keep.
+      if (results.length && isRetryAnnouncement(completion.text)) {
+        if (roundStreamed.streamed) emit({ type: 'reply_reset' });
+        input.answered.streamed = false;
         break;
       }
 
@@ -340,6 +352,9 @@ async function runModelRounds(input: {
           ? `${plan.calls.length} tool${plan.calls.length === 1 ? '' : 's'}: ${plan.calls.map((call) => call.name).join(', ')}.`
           : 'No tool ran.',
         plan.rejected.length ? `${plan.rejected.length} call refused.` : '',
+        plan.blocked.length
+          ? `${plan.blocked.length} call blocked by the desk: ${plan.blocked.map((item) => item.name).join(', ')}.`
+          : '',
         plan.repeated
           ? `${plan.repeated} call already ran this turn and was not repeated.`
           : '',
@@ -358,6 +373,36 @@ async function runModelRounds(input: {
   // The round budget is spent. What ran is still the turn's grounding, so the
   // narration pass below answers from it rather than from nothing.
   return { results };
+}
+
+/**
+ * Whether this turn still has something worth trying again. A blocked call is
+ * the desk's own verdict and a terminal failure is a fact about the install —
+ * neither becomes a reason to spend another round, so a turn whose only
+ * failures are those writes its answer instead of promising a retry.
+ */
+function canRetry(results: ToolResult[]): boolean {
+  return results.some(
+    (result) => !result.ok && !result.blocked && result.retryable !== false,
+  );
+}
+
+/**
+ * The tools this turn already failed for a reason a retry cannot fix, keyed by
+ * name with that reason in one sentence. The planner refuses further calls to
+ * them rather than letting a model rediscover the same wall with new arguments.
+ */
+function deadTools(results: ToolResult[]): Record<string, string> {
+  const dead: Record<string, string> = {};
+  for (const result of results) {
+    if (result.ok || result.blocked || result.retryable !== false) continue;
+    dead[result.name] = firstSentence(result.summary);
+  }
+  return dead;
+}
+
+function firstSentence(summary: string): string {
+  return summary.split(/(?<=\.)\s+/)[0]?.replace(/\.$/, '') ?? summary;
 }
 
 /**

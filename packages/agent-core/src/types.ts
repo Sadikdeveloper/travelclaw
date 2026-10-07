@@ -1,4 +1,6 @@
 import type { BudgetStyle, MemoryKind, Pace } from '@travelclaw/shared';
+import type { DeskKind } from './desks';
+import type { ProviderFailureReason } from './providers';
 
 export interface ThemeCard {
   title: string;
@@ -54,6 +56,22 @@ export interface ToolResult<T = unknown> {
   /** Developer-facing reason, when a call was rejected. Never shown to the traveler. */
   warning?: string;
   source?: ToolSource;
+  /**
+   * Whether another attempt inside this same turn could plausibly succeed.
+   * `false` is a verdict about the cause, not a guess: a source that is not
+   * configured, a key the vendor refused, or a field only the traveler can
+   * supply will fail identically on a retry, so the turn asks for the missing
+   * piece instead of spending a round to learn that again. Absent means the
+   * tool did not say, and an unstated failure stays retryable.
+   */
+  retryable?: boolean;
+  /**
+   * Set when the desk refused to run the call at all — a per-turn limit, or a
+   * tool this turn already proved dead. Nothing executed, so this is not a
+   * failure and must not feed a failure count; it is the desk's own verdict,
+   * handed back so the model reads it as a stop signal rather than an error.
+   */
+  blocked?: boolean;
 }
 
 export interface OutlineDay {
@@ -146,6 +164,53 @@ export interface RememberData {
   body: string;
 }
 
+/**
+ * What a fare tool (`flights.search`, `stays.search`) returns. Every number came
+ * from a vendor: the desk adds no estimate, no conversion, and no offer the
+ * source did not price. `sources` carries the failures as well as the successes,
+ * so partial coverage is visible to the model instead of hidden behind a list
+ * that merely looks short.
+ */
+export interface OfferSearchSource {
+  provider: string;
+  adapter: string;
+  ok: boolean;
+  offers: number;
+  reason?: ProviderFailureReason;
+}
+
+export interface OfferSearchOffer {
+  provider: string;
+  adapter: string;
+  currency: string;
+  amount: number;
+  title: string;
+  detail: string | null;
+  /** The vendor's own facts as one line, or null when it sent none. */
+  factsLine: string | null;
+  /** "LOS → LIS" from the itinerary's endpoints, or null when unreadable. */
+  route: string | null;
+  carriers: string[];
+  /** When the desk read this answer, so a stale price reads as stale. */
+  retrievedAt: string;
+  hold: 'none' | 'confirmed';
+  holdRef: string | null;
+  holdSupport: 'provider' | 'unsupported';
+}
+
+export interface OfferSearchData {
+  kind: DeskKind;
+  /** The query as the desk asked it, for the traveler to read back. */
+  query: string;
+  retrievedAt: string;
+  sources: OfferSearchSource[];
+  offers: OfferSearchOffer[];
+  /** Results the source sent that the desk refused to show (no price, no id). */
+  dropped: number;
+  /** Valid offers omitted by a result limit. */
+  limited: number;
+}
+
 export interface TripHints {
   destination?: string;
   origin?: string;
@@ -157,6 +222,18 @@ export interface TripHints {
   query?: string;
   /** A public page to read (`web.fetch`), only ever an http(s) URL. */
   url?: string;
+  /**
+   * The names a fare tool's arguments use. They are aliases, not new fields the
+   * desk reads on their own: `flights.search` and `stays.search` fold them into
+   * `startDate`/`endDate` before a query is built, so a model can say
+   * `departDate` and a router call keeps saying `startDate`.
+   */
+  departDate?: string;
+  /** A return leg, only when the traveler actually gave one. */
+  returnDate?: string;
+  checkIn?: string;
+  /** A stay's check-out, as a fare tool states it. */
+  checkOut?: string;
   startDate?: string;
   endDate?: string;
   days?: number;

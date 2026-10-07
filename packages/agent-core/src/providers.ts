@@ -252,8 +252,9 @@ export function flightQueryFrom(text: string, hints: TripHints): QueryDraft<Flig
     return { missing };
   }
   // `extractHints` can derive an end date from "four days" for itinerary tools.
-  // For airfare, only a second date the traveler actually wrote is a return leg.
-  const returnDate = explicitDates(text)[1];
+  // For airfare, only a second date the traveler actually wrote — or one a model
+  // call states as `returnDate` — is a return leg.
+  const returnDate = validDate(hints.returnDate) ?? explicitDates(text)[1];
   return {
     query: {
       origin,
@@ -272,7 +273,9 @@ export function stayQueryFrom(text: string, hints: TripHints): QueryDraft<StayQu
   const destination = cleanCity(hints.destination ?? destinationFromText(text));
   const checkIn = validDate(hints.startDate);
   const writtenDates = explicitDates(text);
-  const writtenCheckout = validDate(writtenDates[1]);
+  // A model call may state the check-out directly; a router call still reads it
+  // off the second date the traveler wrote.
+  const writtenCheckout = validDate(hints.checkOut) ?? validDate(writtenDates[1]);
   const nights = Number(/\b(\d{1,3})\s*nights?\b/i.exec(text)?.[1] ?? 0);
   const nightCheckout =
     checkIn && nights >= 1 && nights <= 365

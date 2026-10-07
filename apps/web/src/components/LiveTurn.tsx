@@ -41,6 +41,8 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   'weather.outlook': CloudSun,
   'visa.notes': Stamp,
   'memory.remember': Brain,
+  'flights.search': Plane,
+  'stays.search': Hotel,
   'web.search': Globe,
   'web.fetch': FileText,
 };

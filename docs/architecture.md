@@ -206,6 +206,29 @@ already in the model's context, so the pass after it answers from what it has. R
 still loud: a call for a tool that is not on the desk, or with arguments that do not
 validate, is reported as a failed step.
 
+Two brakes act before a tool runs, and both answer back in words rather than failing
+silently — a model that is merely starved reads the silence as a transient error and tries
+to work around it:
+
+- **A per-turn limit per tool** (`TOOL_CALL_LIMITS`, currently `web.search: 2`). Three
+  executions is the whole turn budget, so one tool that is cheap to call, easy to loop on,
+  and never the source of a price cannot spend it on three versions of the same page. At
+  the limit the call is refused with a sentence that says what to do instead: answer from
+  what is already in context.
+- **A dead tool is not called again.** A failure that is a fact about the install — no
+  source configured, a key the vendor refused, a field only the traveler can supply — is
+  marked `retryable: false`, so the planner refuses later calls to that tool even with new
+  arguments, and the turn does not buy another round to learn the same thing. A failure
+  that could differ (a timeout, an unreachable host, a page with nothing readable in it)
+  stays retryable and a model that announces an alternative still gets to run it.
+
+A refused call comes back as a `blocked` result: `ok: false` because nothing ran, and
+marked so no failure count reads the desk's own verdict as a tool error. The prompt labels
+the three states a result can be in — usable, worth another attempt, final — because they
+call for three different next moves. A model that still promises another attempt after a
+final one does not get that promise saved: the draft is taken back and the grounded result
+is written instead.
+
 A tool call is validated against the tool's zod argument schema before it runs. A payload
 that does not match is rejected with a short traveler sentence — never coerced, and never
 a 500. The mock provider has no tool support, so it keeps the router-only path: the same
@@ -214,7 +237,7 @@ weather, availability, or a booking. The router is also the fallback when a live
 returns no tool call. Either way the tool result is what the model narrates; a runtime
 error inside a tool becomes a failed result with the desk still speaking, not a dead turn.
 
-A complete flight or hotel search does not go through that tool list. When this install has a configured provider source (or an authorized browser fallback) and the traveler supplied every field needed for the query, it wakes one or two desks, Flight and Stay. Incomplete requests remain ordinary model turns so the traveler gets a useful follow-up instead of a fake completion card. A desk is marked **Search finished** only after its source returns, then the traveler can dismiss or answer the task-success prompt: **Yes**, **No**, or **Keep working**. Keep working does not replay a stale query; it leaves the composer available for the next instruction. An authorized browser handoff is the exception and says what input is needed. A provider offer is not a booking. Asking its provider to hold it is a separate traveler action, and the desk reports a hold only after confirmation.
+A flight or hotel search has two paths, and neither reports a price it did not get from a source. When this install has a configured provider source (or an authorized browser fallback) and the traveler supplied every field needed for the query in one message, the gateway wakes one or two desks, Flight and Stay, which store what the source priced as offers the traveler can hold or dismiss. Everything else stays an ordinary model turn — a follow-up that completes the route from earlier messages, a query one field short, an install with no source configured — and that turn has its own fare tools: `flights.search` and `stays.search` call the same adapters the desks use and return what a vendor priced, with the source and the moment it was read. Those two are the only tools that return a price. The router does not offer `web.search` for a fare or a room rate, the web tool's own description says it is not a price source, and the prompt says a snippet or a memory is never a fare: when no source answers, the price stays unknown and the reply says why. A desk is marked **Search finished** only after its source returns, then the traveler can dismiss or answer the task-success prompt: **Yes**, **No**, or **Keep working**. Keep working does not replay a stale query; it leaves the composer available for the next instruction. An authorized browser handoff is the exception and says what input is needed. A provider offer is not a booking. Asking its provider to hold it is a separate traveler action, and the desk reports a hold only after confirmation.
 
 ### The live turn
 
