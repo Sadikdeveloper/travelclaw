@@ -190,6 +190,8 @@ export interface OfferSearchOffer {
   factsLine: string | null;
   /** "LOS → LIS" from the itinerary's endpoints, or null when unreadable. */
   route: string | null;
+  /** Vendor-supplied first departure date, useful in a flexible month scan. */
+  departureDate: string | null;
   carriers: string[];
   /** When the desk read this answer, so a stale price reads as stale. */
   retrievedAt: string;
@@ -231,6 +233,8 @@ export interface TripHints {
   departDate?: string;
   /** A return leg, only when the traveler actually gave one. */
   returnDate?: string;
+  /** Flexible flight month (YYYY-MM), inferred from an explicitly named month. */
+  departMonth?: string;
   checkIn?: string;
   /** A stay's check-out, as a fare tool states it. */
   checkOut?: string;

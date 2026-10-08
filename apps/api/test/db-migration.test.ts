@@ -328,15 +328,18 @@ describe('accounts migration', () => {
           .map((c) => c.name);
         expect(columns).toContain('hold_support');
         expect(columns).toContain('facts_json');
+        expect(columns).toContain('booking_url');
         const offer = service.get<{
           hold_support: string;
           facts_json: string | null;
+          booking_url: string | null;
           title: string;
         }>('SELECT * FROM offers WHERE id = ?', 'o1');
         expect(offer?.title).toBe('Old offer');
         expect(offer?.hold_support).toBe('provider');
-        // An older row keeps no facts: the card shows its prose, never a guess.
+        // An older row keeps no facts or click-through: the card shows its prose, never a guess.
         expect(offer?.facts_json).toBeNull();
+        expect(offer?.booking_url).toBeNull();
       } finally {
         service.onModuleDestroy();
       }

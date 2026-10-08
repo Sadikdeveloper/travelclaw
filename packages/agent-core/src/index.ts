@@ -55,6 +55,8 @@ export type {
   ProviderAdapterId,
 } from './adapters';
 export {
+  FLEXIBLE_FLIGHT_SAMPLE_DAYS,
+  MAX_FLEXIBLE_FLIGHT_OFFERS,
   MAX_OFFERS_PER_SEARCH,
   flightQueryFrom,
   requestProviderHold,

@@ -3,6 +3,7 @@ import {
   offerCarriers,
   offerFactsLine,
   offerRoute,
+  type OfferFacts,
 } from '@travelclaw/shared';
 import { z } from 'zod';
 import { eachDate, inclusiveDayCount } from './dates';
@@ -13,7 +14,7 @@ import { authHeaders, connectorBase, fetchWithRetry, LOOKUP_RETRY } from './http
 import { searchMarketFrom } from './market';
 import {
   flightQueryFrom,
-  MAX_OFFERS_PER_SEARCH,
+  MAX_FLEXIBLE_FLIGHT_OFFERS,
   searchFlights,
   searchStays,
   stayQueryFrom,
@@ -79,6 +80,13 @@ const isoDateArg = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
   .describe('Date as YYYY-MM-DD');
+
+const isoMonthArg = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Use YYYY-MM for flexible dates')
+  .describe(
+    'Flexible departure month, YYYY-MM; search weekly sample dates when no exact day was given',
+  );
 
 const cityArg = z.string().trim().min(2).max(80).describe('City name, for example Lisbon');
 
@@ -376,7 +384,14 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
     args: z.object({
       origin: cityArg.optional().describe('Origin city or airport code'),
       destination: cityArg.optional().describe('Destination city or airport code'),
-      departDate: isoDateArg.optional().describe('Departure date, YYYY-MM-DD'),
+      departDate: isoDateArg
+        .optional()
+        .describe(
+          'Departure date, YYYY-MM-DD; use only when the traveler gave a specific day',
+        ),
+      departMonth: isoMonthArg
+        .optional()
+        .describe('Flexible month, YYYY-MM, when the traveler said any date in a month'),
       returnDate: isoDateArg
         .optional()
         .describe('Return date, only when the traveler gave one'),
@@ -948,7 +963,7 @@ function offerSearchResult(
       retryable: !TERMINAL_FAILURE_REASONS.has(result.reason),
     };
   }
-  const offers = result.offers.slice(0, MAX_OFFERS_PER_SEARCH).map(toSearchOffer);
+  const offers = result.offers.slice(0, MAX_FLEXIBLE_FLIGHT_OFFERS).map(toSearchOffer);
   const retrievedAt =
     offers[0]?.retrievedAt ??
     result.sources.find((source) => source.retrievedAt)?.retrievedAt ??
@@ -1003,7 +1018,9 @@ function toSearchOffer(offer: ProviderOffer): OfferSearchOffer {
     detail: offer.detail,
     factsLine: offer.facts ? offerFactsLine(offer.facts) : null,
     route: flight ? offerRoute(flight) : null,
+    departureDate: flight ? flightDepartureDate(flight) : null,
     carriers: flight ? offerCarriers(flight) : [],
+
     retrievedAt: offer.retrievedAt,
     hold: offer.hold,
     holdRef: offer.holdRef,
@@ -1025,10 +1042,28 @@ function lowestPerCurrency(offers: OfferSearchOffer[]): string[] {
   return [...lowest].map(([currency, amount]) => `${amount.toFixed(2)} ${currency}`);
 }
 
+function flightDepartureDate(
+  facts: Extract<OfferFacts, { kind: 'flight' }>,
+): string | null {
+  const timestamp = facts.segments[0]?.departAt;
+  return timestamp?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+}
+
 function flightQueryLabel(query: FlightQuery): string {
+  const when = query.departMonth
+    ? `any date in ${monthLabel(query.departMonth)} (weekly sample dates)`
+    : `on ${query.departDate}`;
   const legs = query.returnDate ? `, returning ${query.returnDate}` : '';
   const party = query.travelers === 1 ? '1 traveler' : `${query.travelers} travelers`;
-  return `${query.origin} → ${query.destination} on ${query.departDate}${legs}, ${party}`;
+  return `${query.origin} → ${query.destination} ${when}${legs}, ${party}`;
+}
+
+function monthLabel(value: string): string {
+  const [year, month] = value.split('-').map(Number);
+  const label = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, 1)),
+  );
+  return `${label} ${year}`;
 }
 
 function stayQueryLabel(query: StayQuery): string {

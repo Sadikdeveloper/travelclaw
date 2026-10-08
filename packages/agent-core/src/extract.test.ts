@@ -18,12 +18,23 @@ describe('reading a trip out of a sentence', () => {
     expect(hints('a weekend in Porto')).toMatchObject({ days: 2 });
   });
 
-  it('turns a named month and a length into real dates', () => {
+  it('turns a named month and a length into real dates while retaining month flexibility', () => {
     expect(hints('four days in Lisbon in November')).toMatchObject({
       startDate: '2026-11-01',
       endDate: '2026-11-04',
+      departMonth: '2026-11',
       days: 4,
     });
+  });
+
+  it('reads a lower-case route and a month-only flight request without inventing a day', () => {
+    expect(hints('Find a flight from lagso to moscaw on any date in Nov')).toMatchObject({
+      origin: 'Lagos',
+      departMonth: '2026-11',
+    });
+    expect(
+      hints('Find a flight from lagso to moscaw on any date in Nov').startDate,
+    ).toBeUndefined();
   });
 
   it('rolls a month that has already passed into next year', () => {

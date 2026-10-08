@@ -112,7 +112,29 @@ describe('memory budget', () => {
     expect(prompt).toContain('Do not promise future work');
   });
 
-  it('never lets the desk claim a table, room, or ticket is held', () => {
+  it('allows a detail follow-up while respecting provider reservation and checkout status', () => {
+    const prompt = assemblePrompt(
+      {
+        text: 'I want to proceed with the selected flight',
+        persona: { name: 'Marlow', soul: '', identity: '', user: '', agents: '' },
+        memory: [],
+        history: [],
+      },
+      [],
+    );
+
+    expect(prompt).toContain(
+      'ask for only the missing non-payment detail conversationally',
+    );
+    expect(prompt).toContain('then wait');
+    expect(prompt).toContain('unpaid reservation/hold');
+    expect(prompt).toContain('provider-supplied checkout link');
+    expect(prompt).toContain('TravelClaw does not take payment');
+    expect(prompt).toContain('never put personal or payment details in a URL');
+    expect(prompt).toContain('Never request or accept card numbers');
+  });
+
+  it('requires provider confirmation before claiming a reservation or ticket is complete', () => {
     const prompt = assemblePrompt(
       {
         text: 'hello',
@@ -123,7 +145,10 @@ describe('memory budget', () => {
       [],
     );
     expect(prompt).toContain(
-      'Never say a flight, room, table, or ticket is booked or available.',
+      'Do not claim a reservation, payment, or ticket is complete unless the provider confirms that exact status.',
+    );
+    expect(prompt).toContain(
+      'A quoted offer is not guaranteed to remain available at checkout.',
     );
   });
 

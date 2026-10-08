@@ -153,6 +153,7 @@ describe('the fare tools the model is given', () => {
       'origin',
       'destination',
       'departDate',
+      'departMonth',
       'returnDate',
       'travelers',
     ]);

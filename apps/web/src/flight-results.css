@@ -1,0 +1,484 @@
+/* Flight/stay result cards — compact comparison rows with an unmistakable next step. */
+.agent-card {
+  width: min(100%, 940px);
+  max-width: 940px;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  color: var(--ink);
+  background: #fffefa;
+  border: 1px solid #ded3c5;
+  border-radius: 22px;
+  box-shadow: 0 16px 38px rgba(39, 30, 20, 0.08);
+}
+.agent-card .agent-card-head {
+  padding: 17px 20px 14px;
+  background: linear-gradient(120deg, #fffaf3 0%, #f6f0e8 100%);
+  border-bottom: 1px solid #eee5db;
+}
+.agent-card-name {
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.agent-card-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: #f1e2d4;
+  color: var(--copper-deep);
+}
+.agent-card-title {
+  display: grid;
+  gap: 1px;
+}
+.agent-card-title strong {
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+.agent-card-title small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 450;
+}
+.agent-card .agent-card-summary {
+  max-width: 90ch;
+  margin: 0;
+  padding: 13px 20px 0;
+  color: #62574c;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-card .provider-offers {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  border: 0;
+}
+.provider-offers-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.provider-offers-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.3rem;
+  line-height: 1.15;
+}
+.provider-offers-eyebrow {
+  margin: 0 0 3px;
+  color: var(--sea-deep);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.agent-card .provider-offers-count {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid #e5ddd2;
+  border-radius: 999px;
+  color: #65594e;
+  background: #faf7f2;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.agent-card .provider-offers-note {
+  margin: 0;
+  color: #7b7065;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.provider-offer-list {
+  display: grid;
+  gap: 10px;
+}
+.agent-card .provider-offer {
+  min-width: 0;
+  padding: 14px 15px 12px;
+  gap: 11px;
+  background: #fff;
+  border: 1px solid #e4ddd4;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(35, 27, 19, 0.025);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+.agent-card .provider-offer:hover {
+  border-color: #cdbca9;
+  box-shadow: 0 6px 16px rgba(35, 27, 19, 0.055);
+}
+.agent-card .provider-offer.selected {
+  border-color: var(--sea);
+  background: #fbfdfb;
+  box-shadow: 0 0 0 2px rgba(30, 107, 100, 0.1);
+}
+.fare-option-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+.fare-brand-mark {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  background: #f2eee8;
+  color: #716453;
+}
+.fare-option-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.fare-option-name strong {
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.fare-option-name span {
+  color: var(--muted);
+  font-size: 0.77rem;
+  overflow-wrap: anywhere;
+}
+.fare-price {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 1px;
+  min-width: 110px;
+  text-align: right;
+}
+.fare-price strong {
+  font-size: 1.25rem;
+  line-height: 1.15;
+  font-weight: 720;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fare-price small {
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+.lowest-fare {
+  margin-bottom: 2px;
+  color: var(--sea-deep);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.flight-itinerary {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.75fr) minmax(110px, 1.2fr) minmax(72px, 0.75fr);
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: #faf8f4;
+  border: 1px solid #eee9e2;
+  border-radius: 13px;
+}
+.flight-endpoint {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  min-width: 0;
+}
+.flight-endpoint.arrival {
+  justify-items: end;
+  text-align: right;
+}
+.flight-endpoint strong {
+  font-size: 1.03rem;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+}
+.flight-endpoint span {
+  color: #4a4037;
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+.flight-endpoint small {
+  min-height: 1em;
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+.flight-middle {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  text-align: center;
+}
+.flight-date-label,
+.flight-duration {
+  font-size: 0.69rem;
+  line-height: 1.25;
+}
+.flight-track {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--sea);
+}
+.flight-track span {
+  height: 1px;
+  flex: 1;
+  background: #c8d8d4;
+}
+.agent-card .offer-facts,
+.agent-card .offer-row-detail {
+  margin: -3px 0 0;
+  color: #75695f;
+  font-size: 0.75rem;
+}
+.stay-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 14px;
+}
+.stay-detail-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #5d534a;
+  font-size: 0.76rem;
+}
+.stay-detail-line svg {
+  color: var(--sea);
+}
+.agent-card .provider-offer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid #f0ece6;
+  color: #82776d;
+  font-size: 0.68rem;
+}
+.fare-option-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.fare-select,
+.hold-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 620;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.fare-select {
+  color: white;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+}
+.fare-select:hover {
+  background: #30281f;
+}
+.fare-select.selected {
+  color: white;
+  background: var(--sea-deep);
+  border-color: var(--sea-deep);
+}
+.hold-link {
+  padding-inline: 4px;
+  color: #65594e;
+  background: transparent;
+  border: 1px solid transparent;
+}
+.hold-link:hover:not(:disabled) {
+  color: var(--copper-deep);
+  background: #fbf5ed;
+  border-color: #eee0d0;
+}
+.hold-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.agent-card .offer-state {
+  padding: 3px 8px;
+  background: #f3eee7;
+  color: #78695a;
+  font-size: 0.67rem;
+}
+.agent-card .offer-state.confirmed {
+  background: #e5f2ed;
+  color: var(--sea-deep);
+}
+.agent-card .provider-offer-hold {
+  margin: 0;
+  color: var(--sea-deep);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.booking-handoff {
+  display: grid;
+  gap: 8px;
+  padding: 15px 16px;
+  background: linear-gradient(112deg, #eef6f1 0%, #f6f8f0 100%);
+  border: 1px solid #d4e6dc;
+  border-radius: 16px;
+}
+.booking-handoff-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.booking-check {
+  display: inline-flex;
+  width: 31px;
+  height: 31px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: white;
+  background: var(--sea-deep);
+  border-radius: 50%;
+}
+.booking-handoff-heading div {
+  display: grid;
+  gap: 2px;
+}
+.booking-handoff-heading strong {
+  font-size: 0.92rem;
+}
+.booking-handoff-heading span:not(.booking-check) {
+  color: #63756a;
+  font-size: 0.74rem;
+}
+.agent-card .booking-handoff p {
+  margin: 0;
+  color: #56665b;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.agent-card .booking-handoff .booking-handoff-safe {
+  color: #3e5949;
+  font-size: 0.76rem;
+}
+.booking-handoff-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+.booking-handoff-actions a {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 13px;
+  color: white;
+  background: var(--sea-deep);
+  border: 1px solid var(--sea-deep);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.booking-handoff-actions a:hover {
+  background: #0f3935;
+}
+.booking-handoff-actions > span {
+  color: #6c786f;
+  font-size: 0.69rem;
+}
+
+@media (max-width: 680px) {
+  .agent-card {
+    border-radius: 18px;
+  }
+  .agent-card .agent-card-head {
+    padding: 14px 14px 12px;
+  }
+  .agent-card .agent-card-summary {
+    padding: 11px 14px 0;
+    font-size: 0.78rem;
+  }
+  .agent-card .provider-offers {
+    padding: 14px 11px;
+  }
+  .provider-offers-heading h3 {
+    font-size: 1.17rem;
+  }
+  .agent-card .provider-offer {
+    padding: 12px 11px 10px;
+    border-radius: 14px;
+  }
+  .fare-option-top {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .fare-price {
+    grid-column: 2;
+    grid-row: 2;
+    justify-items: start;
+    min-width: 0;
+    text-align: left;
+  }
+  .fare-price strong {
+    font-size: 1.12rem;
+  }
+  .lowest-fare {
+    grid-row: 1;
+  }
+  .flight-itinerary {
+    grid-template-columns: minmax(58px, 0.72fr) minmax(60px, 1fr) minmax(58px, 0.72fr);
+    gap: 6px;
+    padding: 9px 8px;
+  }
+  .flight-endpoint strong {
+    font-size: 0.94rem;
+  }
+  .flight-endpoint span {
+    font-size: 0.72rem;
+  }
+  .flight-date-label {
+    font-size: 0.62rem;
+    white-space: nowrap;
+  }
+  .flight-duration {
+    font-size: 0.64rem;
+  }
+  .fare-option-actions {
+    gap: 5px 10px;
+  }
+  .fare-select {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+  .booking-handoff {
+    padding: 13px 12px;
+  }
+}

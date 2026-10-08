@@ -130,10 +130,11 @@ describe('flight and stay provider search', () => {
     return agent;
   }
 
-  function flightOffer(id = 'F-1020') {
+  function flightOffer(id = 'F-1020', bookingUrl?: string) {
     return {
       id,
       price: { amount: '182.40', currency: 'EUR' },
+      ...(bookingUrl ? { bookingUrl } : {}),
       segments: [{ from: 'LOS', to: 'LIS', carrier: 'Test Air' }],
     };
   }
@@ -155,7 +156,10 @@ describe('flight and stay provider search', () => {
     process.env.TRAVELCLAW_FLIGHT_API_KEY = 'operator-secret-1902';
     searchBody = {
       provider: 'Fare Shop',
-      offers: [flightOffer(), { id: 'unpriced' }],
+      offers: [
+        flightOffer('F-1020', 'https://airline.example.test/checkout?offer=F-1020'),
+        { id: 'unpriced' },
+      ],
     };
     const agent = await signedInAgent();
 
@@ -177,6 +181,7 @@ describe('flight and stay provider search', () => {
       currency: 'EUR',
       totalAmount: 182.4,
       hold: 'none',
+      bookingUrl: 'https://airline.example.test/checkout?offer=F-1020',
     });
     expect(task.offers[0].retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(seen).toHaveLength(1);
@@ -497,17 +502,22 @@ describe('flight and stay provider search', () => {
 
     expect(attempted.status).toBe(201);
     expect(attempted.body.confirmed).toBe(true);
+    expect(attempted.body.note).toContain('confirmed a reservation hold');
+    expect(attempted.body.note).toContain('TravelClaw did not take payment');
     expect(attempted.body.offer).toMatchObject({
       hold: 'confirmed',
       holdRef: 'HOLD-42',
       holdExpiresAt: '2026-10-02T18:00:00Z',
     });
-    expect(attempted.body.task.summary).toContain('provider-confirmed hold (HOLD-42)');
+    expect(attempted.body.task.summary).toContain(
+      'provider-confirmed reservation hold (HOLD-42)',
+    );
+    expect(attempted.body.task.summary).toContain('TravelClaw did not take payment');
     expect(attempted.body.task.summary).not.toContain('No seat is held.');
     const later = await taskFor(agent, response.body.session.id);
     expect(later.offers[0].hold).toBe('confirmed');
     expect(later.offers[0].holdRef).toBe('HOLD-42');
-    expect(later.summary).toContain('provider-confirmed hold (HOLD-42)');
+    expect(later.summary).toContain('provider-confirmed reservation hold (HOLD-42)');
     expect(later.summary).not.toContain('offer only; no hold confirmed');
     expect(later.summary).not.toContain('No seat is held.');
 
@@ -516,7 +526,7 @@ describe('flight and stay provider search', () => {
       .send({ confirm: true });
     expect(repeated.status).toBe(201);
     expect(repeated.body.confirmed).toBe(true);
-    expect(repeated.body.note).toMatch(/already confirmed this hold/);
+    expect(repeated.body.note).toMatch(/already confirmed this reservation hold/);
     expect(seen.filter((call) => call.url.endsWith('/holds'))).toHaveLength(1);
   });
 

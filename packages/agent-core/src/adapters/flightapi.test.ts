@@ -61,8 +61,18 @@ const itineraryPayload = {
       id: '16216-2404021419--32385-1-12387-2404030005',
       leg_ids: ['leg-1'],
       pricing_options: [
-        { price: { amount: 700.5, update_status: 'stale' } },
-        { price: { amount: 612.4, update_status: 'current' } },
+        {
+          price: { amount: 700.5, update_status: 'stale' },
+          items: [
+            { agent_id: 'stale-agent', url: 'https://airline.example/stale-checkout' },
+          ],
+        },
+        {
+          price: { amount: 612.4, update_status: 'current' },
+          items: [
+            { agent_id: 'airline-1', url: 'https://airline.example/checkout?flight=EX1' },
+          ],
+        },
       ],
     },
     { id: 'no-price-itinerary', leg_ids: ['leg-1'], pricing_options: [] },
@@ -126,6 +136,7 @@ describe('FlightAPI.io adapter', () => {
       holdSupport: 'unsupported',
       hold: 'none',
       providerOfferId: '16216-2404021419--32385-1-12387-2404030005',
+      bookingUrl: 'https://airline.example/checkout?flight=EX1',
     });
     expect(result.offers[0].title).toContain('Example Air');
     expect(result.offers[0].detail).toContain('nonstop');
