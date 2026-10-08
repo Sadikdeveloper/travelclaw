@@ -1,6 +1,7 @@
 import { MAX_OUTLINE_DAYS, type BudgetStyle } from '@travelclaw/shared';
 import { addDays } from './dates';
 import { findDestination } from './destinations';
+import { normalizeCityName } from './city-names';
 import type { TripHints } from './types';
 
 const INTERESTS = [
@@ -22,19 +23,21 @@ const INTERESTS = [
 const MAX_INFERRED_DAYS = MAX_OUTLINE_DAYS;
 
 const MONTHS = [
-  'january',
-  'february',
-  'march',
-  'april',
-  'may',
-  'june',
-  'july',
-  'august',
-  'september',
-  'october',
-  'november',
-  'december',
-];
+  { names: ['january', 'jan'], number: 1 },
+  { names: ['february', 'feb'], number: 2 },
+  { names: ['march', 'mar'], number: 3 },
+  { names: ['april', 'apr'], number: 4 },
+  { names: ['may'], number: 5 },
+  { names: ['june', 'jun'], number: 6 },
+  { names: ['july', 'jul'], number: 7 },
+  { names: ['august', 'aug'], number: 8 },
+  { names: ['september', 'sept', 'sep'], number: 9 },
+  { names: ['october', 'oct'], number: 10 },
+  { names: ['november', 'nov'], number: 11 },
+  { names: ['december', 'dec'], number: 12 },
+] as const;
+
+const MONTH_WORDS = MONTHS.flatMap((month) => month.names);
 
 /** Travelers write "four days" and "a week" far more often than "4 days". */
 const NUMBER_WORDS: Record<string, number> = {
@@ -85,7 +88,10 @@ export function extractHints(text: string, now: Date = new Date()): TripHints {
     /\b(\d{1,2})\s*(travelers|travellers|people|adults|guests)\b/i,
   );
   const forParty = text.match(/\bfor\s+(\d{1,2})\b/i);
-  const origin = text.match(/\bfrom\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\b/);
+  const originMatch = text.match(
+    /\bfrom\s+([\p{L}\p{N}][\p{L}\p{N}'’.-]*(?:\s+(?!to\b|in\b|on\b|for\b|at\b|any\b|during\b|and\b)[\p{L}\p{N}][\p{L}\p{N}'’.-]*)?)/iu,
+  );
+  const origin = normalizeCityName(originMatch?.[1]);
   const passport = text.match(/\bpassport\s+(?:from|of|:)\s+([A-Za-z][A-Za-z ]{1,40})/i);
   const amount = text.match(
     new RegExp(`\\b(\\d+(?:\\.\\d{1,2})?)\\s*(${CURRENCIES.join('|')})\\b`, 'i'),
@@ -95,10 +101,11 @@ export function extractHints(text: string, now: Date = new Date()): TripHints {
   );
   const destination = findDestination(text);
 
-  // A month name is a soft anchor, not a booking: "four days in November"
-  // starts on the 1st so the length still decides the range, while a bare "in
-  // November" leaves the dates open instead of inventing a 30-day trip.
-  const monthStart = monthAnchor(text, now);
+  // A named month is kept separately for flexible fare searches. For itinerary
+  // tools, a stated length can still use its first day as a soft anchor; a bare
+  // month never becomes an invented multi-week stay.
+  const departMonth = monthInText(text, now);
+  const monthStart = departMonth ? `${departMonth}-01` : undefined;
   const startDate = dates[0] ?? (days !== undefined ? monthStart : undefined);
   let endDate: string | undefined = dates[1];
   if (startDate && !endDate && days && days > 0 && days <= MAX_INFERRED_DAYS) {
@@ -111,9 +118,10 @@ export function extractHints(text: string, now: Date = new Date()): TripHints {
 
   return {
     destination: destination?.name,
-    origin: origin?.[1],
+    origin,
     startDate,
     endDate,
+    departMonth,
     days,
     travelers: travelers
       ? Number(travelers[1])
@@ -153,18 +161,30 @@ function countFrom(word: string): number | undefined {
 }
 
 /**
- * The first day of the month the traveler named, in the next year that has not
- * already started, so "in November" written in December means next November.
+ * Resolve a named month to an explicit year when one is nearby, otherwise the
+ * next occurrence that has not passed. "November" in December means next year.
  */
-function monthAnchor(text: string, now: Date): string | undefined {
-  const lower = text.toLowerCase();
-  const index = MONTHS.findIndex((month) => new RegExp(`\\b${month}\\b`).test(lower));
-  if (index === -1) return undefined;
-  const year = now.getUTCFullYear();
-  const first = Date.UTC(year, index, 1);
-  const thisMonth = Date.UTC(year, now.getUTCMonth(), 1);
-  const chosen = first < thisMonth ? Date.UTC(year + 1, index, 1) : first;
-  return new Date(chosen).toISOString().slice(0, 10);
+function monthInText(text: string, now: Date): string | undefined {
+  const pattern = new RegExp(`\\b(${MONTH_WORDS.join('|')})\\b`, 'i');
+  const match = pattern.exec(text);
+  if (!match) return undefined;
+
+  const token = match[1].toLowerCase();
+  const month = MONTHS.find((candidate) => candidate.names.some((name) => name === token));
+  if (!month) return undefined;
+
+  const nearby = text.slice(
+    Math.max(0, match.index - 12),
+    match.index + match[0].length + 12,
+  );
+  const explicitYear = /\b(20\d{2})\b/.exec(nearby)?.[1];
+  const currentYear = now.getUTCFullYear();
+  const year = explicitYear
+    ? Number(explicitYear)
+    : month.number < now.getUTCMonth() + 1
+      ? currentYear + 1
+      : currentYear;
+  return `${year}-${String(month.number).padStart(2, '0')}`;
 }
 
 function matchEnum<T extends string>(text: string, values: readonly T[]): T | undefined {

@@ -159,6 +159,55 @@ describe('flight search', () => {
     expect(JSON.stringify(result)).not.toContain('sk-fares-1234');
   });
 
+  it('keeps only safe HTTPS booking links from provider offers', async () => {
+    const { ctx } = ctxWith(
+      'flight',
+      { baseUrl: 'https://fares.example.com', apiKey: 'k' },
+      async () =>
+        json({
+          offers: [
+            {
+              id: 'safe',
+              price: { amount: 180, currency: 'EUR' },
+              bookingUrl: 'https://airline.example/checkout/offer-1',
+            },
+            {
+              id: 'insecure',
+              price: { amount: 181, currency: 'EUR' },
+              bookingUrl: 'http://airline.example/checkout/offer-2',
+            },
+            {
+              id: 'credentials',
+              price: { amount: 182, currency: 'EUR' },
+              bookingUrl: 'https://traveler:secret@airline.example/checkout/offer-3',
+            },
+            {
+              id: 'session-token',
+              price: { amount: 183, currency: 'EUR' },
+              bookingUrl: 'https://airline.example/checkout?session=opaque',
+            },
+            {
+              id: 'malformed-link',
+              price: { amount: 184, currency: 'EUR' },
+              bookingUrl: { href: 'https://airline.example/checkout/offer-5' },
+            },
+          ],
+        }),
+    );
+
+    const result = await searchFlights(FLIGHT_QUERY, ctx);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.offers.map((offer) => offer.bookingUrl)).toEqual([
+      'https://airline.example/checkout/offer-1',
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
   it('never turns a multi-leg itinerary into a stop count of its own', async () => {
     const { ctx } = ctxWith(
       'flight',
@@ -604,6 +653,8 @@ describe('hold requests', () => {
       ctx,
     );
     expect(result).toMatchObject({ confirmed: true, ref: 'HOLD-42' });
+    expect(result.note).toContain('confirmed a reservation hold');
+    expect(result.note).toContain('TravelClaw did not take payment');
     expect(seen[0].method).toBe('POST');
     expect(seen[0].url).toBe('https://f.example/holds');
     expect(seen[0].body).toBe(JSON.stringify({ kind: 'flight', offerId: 'TP-1020' }));
@@ -768,6 +819,72 @@ describe('reading a search out of the traveler’s own words', () => {
     expect(draft.query).toMatchObject({ origin: 'LOS', destination: 'ACC' });
   });
 
+  it('corrects a clear route typo and turns a named month into flexible dates', () => {
+    const draft = flightQueryFrom(
+      'Find a flight from lagso to moscaw on any date in November',
+      { origin: 'Lagos', departMonth: '2026-11', interests: [] },
+    );
+    expect(draft.query).toEqual({
+      origin: 'Lagos',
+      destination: 'Moscow',
+      departDate: '2026-11-01',
+      departMonth: '2026-11',
+      travelers: 1,
+    });
+    expect(draft.missing).toEqual([]);
+  });
+
+  it('checks weekly sample dates for a flexible month and returns each dated fare', async () => {
+    const { ctx, seen } = ctxWith(
+      'flight',
+      { baseUrl: 'https://fares.example.com', apiKey: 'k' },
+      async (url) => {
+        const date = new URL(url).searchParams.get('departDate')!;
+        const day = date.slice(-2);
+        return json({
+          offers: [
+            {
+              id: `fare-${day}`,
+              price: { amount: Number(day) * 10, currency: 'USD' },
+              segments: [
+                { from: 'LOS', to: 'MOW', departAt: `${date}T08:00:00Z`, carrier: 'Air' },
+              ],
+            },
+          ],
+        });
+      },
+    );
+
+    const result = await searchFlights(
+      {
+        origin: 'Lagos',
+        destination: 'Moscow',
+        departDate: '2026-11-01',
+        departMonth: '2026-11',
+        travelers: 1,
+      },
+      ctx,
+    );
+
+    expect(seen).toHaveLength(5);
+    expect(seen.map((call) => new URL(call.url).searchParams.get('departDate'))).toEqual([
+      '2026-11-01',
+      '2026-11-08',
+      '2026-11-15',
+      '2026-11-22',
+      '2026-11-29',
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.offers).toHaveLength(5);
+    expect(
+      result.offers.map(
+        (offer) =>
+          offer.facts?.kind === 'flight' && offer.facts.segments[0]?.departAt?.slice(0, 10),
+      ),
+    ).toEqual(['2026-11-01', '2026-11-08', '2026-11-15', '2026-11-22', '2026-11-29']);
+  });
+
   it('treats a second date as a return only when it is later', () => {
     const later = flightQueryFrom('Lagos to Lisbon from 2026-11-02 to 2026-11-09', {
       origin: 'Lagos',
@@ -803,7 +920,11 @@ describe('reading a search out of the traveler’s own words', () => {
   it('says what is missing rather than searching for nothing', () => {
     const draft = flightQueryFrom('Find me a flight', { interests: [] });
     expect(draft.query).toBeUndefined();
-    expect(draft.missing).toEqual(['an origin city', 'a destination', 'a departure date']);
+    expect(draft.missing).toEqual([
+      'an origin city',
+      'a destination',
+      'a departure date or month',
+    ]);
   });
 
   it('refuses a month name that follows a preposition', () => {

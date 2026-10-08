@@ -66,7 +66,7 @@ tools reach the public web for a grounded answer:
 `web.search` and `web.fetch`, with an operator `search` connector when one is configured and a
 keyless DuckDuckGo tier otherwise. See [architecture](docs/architecture.md#reading-the-public-web).
 
-A provider hold is a separate, explicit traveler action after an offer is shown. Only a provider confirmation can mark it held; that still does not purchase anything.
+Month-only flight searches sample weekly dates and label each fare with the departure date the provider returned. Travelers can choose a fare or stay and continue through a validated, provider-supplied checkout link when available. A provider may confirm an unpaid reservation hold; its reference and any provider-supplied expiry are shown. TravelClaw does not take payment, and pay-later terms and payment instructions come from the provider.
 
 ## Gemini setup
 

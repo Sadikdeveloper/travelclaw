@@ -54,6 +54,8 @@ export interface AdapterOfferCandidate {
   price: { amount: number; currency: string };
   title?: string;
   detail?: string;
+  /** Direct provider click-through, only when the source actually supplied it. */
+  bookingUrl?: string;
   segments?: Array<{
     from: string;
     to: string;

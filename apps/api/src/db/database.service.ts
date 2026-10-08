@@ -32,6 +32,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.migrateOfferProviderIds();
     this.migrateOfferHoldSupport();
     this.migrateOfferFacts();
+    this.migrateOfferBookingUrl();
     this.ensureMemorySearch();
   }
 
@@ -219,6 +220,19 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     const columns = this.all<{ name: string }>('PRAGMA table_info(offers)');
     if (columns.some((column) => column.name === 'facts_json')) return;
     this.db.exec('ALTER TABLE offers ADD COLUMN facts_json TEXT');
+  }
+
+  /** Safe provider click-throughs are optional; old offers remain without one. */
+  private migrateOfferBookingUrl() {
+    const tables = new Set(
+      this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").map(
+        (row) => row.name,
+      ),
+    );
+    if (!tables.has('offers')) return;
+    const columns = this.all<{ name: string }>('PRAGMA table_info(offers)');
+    if (columns.some((column) => column.name === 'booking_url')) return;
+    this.db.exec('ALTER TABLE offers ADD COLUMN booking_url TEXT');
   }
 
   onModuleDestroy() {

@@ -295,8 +295,9 @@ export type AgentTaskStatus =
 export type TaskDecision = 'complete' | 'no' | 'still_working';
 
 /**
- * A hold exists only when the provider said one does and named a reference.
- * Until then the row is an offer, and the desk says so.
+ * A reservation hold exists only when the provider said one does and named a
+ * reference. It may be an unpaid booking; only the provider sets its payment
+ * terms. Until confirmation, the row remains an offer.
  */
 export type OfferHoldState = 'none' | 'confirmed';
 
@@ -372,10 +373,13 @@ export interface OfferRecord {
    * when present and falls back to `title`/`detail` prose when it did not.
    */
   facts: OfferFacts | null;
+  /** Vendor-provided checkout URL, when safe to open; not a guarantee of availability. */
+  bookingUrl: string | null;
   hold: OfferHoldState;
   /** `unsupported` sources never grow a hold button or a hold request. */
   holdSupport: OfferHoldSupport;
   holdRef: string | null;
+  /** Provider-supplied reservation/hold expiry; not assumed to be a payment deadline. */
   holdExpiresAt: string | null;
   /** Set when the provider sent hold-shaped details it never confirmed. */
   holdNote: string | null;

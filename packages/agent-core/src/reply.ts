@@ -73,7 +73,12 @@ function renderOfferSearch(data: OfferSearchData): string {
     return `The configured sources answered with no ${noun} offers for ${data.query}. That is an empty answer, not a price.`;
   }
   const lines = data.offers.map((offer) => {
-    const facts = [offer.route, offer.factsLine, offer.carriers.join(' / ')]
+    const facts = [
+      offer.route,
+      offer.departureDate ? `departs ${offer.departureDate}` : null,
+      offer.factsLine,
+      offer.carriers.join(' / '),
+    ]
       .filter(Boolean)
       .join(' · ');
     const price = `**${offer.amount.toFixed(2)} ${offer.currency}**`;

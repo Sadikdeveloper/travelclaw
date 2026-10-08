@@ -34,7 +34,7 @@ import { adoptLiveTurn, watchLiveTurn } from '../liveTurn';
 import { streamTurn } from '../turnStream';
 
 const prompts: Array<{ text: string; icon: ComponentType<{ size?: number }> }> = [
-  { text: 'Find a flight from Lagos to Lisbon on 2026-11-02', icon: Plane },
+  { text: 'Find a flight from Lagos to Moscow on any date in November', icon: Plane },
   { text: 'Book a hotel in Lisbon for 2 from 2026-11-02 to 2026-11-06', icon: Hotel },
   { text: 'Flight and a hotel in Kyoto from 2026-11-02 to 2026-11-06', icon: Sparkles },
 ];
@@ -64,6 +64,7 @@ export function ChatPage() {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [holdingOfferId, setHoldingOfferId] = useState('');
+  const [selectedOfferIds, setSelectedOfferIds] = useState<Record<string, string>>({});
   const [feedbackTask, setFeedbackTask] = useState<AgentTaskRecord | null>(null);
   const [givingFeedback, setGivingFeedback] = useState(false);
   // The turn that is running right now, as the gateway reports it.
@@ -94,6 +95,8 @@ export function ChatPage() {
     if (!keepExpected) feedbackExpectedForSession.current = null;
     setFeedbackTask(null);
     setGivingFeedback(false);
+    setSelectedOfferIds({});
+    setHoldingOfferId('');
   }, [sessionId]);
 
   useEffect(() => {
@@ -210,7 +213,7 @@ export function ChatPage() {
       );
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : 'Could not ask the provider for a hold',
+        err instanceof ApiError ? err.message : 'Could not request a provider reservation',
       );
     } finally {
       setHoldingOfferId('');
@@ -355,8 +358,9 @@ export function ChatPage() {
             </span>
             <h1>Your next trip, one message away.</h1>
             <p className="hero-sub">
-              Ask for a flight, a hotel, or both. A desk spins up for each one — nothing
-              books until you say so.
+              Compare live flight and stay offers. Request a provider-confirmed reservation
+              where supported, or follow the selected offer’s checkout link. Payment and
+              pay-later terms stay with the provider.
             </p>
             {error ? <Banner message={error} tone="bad" /> : null}
             {composer}
@@ -434,6 +438,10 @@ export function ChatPage() {
                     key={task.id}
                     task={task}
                     holdingOfferId={holdingOfferId}
+                    selectedOfferId={selectedOfferIds[task.id] ?? null}
+                    onSelectOffer={(offerId) =>
+                      setSelectedOfferIds((current) => ({ ...current, [task.id]: offerId }))
+                    }
                     onHold={(offerId) => void askProviderToHold(task.id, offerId)}
                   />
                 ))}

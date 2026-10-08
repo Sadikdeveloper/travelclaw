@@ -281,8 +281,9 @@ function itineraryCandidate(
 ): AdapterOfferCandidate | undefined {
   const itinerary = itinerarySchema.safeParse(raw);
   if (!itinerary.success) return undefined;
-  const amount = bestPrice(itinerary.data.pricing_options ?? []);
-  if (amount === undefined) return undefined;
+  const price = bestPrice(itinerary.data.pricing_options ?? []);
+  if (!price) return undefined;
+  const amount = price.amount;
 
   const legs = (itinerary.data.leg_ids ?? [])
     .map((id) => context.legs.get(id))
@@ -356,6 +357,7 @@ function itineraryCandidate(
     return {
       id,
       price: { amount, currency: context.currency },
+      ...(price.bookingUrl ? { bookingUrl: price.bookingUrl } : {}),
       segments,
       stops: legs.length ? stops : null,
       durationMinutes: duration > 0 ? duration : null,
@@ -380,6 +382,7 @@ function itineraryCandidate(
   return {
     id,
     price: { amount, currency: context.currency },
+    ...(price.bookingUrl ? { bookingUrl: price.bookingUrl } : {}),
     title,
     ...(detail ? { detail } : {}),
     // Even without a name for every stop, the vendor's own counts are real.
@@ -393,18 +396,32 @@ function itineraryCandidate(
  * still marks current. A stale-only itinerary keeps the vendor's number and is
  * not re-priced or hidden.
  */
-function bestPrice(options: unknown[]): number | undefined {
-  const prices: Array<{ amount: number; current: boolean }> = [];
+function bestPrice(
+  options: unknown[],
+): { amount: number; bookingUrl?: string } | undefined {
+  const prices: Array<{ amount: number; current: boolean; bookingUrl?: string }> = [];
   for (const raw of options) {
     const option = pricingOptionSchema.safeParse(raw);
     if (!option.success) continue;
     const amount = money(option.data.price?.amount);
     if (amount === undefined) continue;
-    prices.push({ amount, current: option.data.price?.update_status === 'current' });
+    const bookingUrl = option.data.items
+      ?.map((item) => item.url?.trim())
+      .find((url): url is string => Boolean(url && url.length <= 2048));
+    prices.push({
+      amount,
+      current: option.data.price?.update_status === 'current',
+      ...(bookingUrl ? { bookingUrl } : {}),
+    });
   }
   const current = prices.filter((price) => price.current);
   const pool = current.length ? current : prices;
-  return pool.length ? Math.min(...pool.map((price) => price.amount)) : undefined;
+  if (!pool.length) return undefined;
+  const amount = Math.min(...pool.map((price) => price.amount));
+  const best = pool
+    .filter((price) => price.amount === amount)
+    .find((price) => price.bookingUrl);
+  return { amount, ...(best?.bookingUrl ? { bookingUrl: best.bookingUrl } : {}) };
 }
 
 function resolveAirport(value: string, ctx: AdapterContext): string | undefined {

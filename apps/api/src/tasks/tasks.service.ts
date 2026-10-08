@@ -64,6 +64,7 @@ interface OfferRow {
   title: string;
   detail: string | null;
   facts_json: string | null;
+  booking_url: string | null;
   hold: OfferRecord['hold'];
   hold_support: OfferRecord['holdSupport'];
   hold_ref: string | null;
@@ -220,7 +221,7 @@ export class TasksService {
         offer: mapOffer(offer),
         task: mapTask(task, this.offersFor(taskId)),
         confirmed: true,
-        note: `${offer.provider} already confirmed this hold${offer.hold_ref ? ` (reference ${offer.hold_ref})` : ''}. Nothing was purchased.`,
+        note: `${offer.provider} already confirmed this reservation hold${offer.hold_ref ? ` (reference ${offer.hold_ref})` : ''}. TravelClaw did not take payment; follow the provider's terms.`,
       };
     }
 
@@ -426,9 +427,9 @@ export class TasksService {
         this.db.run(
           `INSERT INTO offers
             (id, session_id, task_id, kind, provider, provider_id, provider_base_url, provider_offer_id,
-             retrieved_at, currency, total_amount, title, detail, facts_json, hold, hold_support, hold_ref,
-             hold_expires_at, hold_note, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             retrieved_at, currency, total_amount, title, detail, facts_json, booking_url, hold, hold_support,
+             hold_ref, hold_expires_at, hold_note, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           task.session_id,
           task.id,
@@ -443,6 +444,7 @@ export class TasksService {
           offer.title,
           offer.detail,
           offer.facts ? JSON.stringify(offer.facts) : null,
+          offer.bookingUrl,
           offer.hold,
           offer.holdSupport,
           offer.holdRef,
@@ -534,7 +536,9 @@ function briefLead(kind: DeskKind, request: string, pass: number): string {
     ? hints.endDate
       ? ` from ${hints.startDate} to ${hints.endDate}`
       : ` on ${hints.startDate}`
-    : '';
+    : hints.departMonth
+      ? ` in ${formatMonth(hints.departMonth)}`
+      : '';
   if (kind === 'flight') {
     const route =
       hints.origin && hints.destination
@@ -545,7 +549,7 @@ function briefLead(kind: DeskKind, request: string, pass: number): string {
     const missing = [
       hints.origin ? '' : 'an origin city',
       hints.destination ? '' : 'a destination',
-      hints.startDate ? '' : 'a date',
+      hints.startDate || hints.departMonth ? '' : 'a date or month',
     ].filter(Boolean);
     const gap = missing.length ? ` Still need ${missing.join(', ')}.` : '';
     return `Flight desk finished a brief for ${route}${when}.${passNote}${gap}`;
@@ -565,12 +569,15 @@ function flightSearchLead(
   pass: number,
   requestedTravelers?: number,
 ): string {
+  const departure = query.departMonth
+    ? `any date in ${formatMonth(query.departMonth)} (weekly sample dates)`
+    : `departing ${query.departDate}`;
   const returning = query.returnDate ? `, returning ${query.returnDate}` : ', one-way';
   const party = requestedTravelers
     ? `Search party: ${query.travelers} traveler${query.travelers === 1 ? '' : 's'}.`
     : 'Search assumed one traveler because no party size was specified.';
   const passNote = pass > 1 ? ` Pass ${pass}.` : '';
-  return `Flight desk finished a brief for ${query.origin} to ${query.destination}, departing ${query.departDate}${returning}.${passNote} ${party}`;
+  return `Flight desk finished a brief for ${query.origin} to ${query.destination}, ${departure}${returning}.${passNote} ${party}`;
 }
 
 function staySearchLead(
@@ -621,9 +628,17 @@ function marketNote(market: SearchMarket, stated: SearchMarket): string {
     .join(', ')}.`;
 }
 
+function formatMonth(value: string): string {
+  const [year, month] = value.split('-').map(Number);
+  const name = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, 1)),
+  );
+  return `${name} ${year}`;
+}
+
 function holdStatus(kind: DeskKind, confirmed: boolean): string {
   if (confirmed)
-    return 'A saved offer has a provider-confirmed hold. Nothing was purchased.';
+    return 'A saved offer has a provider-confirmed reservation hold. TravelClaw did not take payment; follow the provider’s terms.';
   return kind === 'flight'
     ? 'No seat is held. Nothing was purchased.'
     : 'No room is held. Nothing was purchased.';
@@ -639,7 +654,7 @@ function providerOfferSummary(offer: OfferRecord, index: number): string {
   const price = `${offer.totalAmount.toLocaleString('en-US', { maximumFractionDigits: 3 })} ${offer.currency}`;
   const status =
     offer.hold === 'confirmed'
-      ? `provider-confirmed hold${offer.holdRef ? ` (${offer.holdRef})` : ''}`
+      ? `provider-confirmed reservation hold${offer.holdRef ? ` (${offer.holdRef})` : ''}`
       : 'offer only; no hold confirmed';
   const facts = offer.facts;
   if (facts?.kind === 'flight') {
@@ -647,7 +662,10 @@ function providerOfferSummary(offer: OfferRecord, index: number): string {
     const lead = carriers.length ? carriers.join(', ') : offer.title;
     const route = offerRoute(facts);
     const heading = [lead, route].filter(Boolean).join(': ');
-    const shape = offerFactsLine(facts);
+    const departureDate = facts.segments[0]?.departAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    const shape = [departureDate ? `departs ${departureDate}` : null, offerFactsLine(facts)]
+      .filter(Boolean)
+      .join(' · ');
     return `${index + 1}. ${heading} — ${shape ? `${shape} — ` : ''}${price} (${status}).`;
   }
   if (facts?.kind === 'stay') {
@@ -680,7 +698,7 @@ function holdConfirmedSummary(
   if (updated.includes(unheldStatus)) return updated.replace(unheldStatus, heldStatus);
   if (updated.includes(heldStatus)) return updated;
   const reference = confirmed.holdRef ? ` (reference ${confirmed.holdRef})` : '';
-  return `${updated} ${confirmed.provider} confirmed a hold for ${confirmed.title}${reference}. Nothing was purchased.`;
+  return `${updated} ${confirmed.provider} confirmed a reservation hold for ${confirmed.title}${reference}. TravelClaw did not take payment; follow the provider’s terms.`;
 }
 
 function providerBrief(
@@ -772,6 +790,7 @@ function mapOffer(row: OfferRow): OfferRecord {
     title: row.title,
     detail: row.detail,
     facts: parseOfferFacts(row.facts_json),
+    bookingUrl: row.booking_url ?? null,
     hold: row.hold,
     holdSupport: row.hold_support,
     holdRef: row.hold_ref,

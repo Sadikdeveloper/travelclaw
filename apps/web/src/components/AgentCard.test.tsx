@@ -30,6 +30,7 @@ const offer: OfferRecord = {
     durationMinutes: 385,
     stopNames: [],
   },
+  bookingUrl: null,
   hold: 'none',
   holdSupport: 'provider',
   holdRef: null,
@@ -53,11 +54,17 @@ const task: AgentTaskRecord = {
   updatedAt: '2026-10-06T09:00:00Z',
 };
 
-function render(withOffer: OfferRecord, overrides: Partial<AgentTaskRecord> = {}): string {
+function render(
+  withOffer: OfferRecord,
+  overrides: Partial<AgentTaskRecord> = {},
+  selectedOfferId: string | null = null,
+): string {
   return renderToStaticMarkup(
     <AgentCard
       task={{ ...task, ...overrides, offers: [withOffer] }}
       holdingOfferId=""
+      selectedOfferId={selectedOfferId}
+      onSelectOffer={vi.fn()}
       onHold={vi.fn()}
       onStopBrowser={vi.fn()}
     />,
@@ -65,47 +72,58 @@ function render(withOffer: OfferRecord, overrides: Partial<AgentTaskRecord> = {}
 }
 
 describe('provider offer card', () => {
-  it('offers the hold ask only for a source that can confirm one', () => {
+  it('shows a quote and offers a reservation request only when the source supports one', () => {
     const html = render(offer);
 
-    expect(html).toContain('Ask provider to hold');
-    expect(html).toContain('Offer · no hold confirmed');
-    expect(html).toContain('EUR');
+    expect(html).toContain('Request provider reservation');
+    expect(html).toContain('Quote · no hold confirmed');
+    expect(html).toContain('Quotes are not reservations.');
+    expect(html).toContain('€620.50');
   });
 
-  it('says a quote-only source cannot hold instead of showing a dead button', () => {
+  it('clearly labels a quote-only source without showing a hold action', () => {
     const html = render({ ...offer, holdSupport: 'unsupported' });
 
-    expect(html).not.toContain('Ask provider to hold');
-    expect(html).toContain('does not hold them');
-    expect(html).toContain('Nothing is purchased here.');
+    expect(html).not.toContain('Request provider reservation');
+    expect(html).toContain('No hold available');
+    expect(html).toContain('Quotes are not reservations.');
   });
 
-  it('shows the reference only after the provider confirmed a hold', () => {
-    const html = render({
-      ...offer,
-      hold: 'confirmed',
-      holdRef: 'HOLD-9',
-      holdSupport: 'provider',
-    });
+  it('shows the hold reference only after the provider confirmed it', () => {
+    const html = render(
+      {
+        ...offer,
+        hold: 'confirmed',
+        holdRef: 'HOLD-9',
+        holdExpiresAt: '2026-10-08T10:00:00Z',
+        holdSupport: 'provider',
+      },
+      {},
+      offer.id,
+    );
 
-    expect(html).toContain('Hold confirmed by provider');
-    expect(html).toContain('Reference HOLD-9');
-    expect(html).not.toContain('Ask provider to hold');
+    expect(html).toContain('Provider reservation confirmed');
+    expect(html).toContain('Provider reference HOLD-9');
+    expect(html).toContain('Reservation hold expires 2026-10-08T10:00:00Z.');
+    expect(html).toContain('TravelClaw has not taken payment.');
+    expect(html).toContain('The provider confirmed this reservation hold.');
+    expect(html).not.toContain('Request provider reservation');
   });
 
-  it('lays the vendor facts out as a fare row instead of a sentence', () => {
+  it('lays vendor facts out as a date-labelled fare row', () => {
     const html = render(offer);
 
     expect(html).toContain('Example Air');
     expect(html).toContain('LOS → LIS');
-    expect(html).toContain('08:05 → 15:30');
+    expect(html).toContain('Nov 2');
+    expect(html).toContain('08:05');
+    expect(html).toContain('15:30');
     expect(html).toContain('Nonstop');
     expect(html).toContain('6 hr 25 min');
     expect(html).toContain('Flight options');
   });
 
-  it('names a single connection in the words the vendor sent', () => {
+  it('names a connection and next-day arrival using the vendor facts', () => {
     const html = render({
       ...offer,
       facts: {
@@ -134,15 +152,45 @@ describe('provider offer card', () => {
 
     expect(html).toContain('1 stop');
     expect(html).toContain('via Lagos');
-    expect(html).toContain('20:05 → 23:50+1');
+    expect(html).toContain('20:05');
+    expect(html).toContain('23:50+1');
+    expect(html).toContain('Next day');
     expect(html).toContain('24 hr 0 min');
   });
 
-  it('keeps the prose the provider sent when the source sent no facts', () => {
+  it('keeps provider prose when the source sent no structured facts', () => {
     const html = render({ ...offer, facts: null, detail: 'nonstop · Example Air' });
 
     expect(html).toContain('nonstop · Example Air');
     expect(html).not.toContain('6 hr 25 min');
+  });
+
+  it('shows the selected quote and a clearly labelled fallback booking search', () => {
+    const html = render(offer, {}, offer.id);
+
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('Flight selected');
+    expect(html).toContain('Search the web for options');
+    expect(html).toContain('https://www.google.com/search?q=');
+    expect(html).toContain('opens a general search for booking options.');
+    expect(html).toContain('TravelClaw does not process payment or collect card details.');
+    expect(html).not.toContain('is not a ticket or completed booking');
+  });
+
+  it('hands off to a supplied provider URL and keeps booking status honest', () => {
+    const html = render(
+      { ...offer, bookingUrl: 'https://book.example-air.test/checkout/offer-1' },
+      {},
+      offer.id,
+    );
+
+    expect(html).toContain('href="https://book.example-air.test/checkout/offer-1"');
+    expect(html).toContain('Continue booking with provider');
+    expect(html).not.toContain('Search the web for options');
+    expect(html).toContain('This offer is not reserved yet.');
+    expect(html).toContain('may prefill the offer.');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
   });
 
   it('reads a stay as a stay: nights, window, and the rating that arrived', () => {

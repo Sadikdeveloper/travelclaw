@@ -3,15 +3,15 @@ import {
   offerFactsLine,
   offerDurationLabel,
   offerRoute,
+  offerStopsLabel,
   type OfferFacts,
   type OfferRecord,
 } from '@travelclaw/shared';
 
 /**
- * Turning an offer's vendor facts into the lines a card shows. The wording for
- * stops, duration, nights, and ratings comes from the shared helpers, so the
- * desk's brief and this card never describe the same offer differently. Times are
- * the only web-specific part: they are read from the vendor's own timestamps.
+ * Turning an offer's vendor facts into the lines a card shows. Stop, duration,
+ * night, and rating labels come from shared helpers, while the card adds the
+ * provider's date and times from its own timestamps.
  */
 
 export interface OfferRow {
@@ -21,7 +21,7 @@ export interface OfferRow {
   qualifier: string | null;
   /** Times, dates, or the check-in window. */
   when: string | null;
-  /** Stops, duration, nights, rating — the facts line. */
+  /** Stop count, nights, or rating; duration is shown on the flight track. */
   facts: string | null;
 }
 
@@ -37,12 +37,30 @@ export function offerRow(offer: OfferRecord): OfferRow | null {
     };
   }
   const carriers = offerCarriers(facts);
+  const departureDate = offerDepartureDate(facts);
+  const time = offerTimeLabel(facts);
   return {
     lead: carriers.length ? carriers.join(', ') : offer.title.split(':')[0],
     qualifier: offerRoute(facts),
-    when: offerTimeLabel(facts),
-    facts: offerFactsLine(facts),
+    when: [departureDate, time].filter(Boolean).join(' · ') || null,
+    facts: offerStopsLabel(facts),
   };
+}
+
+/** The vendor's departure date, formatted for a fare card (never inferred from the request). */
+export function offerDepartureDate(
+  facts: Extract<OfferFacts, { kind: 'flight' }>,
+): string | null {
+  const timestamp = facts.segments[0]?.departAt;
+  if (!timestamp) return null;
+  const parsed = dateFromTimestamp(timestamp);
+  if (!parsed) return null;
+  return new Intl.DateTimeFormat('en', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(parsed);
 }
 
 /** "20:05 → 20:05+1", from the vendor's own timestamps. */
@@ -67,6 +85,9 @@ export { offerDurationLabel };
  */
 function clock(value: string | null): string | null {
   if (!value) return null;
+  const local =
+    /(?:T|\s)(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.exec(value);
+  if (local) return `${local[1]}:${local[2]}`;
   const parsed = parse(value);
   if (!parsed) return null;
   return `${pad(parsed.getUTCHours())}:${pad(parsed.getUTCMinutes())}`;
@@ -74,11 +95,16 @@ function clock(value: string | null): string | null {
 
 /** "+1" when the arrival is another calendar day, only if both ends parsed. */
 function dayShift(from: string | null, to: string | null): string | null {
-  const start = from ? parse(from) : null;
-  const end = to ? parse(to) : null;
+  const start = from ? dateFromTimestamp(from) : null;
+  const end = to ? dateFromTimestamp(to) : null;
   if (!start || !end) return null;
   const days = Math.round((startOfDay(end) - startOfDay(start)) / 86_400_000);
   return days > 0 ? `+${days}` : null;
+}
+
+function dateFromTimestamp(value: string): Date | null {
+  const date = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
+  return parse(date ?? value);
 }
 
 function parse(value: string): Date | null {

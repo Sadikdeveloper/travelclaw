@@ -13,6 +13,7 @@ import {
   readJson,
 } from './http';
 import { addDays, parseIsoDate } from './dates';
+import { normalizeCityName } from './city-names';
 import type { ConnectorCredentials, SearchMarket, ToolContext, TripHints } from './types';
 
 /**
@@ -38,8 +39,12 @@ import type { ConnectorCredentials, SearchMarket, ToolContext, TripHints } from 
 
 const HOLD_TIMEOUT_MS = 9000;
 
-/** How many offers a desk keeps from one search. The provider's own order is kept. */
+/** How many offers a desk keeps from one exact-date search. */
 export const MAX_OFFERS_PER_SEARCH = 6;
+/** A flexible month scan shows a bounded choice across sampled departure dates. */
+export const MAX_FLEXIBLE_FLIGHT_OFFERS = 24;
+/** Weekly samples keep a month-wide scan useful without issuing a call for every day. */
+export const FLEXIBLE_FLIGHT_SAMPLE_DAYS = [1, 8, 15, 22, 29] as const;
 
 const FLIGHT_SLOT = 'flight';
 const STAY_SLOT = 'stay';
@@ -47,7 +52,10 @@ const STAY_SLOT = 'stay';
 export interface FlightQuery extends SearchMarket {
   origin: string;
   destination: string;
+  /** Exact date, or the first day of `departMonth` for a flexible month scan. */
   departDate: string;
+  /** YYYY-MM; provider searches sample real dates within this month. */
+  departMonth?: string;
   returnDate?: string;
   travelers: number;
 }
@@ -75,6 +83,8 @@ export interface ProviderOffer {
   detail: string | null;
   /** Structured vendor facts when the source sent them, else null. */
   facts: OfferFacts | null;
+  /** A validated HTTPS click-through sent by the source, if it supports one. */
+  bookingUrl: string | null;
   currency: string;
   totalAmount: number;
   /** `confirmed` only when the provider confirmed one and named a reference. */
@@ -149,6 +159,7 @@ export type ProviderSearchResult = ProviderSearchFound | ProviderSearchFailed;
 export interface ProviderHoldResult {
   confirmed: boolean;
   ref: string | null;
+  /** Provider-supplied reservation/hold expiry; not necessarily a payment deadline. */
   expiresAt: string | null;
   reason: 'confirmed' | 'refused' | 'provider_changed' | ProviderFailureReason;
   /** One traveler-facing sentence: what the provider did or did not confirm. */
@@ -219,6 +230,7 @@ const providerOfferSchema = z.object({
   price: priceSchema,
   title: z.string().trim().min(1).max(200).nullish(),
   detail: z.string().trim().min(1).max(600).nullish(),
+  bookingUrl: z.unknown().nullish(),
   segments: z.array(segmentSchema).min(1).max(8).nullish(),
   stay: staySchema.nullish(),
   stops: z.number().int().min(0).max(8).nullish(),
@@ -229,16 +241,25 @@ const providerOfferSchema = z.object({
 
 export function flightQueryFrom(text: string, hints: TripHints): QueryDraft<FlightQuery> {
   const route = routeFromText(text);
-  const origin = cleanCity(hints.origin ?? route?.origin);
+  // The written route is stronger evidence than a city name elsewhere in the
+  // sentence. Normalize case and confident typos before asking a provider to
+  // resolve the place; genuinely unfamiliar names are left intact.
+  const origin = cleanCity(route?.origin ?? hints.origin);
   const destination = cleanCity(
-    hints.destination ?? route?.destination ?? destinationFromText(text),
+    route?.destination ?? hints.destination ?? destinationFromText(text),
   );
-  const departDate = validDate(hints.startDate);
+  const departMonth = validMonth(hints.departMonth) ? hints.departMonth : undefined;
+  const writtenDepart = validDate(explicitDates(text)[0]);
+  const modelDepart = validDate(hints.departDate);
+  const departDate =
+    writtenDepart ??
+    modelDepart ??
+    (departMonth ? `${departMonth}-01` : validDate(hints.startDate));
   const travelers = validTravelers(hints.travelers);
   const missing: string[] = [];
   if (!origin) missing.push('an origin city');
   if (!destination) missing.push('a destination');
-  if (!departDate) missing.push('a departure date');
+  if (!departDate) missing.push('a departure date or month');
   if (hints.travelers !== undefined && !travelers) {
     missing.push('a party size from 1 to 12');
   }
@@ -260,6 +281,7 @@ export function flightQueryFrom(text: string, hints: TripHints): QueryDraft<Flig
       origin,
       destination,
       departDate,
+      ...(departMonth && !writtenDepart && !modelDepart ? { departMonth } : {}),
       ...(returnDate && validDate(returnDate) && laterDate(returnDate, departDate)
         ? { returnDate }
         : {}),
@@ -317,7 +339,28 @@ export async function searchFlights(
   query: FlightQuery,
   ctx: ToolContext,
 ): Promise<ProviderSearchResult> {
-  return search(FLIGHT_SLOT, query, ctx);
+  if (!query.departMonth) return search(FLIGHT_SLOT, query, ctx);
+
+  const dates = flexibleDepartureDates(query.departMonth, ctx.now, query.returnDate);
+  if (!dates.length) {
+    return {
+      ok: false,
+      kind: 'flight',
+      reason: 'bad_query',
+      provider: null,
+      detail: 'the requested month has no remaining sample departure dates.',
+    };
+  }
+
+  // Providers still receive the exact dates they can price. Sampling once a week
+  // covers the month quickly while avoiding a misleading arbitrary day-one fare.
+  const results = await Promise.all(
+    dates.map((departDate) => {
+      const { departMonth: _departMonth, ...exactQuery } = query;
+      return search(FLIGHT_SLOT, { ...exactQuery, departDate }, ctx);
+    }),
+  );
+  return combineFlexibleFlightResults(results);
 }
 
 export async function searchStays(
@@ -325,6 +368,79 @@ export async function searchStays(
   ctx: ToolContext,
 ): Promise<ProviderSearchResult> {
   return search(STAY_SLOT, query, ctx);
+}
+
+function flexibleDepartureDates(month: string, now: Date, returnDate?: string): string[] {
+  if (!validMonth(month)) return [];
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const samples = FLEXIBLE_FLIGHT_SAMPLE_DAYS.filter((day) => day <= daysInMonth);
+  const candidates = samples.length ? [...samples] : [1];
+  const isCurrentMonth =
+    year === now.getUTCFullYear() && monthNumber === now.getUTCMonth() + 1;
+  let dates = candidates
+    .filter((day) => !isCurrentMonth || day >= now.getUTCDate())
+    .map((day) => `${month}-${String(day).padStart(2, '0')}`);
+
+  // If the calendar is already past the final weekly sample, make one truthful
+  // search for today instead of claiming the month has no remaining dates.
+  if (!dates.length && isCurrentMonth) {
+    dates = [`${month}-${String(now.getUTCDate()).padStart(2, '0')}`];
+  }
+  if (returnDate) dates = dates.filter((date) => laterDate(returnDate, date));
+  return dates;
+}
+
+function combineFlexibleFlightResults(
+  results: ProviderSearchResult[],
+): ProviderSearchResult {
+  const found = results.filter((result): result is ProviderSearchFound => result.ok);
+  if (!found.length) {
+    return (
+      results.find((result): result is ProviderSearchFailed => !result.ok) ?? {
+        ok: false,
+        kind: 'flight',
+        reason: 'http_error',
+        provider: null,
+        detail: 'no weekly sample search returned a result.',
+      }
+    );
+  }
+
+  const allOffers = found.map((result) => result.offers);
+  const offers = roundRobin(allOffers, MAX_FLEXIBLE_FLIGHT_OFFERS);
+  const sources = new Map<string, ProviderSearchSource>();
+  for (const result of found) {
+    for (const source of result.sources) {
+      const previous = sources.get(source.providerId);
+      if (!previous) {
+        sources.set(source.providerId, { ...source });
+        continue;
+      }
+      const ok = previous.ok || source.ok;
+      sources.set(source.providerId, {
+        ...previous,
+        ok,
+        retrievedAt: source.retrievedAt ?? previous.retrievedAt,
+        offerCount: previous.offerCount + source.offerCount,
+        dropped: previous.dropped + source.dropped,
+        limited: previous.limited + source.limited,
+        ...(ok ? { reason: undefined, detail: undefined } : {}),
+      });
+    }
+  }
+  const everyOffer = allOffers.flat();
+  return {
+    ok: true,
+    kind: 'flight',
+    sources: [...sources.values()],
+    offers,
+    dropped: found.reduce((total, result) => total + result.dropped, 0),
+    limited:
+      found.reduce((total, result) => total + result.limited, 0) +
+      everyOffer.length -
+      offers.length,
+  };
 }
 
 /** Only the market keys the message or the operator default actually supplied. */
@@ -466,7 +582,7 @@ export async function requestProviderHold(
       ref: confirmed.data.ref,
       expiresAt: confirmed.data.expiresAt ?? null,
       reason: 'confirmed',
-      note: `${provider} confirmed a hold${confirmed.data.expiresAt ? ` until ${confirmed.data.expiresAt}` : ''}. Reference ${confirmed.data.ref}. Nothing was purchased.`,
+      note: `${provider} confirmed a reservation hold${confirmed.data.expiresAt ? ` until ${confirmed.data.expiresAt}` : ''}. Reference ${confirmed.data.ref}. TravelClaw did not take payment; follow the provider's payment terms.`,
     };
   }
   // Anything weaker than a confirmation — `confirmed: false`, a "requested" flag,
@@ -701,6 +817,22 @@ function roundRobin<T>(groups: T[][], limit: number): T[] {
 
 type ProviderOfferPayload = z.infer<typeof providerOfferSchema>;
 
+function safeBookingUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 2048) return null;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    for (const key of url.searchParams.keys()) {
+      if (/(?:key|token|secret|auth|password|credential|session)/i.test(key)) return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeOffer(
   raw: ProviderOfferPayload,
   kind: DeskKind,
@@ -725,6 +857,7 @@ function normalizeOffer(
     title,
     detail,
     facts: offerFacts(raw, kind, segments, stay),
+    bookingUrl: safeBookingUrl(raw.bookingUrl),
     currency: raw.price.currency,
     totalAmount: raw.price.amount,
     hold: hold.hold,
@@ -859,6 +992,10 @@ function validDate(candidate: string | undefined): string | undefined {
   return candidate && parseIsoDate(candidate) ? candidate : undefined;
 }
 
+function validMonth(candidate: string | undefined): candidate is string {
+  return Boolean(candidate && /^\d{4}-(0[1-9]|1[0-2])$/.test(candidate));
+}
+
 function validTravelers(value: number | undefined): number | undefined {
   return value !== undefined && Number.isInteger(value) && value >= 1 && value <= 12
     ? value
@@ -960,8 +1097,38 @@ const NOT_CITY_WORD = new Set([
   'Please',
   'Some',
   'Any',
+  'And',
+  'Or',
+  'But',
+  'With',
+  'On',
+  'During',
+  'After',
+  'Before',
+  'By',
+  'Until',
+  'Around',
+  'Date',
+  'Dates',
+  'Day',
+  'Days',
+  'Week',
+  'Weeks',
+  'Month',
+  'Months',
+  'Available',
+  'Options',
+  'Fares',
+  'Fare',
+  'Cheap',
+  'Cheapest',
+  'Morning',
+  'Evening',
+  'Flexible',
 ]);
 
+const NOT_CITY_WORD_LOWER = new Set([...NOT_CITY_WORD].map((word) => word.toLowerCase()));
+const NOT_A_CITY_LOWER = new Set([...NOT_A_CITY].map((word) => word.toLowerCase()));
 const PREPOSITIONS = new Set(['to', 'in', 'at', 'for']);
 const ROUTE_SEPARATORS = new Set(['to', '→', '->']);
 
@@ -973,8 +1140,9 @@ function words(text: string): string[] {
 }
 
 function looksLikeCity(word: string): boolean {
-  // Either a two-to-four-letter airport code or a capitalized name.
-  return /^[A-Z]{2,4}$/.test(word) || /^\p{Lu}\p{L}+$/u.test(word);
+  // Travelers type place names in any case. Filler words are filtered separately
+  // so a lowercase route can be read without treating "and" or "in" as a city.
+  return /^[A-Z]{2,4}$/.test(word) || /^\p{L}[\p{L}'’.-]*$/u.test(word);
 }
 
 /** Up to two city words from `start`, walking in one direction, stopping at filler. */
@@ -982,11 +1150,11 @@ function cityPhrase(list: string[], start: number, direction: 1 | -1): string | 
   const picked: string[] = [];
   for (let i = start; i >= 0 && i < list.length && picked.length < 2; i += direction) {
     const word = list[i];
-    if (!looksLikeCity(word) || NOT_CITY_WORD.has(word)) break;
+    if (!looksLikeCity(word) || NOT_CITY_WORD_LOWER.has(word.toLowerCase())) break;
     if (direction === 1) picked.push(word);
     else picked.unshift(word);
   }
-  return picked.length ? picked.join(' ') : undefined;
+  return picked.length ? normalizeCityName(picked.join(' ')) : undefined;
 }
 
 /**
@@ -1018,6 +1186,6 @@ function destinationFromText(text: string): string | undefined {
 function cleanCity(value: string | undefined): string | undefined {
   const trimmed = value?.trim().replace(/[.,!?]+$/, '');
   if (!trimmed || trimmed.length < 2) return undefined;
-  if (NOT_A_CITY.has(trimmed.split(/\s+/)[0])) return undefined;
-  return trimmed;
+  if (NOT_A_CITY_LOWER.has(trimmed.split(/\s+/)[0].toLowerCase())) return undefined;
+  return normalizeCityName(trimmed);
 }
