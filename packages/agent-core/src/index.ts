@@ -33,6 +33,18 @@ export {
 } from './http';
 export type { FetchRetryOptions } from './http';
 export { DESTINATIONS, findDestination, findDestinationByName } from './destinations';
+export {
+  AIRLINES,
+  AIRLINE_ROUTES,
+  airlineRouteData,
+  airlinesInCountry,
+  DIRECTORY_AIRPORTS,
+  directoryAgeDays,
+  directoryAirportCode,
+  findAirline,
+  lookupRoute,
+} from './airlines';
+export type { AirlineProfile, AirlineRouteFact, RouteLookup } from './airlines';
 export { deskName, planAgentDesks } from './desks';
 export type { DeskKind } from './desks';
 export { extractHints } from './extract';
@@ -132,6 +144,10 @@ export {
 export type { CompleteTurnDeps } from './turn';
 export type {
   ActiveTripHint,
+  AirlineBookingChannel,
+  AirlineContact,
+  AirlineData,
+  AirlinePaymentOrder,
   BudgetData,
   ConnectorCredentials,
   CurrencyData,

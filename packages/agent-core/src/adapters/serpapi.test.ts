@@ -101,15 +101,45 @@ const flightsPayload = {
   ],
 };
 
+/** What the vendor answers when the desk spends a booking token. */
+const bookingOptionsPayload = {
+  booking_options: [
+    {
+      together: {
+        book_with: 'Example Air',
+        airline: true,
+        price: 620.5,
+        deeplink: 'https://airline.example/checkout?ref=EX1',
+      },
+    },
+  ],
+};
+
+/**
+ * One responder that knows all three of this engine's shapes. Booking lookups
+ * are matched first: their request also carries `engine=google_flights`, so a
+ * responder that only special-cased the autocomplete call would answer a booking
+ * lookup with flight results and hide the difference.
+ */
+function flightsResponder(
+  payload: unknown = flightsPayload,
+  options: { booking?: unknown } = {},
+) {
+  return async (url: string): Promise<Response> => {
+    if (url.includes('google_flights_autocomplete')) {
+      return json({
+        suggestions: [{ name: 'Lisbon', id: '/m/04jpl', airports: [{ id: 'LIS' }] }],
+      });
+    }
+    if (url.includes('booking_token='))
+      return json(options.booking ?? bookingOptionsPayload);
+    return json(payload);
+  };
+}
+
 describe('SerpApi Google Flights adapter', () => {
   it('resolves a city with the vendor lookup, keeps the key in a header, and maps real fares', async () => {
-    const { ctx, seen } = ctxWith('flight', credential(), async (url) =>
-      url.includes('google_flights_autocomplete')
-        ? json({
-            suggestions: [{ name: 'Lisbon', id: '/m/04jpl', airports: [{ id: 'LIS' }] }],
-          })
-        : json(flightsPayload),
-    );
+    const { ctx, seen } = ctxWith('flight', credential(), flightsResponder());
 
     const result = await searchFlights(
       { origin: 'LOS', destination: 'Lisbon', departDate: '2026-11-02', travelers: 1 },
@@ -118,7 +148,9 @@ describe('SerpApi Google Flights adapter', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(seen).toHaveLength(2);
+    // Autocomplete, the fare search, then one booking lookup for the itinerary
+    // that carried a token. The second itinerary has none, so it costs nothing.
+    expect(seen).toHaveLength(3);
     expect(seen[0].url).toContain('engine=google_flights_autocomplete');
     expect(seen[0].url).toContain('q=Lisbon');
     expect(seen[1].url).toContain('engine=google_flights');
@@ -152,7 +184,7 @@ describe('SerpApi Google Flights adapter', () => {
   });
 
   it('passes an airport code straight through without a lookup call', async () => {
-    const { ctx, seen } = ctxWith('flight', credential(), async () => json(flightsPayload));
+    const { ctx, seen } = ctxWith('flight', credential(), flightsResponder());
 
     const result = await searchFlights(
       { origin: 'LOS', destination: 'LIS', departDate: '2026-11-02', travelers: 2 },
@@ -161,7 +193,9 @@ describe('SerpApi Google Flights adapter', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(seen).toHaveLength(1);
+    // The fare search plus one booking lookup; no autocomplete for a code.
+    expect(seen).toHaveLength(2);
+    expect(seen[1].url).toContain('booking_token=opaque-booking-token');
     expect(seen[0].url).toContain('adults=2');
     // Nothing in the message stated a currency, so the desk does not invent one;
     // the vendor's own default (USD) is what it then prices in.
@@ -173,7 +207,7 @@ describe('SerpApi Google Flights adapter', () => {
     const { ctx, seen } = ctxWith(
       'flight',
       credential({ cityCodes: { lagos: 'LOS' } }),
-      async () => json(flightsPayload),
+      flightsResponder(),
     );
 
     const result = await searchFlights(
@@ -182,8 +216,90 @@ describe('SerpApi Google Flights adapter', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(seen).toHaveLength(1);
+    expect(seen).toHaveLength(2);
     expect(seen[0].url).toContain('departure_id=LOS');
+  });
+
+  it('turns the vendor token into a seller link, and never lets the token out', async () => {
+    const { ctx, seen } = ctxWith('flight', credential(), flightsResponder());
+
+    const result = await searchFlights(
+      { origin: 'LOS', destination: 'LIS', departDate: '2026-11-02', travelers: 1 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.offers[0]?.bookingUrl).toBe('https://airline.example/checkout?ref=EX1');
+    // The itinerary that carried no token keeps no link: nothing was invented.
+    expect(result.offers[1]?.bookingUrl).toBeNull();
+    // The token was spent inside the adapter. It is not an id, a detail, or a
+    // click-through, so it cannot reach a stored offer or a prompt.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('opaque-booking-token');
+    // A booking lookup is a lookup. The vendor's own documentation is explicit
+    // that it neither purchases nor reserves, so the disclosure is unchanged.
+    expect(result.sources[0]).toMatchObject({ holdSupport: 'unsupported' });
+    expect(result.offers[0]?.hold).toBe('none');
+    // And the booking request carries no date: the vendor says a token cannot be
+    // re-dated, so sending one would silently search a different itinerary.
+    const booking = seen.find((call) => call.url.includes('booking_token='));
+    expect(booking?.url).not.toContain('outbound_date');
+    expect(booking?.url).not.toContain('departure_id');
+  });
+
+  it('drops a booking option it cannot hand over instead of passing on a dead link', async () => {
+    // A POST-only option needs a redirect handler the desk does not have.
+    const { ctx } = ctxWith(
+      'flight',
+      credential(),
+      flightsResponder(flightsPayload, {
+        booking: {
+          booking_options: [
+            {
+              together: {
+                book_with: 'Example Air',
+                booking_request: {
+                  url: 'https://www.google.example/travel/clk/f',
+                  post_data: 'u=opaque-form-body',
+                },
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await searchFlights(
+      { origin: 'LOS', destination: 'LIS', departDate: '2026-11-02', travelers: 1 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The fare survives; only the click-through is missing.
+    expect(result.offers[0]?.totalAmount).toBe(620.5);
+    expect(result.offers[0]?.bookingUrl).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('opaque-form-body');
+  });
+
+  it('keeps the fare when the booking lookup itself fails', async () => {
+    const { ctx } = ctxWith(
+      'flight',
+      credential(),
+      flightsResponder(flightsPayload, { booking: { error: 'no options' } }),
+    );
+
+    const result = await searchFlights(
+      { origin: 'LOS', destination: 'LIS', departDate: '2026-11-02', travelers: 1 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.offers).toHaveLength(2);
+    expect(result.offers[0]?.bookingUrl).toBeNull();
+    expect(result.offers[0]?.totalAmount).toBe(620.5);
   });
 
   it('refuses the search instead of guessing an airport for a city the vendor does not know', async () => {

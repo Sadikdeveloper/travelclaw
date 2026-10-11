@@ -134,6 +134,78 @@ export interface PlacesData {
   places: PlaceSuggestion[];
 }
 
+/**
+ * How a carrier sequences reservation and money.
+ *
+ * - `pnr_then_pay`: the site issues a booking reference before payment, with a
+ *   payment deadline. This is the case where an agent can complete a booking and
+ *   leave the payment to the traveler.
+ * - `pay_at_booking`: the ticket is issued as part of payment, so there is no
+ *   unpaid slot to hold. The agent must hand off at the payment step.
+ * - `unverified`: the desk has not read this carrier's published terms. Treated
+ *   as "assume a handoff", never as permission to claim a reservation exists.
+ */
+export type AirlinePaymentOrder = 'pnr_then_pay' | 'pay_at_booking' | 'unverified';
+
+export interface AirlineContact {
+  email?: string;
+  phone?: string[];
+  whatsapp?: string[];
+}
+
+export interface AirlineBookingChannel {
+  /** Where the agent sends the traveler, or drives itself with permission. */
+  url: string;
+  kind: 'airline_site' | 'phone' | 'ota';
+  /** Only for `ota`: who the seller is. */
+  label?: string;
+}
+
+/**
+ * What the carrier directory knows about one city pair (`airlines.find`).
+ *
+ * Directory data only: no price, no seat, no availability was checked. The
+ * summary and `caveats` say so, because a hand-kept route table is exactly the
+ * kind of source that goes stale in a traveler's favor.
+ */
+export interface AirlineData {
+  known: boolean;
+  origin: string;
+  destination: string;
+  from: { code: string; city: string; country: string } | null;
+  to: { code: string; city: string; country: string } | null;
+  /** Carriers this desk has seen on the pair. Empty when the pair is unlisted. */
+  carriers: Array<{
+    id: string;
+    name: string;
+    iata: string | null;
+    country: string;
+    scope: 'domestic' | 'regional' | 'international';
+    hubs: string[];
+    bookingUrl: string;
+    channels: AirlineBookingChannel[];
+    paymentOrder: AirlinePaymentOrder;
+    /** Where a non-`unverified` payment order was read, else null. */
+    evidence: string | null;
+    bookingSteps: string[];
+    manageBooking: string | null;
+    contact: AirlineContact | null;
+    verifiedOn: string;
+    notes: string | null;
+  }>;
+  /** Country-level carriers offered only when the pair itself is unlisted. */
+  fallbackCarriers?: AirlineData['carriers'];
+  /** True only when the route table names at least one carrier for the pair. */
+  listed: boolean;
+  /** True when exactly one carrier is listed and no second one was ever seen. */
+  singleCarrier: boolean;
+  /** Days since the oldest row this answer rests on was checked. */
+  staleDays: number;
+  verification: string;
+  caveats: string[];
+  summary: string;
+}
+
 export interface CurrencyData {
   amount: number;
   from: string;

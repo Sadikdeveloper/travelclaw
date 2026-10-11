@@ -1,4 +1,5 @@
 import type {
+  AirlineData,
   BudgetData,
   CurrencyData,
   OfferSearchData,
@@ -53,6 +54,8 @@ export function renderResult(result: ToolResult): string {
     case 'flights.search':
     case 'stays.search':
       return renderOfferSearch(result.data as OfferSearchData);
+    case 'airlines.find':
+      return renderAirlines(result.data as AirlineData);
     case 'web.search':
       return renderWebSearch(result.data as WebSearchData);
     case 'web.fetch':
@@ -92,6 +95,43 @@ function renderOfferSearch(data: OfferSearchData): string {
       ? `${failed.length} of ${data.sources.length} sources failed, so this is partial coverage.`
       : '',
     'These are the vendor’s prices at the moment they were read. Nothing is booked.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Directory rows, not a fare card. The last line is the whole point: a route
+ * table names who to talk to, never what a seat costs or whether one is left.
+ */
+function renderAirlines(data: AirlineData): string {
+  if (!data.known) {
+    return `${data.verification}\n\nNothing is booked.`;
+  }
+  const rows = (data.carriers.length ? data.carriers : (data.fallbackCarriers ?? [])).map(
+    (airline) => {
+      const pay =
+        airline.paymentOrder === 'pnr_then_pay'
+          ? 'issues a booking reference before payment'
+          : airline.paymentOrder === 'pay_at_booking'
+            ? 'tickets as part of payment — no unpaid slot to hold'
+            : 'payment order not verified';
+      const steps = airline.bookingSteps.length
+        ? `\n  Booking: ${airline.bookingSteps.join(' Then ')}`
+        : '';
+      const manage = airline.manageBooking ? `\n  Manage: ${airline.manageBooking}` : '';
+      const code = airline.iata ? ` (${airline.iata})` : '';
+      return `- **${airline.name}**${code} — books at ${airline.bookingUrl}; ${pay}.${steps}${manage}`;
+    },
+  );
+  const head = data.listed
+    ? `${data.summary}`
+    : `${data.summary} Carriers in ${data.to?.country ?? 'that country'} this desk knows, none confirmed on this pair:`;
+  return [
+    head,
+    ...rows,
+    ...data.caveats,
+    'Nothing is booked. Availability and price still need flights.search.',
   ]
     .filter(Boolean)
     .join('\n');

@@ -6,6 +6,7 @@ import {
   type OfferFacts,
 } from '@travelclaw/shared';
 import { z } from 'zod';
+import { airlineRouteData, routePairIn } from './airlines';
 import { eachDate, inclusiveDayCount } from './dates';
 import type { DeskKind } from './desks';
 import { findDestinationByName } from './destinations';
@@ -27,6 +28,7 @@ import {
 import { zodToJsonSchema } from './tool-args';
 import { firstUrlIn, MAX_WEB_RESULTS, searchQueryFrom, webFetch, webSearch } from './web';
 import type {
+  AirlineData,
   BudgetData,
   CurrencyData,
   ModelToolSpec,
@@ -376,6 +378,64 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'airlines.find',
+    description:
+      'Look up which carriers a desk-side directory lists for a city pair, plus where each one books, how it sequences payment (booking reference first, or pay at booking), and how a booking reference is managed afterwards. Directory data only: it contains no price and no seat, so it never answers "is this flight available" — call flights.search for that. Use it to name a local or domestic carrier a fare source covers thinly, or to decide whether a reservation can exist before payment.',
+    label: 'carrier directory',
+    triggers: [
+      'which airline',
+      'which airlines',
+      'what airlines',
+      'airlines that fly',
+      'who flies',
+      'local flight',
+      'domestic flight',
+      'book directly',
+      'book with the airline',
+      'airline website',
+    ],
+    args: z.object({
+      origin: cityArg
+        .optional()
+        .describe('Origin city or airport code, for example Kaduna or KAD'),
+      destination: cityArg.optional().describe('Destination city or airport code'),
+    }),
+    run: async (input, ctx) => {
+      const hints = input.hints;
+      // A model call supplies both ends as arguments. A router call carries only
+      // what the shared extractor could resolve, which for a domestic pair is
+      // often one end, so the directory reads its own pair out of the traveler's
+      // words before giving up. It still refuses a place it does not know.
+      const pair = routePairIn(input.text);
+      const origin = hints.origin || pair?.from;
+      const destination = hints.destination || pair?.to;
+      if (!origin || !destination) {
+        return {
+          name: 'airlines.find',
+          ok: false,
+          summary:
+            'Name both ends of the route and I will look up which carriers the desk directory lists for it.',
+          data: null,
+        };
+      }
+      const data: AirlineData | null = airlineRouteData(origin, destination, ctx.now);
+      if (!data) {
+        return {
+          name: 'airlines.find',
+          ok: false,
+          summary: 'Could not read both ends of that route from the carrier directory.',
+          data: null,
+        };
+      }
+      return {
+        name: 'airlines.find',
+        ok: true,
+        summary: data.summary,
+        data,
+      };
+    },
+  },
+  {
     name: 'flights.search',
     description:
       'Search real flight fares with the configured fare sources and return what they priced: airline, route, stops, duration, price and when it was read. This is the only source of a flight price on this desk — call it before answering anything about fares, and never quote a fare from web.search, a blog, or memory.',
@@ -564,6 +624,15 @@ export function routeTools(
 const FARE_ASK = /\b(flights?|airfares?|air fares?|airlines?|cheapest fares?)\b/i;
 const ROOM_ASK = /\b(hotels?|hostels?|airbnbs?|guesthouses?|accommodation|room rates?)\b/i;
 
+/**
+ * The carrier directory earns a router slot only for the question it can answer:
+ * who flies this, where do they book, can a seat be held before money. A plain
+ * fare request keeps its whole budget for `flights.search`, since a directory row
+ * names no price and no seat.
+ */
+const CARRIER_ASK =
+  /\b(which|what|who)\s+(airlines?|carriers?)\b|\bairlines?\s+(that\s+fly|to)\b|\bwho\s+flies\b|\bbook\s+(directly|with\s+the\s+airline)\b|\bairline\s+website\b|\blocal\s+(airlines?|carriers?|flights?)\b|\bdomestic\s+(airlines?|carriers?)\b|\bhold\s+the\s+seat\b|\bpay\s+later\b/i;
+
 function structuredHit(name: string, hints: TripHints, lower: string): boolean {
   if (
     name === 'trip.outline' &&
@@ -581,6 +650,13 @@ function structuredHit(name: string, hints: TripHints, lower: string): boolean {
   // A fare tool earns its structured points when the message asks about flying
   // (or a room) and names at least one end of the trip. The trigger words alone
   // already run it; a named place makes it the turn's first call.
+  // Both ends named, plus a question the directory can answer. Without both ends
+  // there is no pair to look up; without the question the fare tool owns the turn.
+  // The pair is read here rather than from `hints` because the shared extractor
+  // resolves a destination only against the editorial destination cards, and a
+  // domestic pair usually has none.
+  if (name === 'airlines.find')
+    return CARRIER_ASK.test(lower) && Boolean(routePairIn(lower));
   if (name === 'flights.search')
     return FARE_ASK.test(lower) && Boolean(hints.origin || hints.destination);
   if (name === 'stays.search') return ROOM_ASK.test(lower) && Boolean(hints.destination);

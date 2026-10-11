@@ -12,6 +12,7 @@ import {
 } from '../http';
 import { parseIsoDate } from '../dates';
 import type { DeskKind } from '../desks';
+import { MAX_OFFERS_PER_SEARCH } from '../providers';
 import type {
   AdapterContext,
   AdapterOfferCandidate,
@@ -114,12 +115,45 @@ const flightBundleSchema = z.object({
   total_duration: z.number().nonnegative().nullish(),
   // Google names each connection. Its length is also the vendor's own stop count.
   layovers: z.array(layoverSchema).max(8).nullish(),
+  // Opaque, and only usable by asking the vendor again with it. The desk never
+  // decodes, edits, or constructs one — see `bookingOptions`.
+  booking_token: z.string().trim().min(1).max(4000).nullish(),
 });
 
 const flightPayloadSchema = z.object({
   best_flights: z.array(z.unknown()).max(80).nullish(),
   other_flights: z.array(z.unknown()).max(80).nullish(),
   search_parameters: z.object({ currency: z.string().trim().max(8).nullish() }).nullish(),
+});
+
+/**
+ * What one seller's booking option looks like. The vendor sends either a
+ * `deeplink` (open it directly) or a `booking_request` that is a Google endpoint
+ * plus a form body the caller must POST unmodified. The desk only hands a
+ * traveler a link it can open, so a POST-only option is read and then dropped
+ * rather than passed on as something that would not work.
+ */
+const bookingOptionSchema = z.object({
+  book_with: z.string().trim().min(1).max(160).nullish(),
+  airline: z.boolean().nullish(),
+  price: z.union([z.number(), z.string()]).nullish(),
+  deeplink: z.string().trim().min(1).max(2048).nullish(),
+  booking_request: z
+    .object({
+      url: z.string().trim().min(1).max(2048).nullish(),
+      post_data: z.string().nullish(),
+    })
+    .nullish(),
+});
+
+const bookingOptionsSideSchema = z.object({
+  together: bookingOptionSchema.nullish(),
+  departing: bookingOptionSchema.nullish(),
+  returning: bookingOptionSchema.nullish(),
+});
+
+const bookingOptionsPayloadSchema = z.object({
+  booking_options: z.array(bookingOptionsSideSchema).max(20).nullish(),
 });
 
 const rateSchema = z.object({
@@ -207,7 +241,79 @@ async function searchFlights(
     if (candidate) offers.push(candidate);
     else dropped += 1;
   }
+  await attachBookingLinks(offers, input, ctx, base);
   return { ok: true, offers, dropped };
+}
+
+/**
+ * Turn each itinerary's vendor token into a real seller link.
+ *
+ * This is a second vendor request per itinerary, so it is bounded to the offers
+ * the desk can actually show (`MAX_OFFERS_PER_SEARCH`) and spent inside the
+ * adapter: the token never reaches an offer row, a task, a summary, or a prompt.
+ * What leaves this function is an ordinary `bookingUrl` — a link the traveler
+ * can open — and nothing else.
+ *
+ * Two things this link is not, and the offer keeps saying so elsewhere:
+ *
+ * - **Not a reservation.** The vendor's own documentation is explicit that
+ *   retrieving booking options neither purchases nor reserves a ticket. The desk
+ *   still reports `hold: unsupported` for this adapter.
+ * - **Not the airline.** The seller may be the operating carrier or a travel
+ *   agency; the option says which, and only a URL the desk can hand over is
+ *   used. An option that exists only as a POST the caller must replay is read
+ *   and then dropped rather than passed on as a link that would not work.
+ *
+ * A failed lookup costs that one offer its link, never the search: the fare and
+ * the itinerary are already in hand, and losing the click-through does not make
+ * the price untrue.
+ */
+async function attachBookingLinks(
+  offers: AdapterOfferCandidate[],
+  input: AdapterSearchInput,
+  ctx: AdapterContext,
+  base: string,
+): Promise<void> {
+  const pending = offers
+    .slice(0, MAX_OFFERS_PER_SEARCH)
+    .map((offer) => ({ offer, token: offer.bookingToken }))
+    .filter((entry): entry is { offer: AdapterOfferCandidate; token: string } =>
+      Boolean(entry.token),
+    );
+  if (!pending.length) return;
+  await Promise.all(
+    pending.map(async ({ offer, token }) => {
+      const url = await bookingLink(token, input, ctx, base);
+      // Spent or not, the token does not leave the adapter.
+      delete offer.bookingToken;
+      if (url) offer.bookingUrl = url;
+    }),
+  );
+}
+
+async function bookingLink(
+  token: string,
+  input: AdapterSearchInput,
+  ctx: AdapterContext,
+  base: string,
+): Promise<string | undefined> {
+  // The vendor's own constraint: a booking token cannot be combined with a
+  // departure token or with the date and filter parameters, so the request
+  // carries the search context and the token and nothing that would re-date it.
+  const params = new URLSearchParams({ engine: 'google_flights', booking_token: token });
+  addLocale(params, input);
+  const fetched = await serpApiJson(params, ctx, base, 'flight');
+  if (!fetched.ok) return undefined;
+  const payload = bookingOptionsPayloadSchema.safeParse(fetched.body);
+  if (!payload.success) return undefined;
+
+  for (const option of payload.data.booking_options ?? []) {
+    const side = option.together ?? option.departing ?? option.returning;
+    // A POST-only option needs a redirect handler the desk does not have; the
+    // deeplink is the form it can actually hand to a traveler.
+    if (side?.deeplink) return side.deeplink;
+  }
+  return undefined;
 }
 
 async function searchStays(
@@ -281,6 +387,7 @@ function flightCandidate(
     stops: layovers.length,
     durationMinutes: bundle.data.total_duration ?? null,
     stopNames,
+    ...(bundle.data.booking_token ? { bookingToken: bundle.data.booking_token } : {}),
   };
 }
 

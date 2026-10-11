@@ -56,6 +56,12 @@ export interface AdapterOfferCandidate {
   detail?: string;
   /** Direct provider click-through, only when the source actually supplied it. */
   bookingUrl?: string;
+  /**
+   * A vendor token that identifies this itinerary on a follow-up request for the
+   * sellers who will book it. Opaque: never decoded, edited, stored as a fare,
+   * or constructed by the desk. Only the adapter that received it may spend it.
+   */
+  bookingToken?: string;
   segments?: Array<{
     from: string;
     to: string;
