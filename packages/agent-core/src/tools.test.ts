@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { airlineRouteData, lookupRoute } from './airlines';
+import { airlineRouteData, findCarrierByName, lookupRoute } from './airlines';
 import { planAgentDesks } from './desks';
 import { inclusiveDayCount } from './dates';
 import {
@@ -282,6 +282,56 @@ describe('carrier directory', () => {
     expect(halfKnown.ok).toBe(false);
     expect(halfKnown.data).toBeNull();
     expect(halfKnown.summary).toMatch(/both ends/i);
+  });
+
+  it('answers for a carrier anywhere in the world, with no route needed', async () => {
+    // A fare source names the carrier for any pair on earth; the directory is
+    // keyed by carrier too, so the lookup does not depend on the route table.
+    const result = await runTool(
+      tool,
+      '',
+      { carrier: 'Ethiopian Airlines', interests: [] },
+      'model',
+      { now, network: false },
+    );
+    expect(result.ok).toBe(true);
+    const data = result.data as AirlineData;
+    expect(data.carriers).toHaveLength(1);
+    expect(data.carriers[0]?.name).toBe('Ethiopian Airlines');
+    expect(data.carriers[0]?.iata).toBe('ET');
+    expect(data.carriers[0]?.bookingUrl).toBe('https://www.ethiopianairlines.com/');
+    // It matched a carrier, not a route, and says so rather than implying coverage.
+    expect(data.listed).toBe(false);
+    expect(data.from).toBeNull();
+    expect(data.verification).toMatch(/no route was matched/i);
+    expect(data.caveats.join(' ')).toMatch(/not evidence that it serves/i);
+    expect(result.summary).toMatch(/no payment order this desk has verified/);
+  });
+
+  it('matches a carrier without its corporate suffix, and refuses a loose guess', () => {
+    expect(findCarrierByName('Ethiopian')?.id).toBe('ethiopian');
+    expect(findCarrierByName('  rwandair  ')?.id).toBe('rwandair');
+    expect(findCarrierByName('Qatar')?.id).toBe('qatar-airways');
+    // A short or unrelated word must not attach one airline's booking terms to
+    // another; not knowing is the safe answer.
+    expect(findCarrierByName('Air')).toBeUndefined();
+    expect(findCarrierByName('Emirates Airways International')).toBeUndefined();
+    expect(findCarrierByName('')).toBeUndefined();
+  });
+
+  it('says plainly when the named carrier is not in the directory', async () => {
+    const result = await runTool(
+      tool,
+      '',
+      { carrier: 'Atlantis Air', interests: [] },
+      'model',
+      { now, network: false },
+    );
+    const data = result.data as AirlineData;
+    expect(data.known).toBe(false);
+    expect(data.carriers).toHaveLength(0);
+    expect(data.summary).toMatch(/Atlantis Air/);
+    expect(data.caveats.join(' ')).toMatch(/gap in the table/);
   });
 
   it('flags carriers whose payment order nobody has verified', async () => {

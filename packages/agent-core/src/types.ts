@@ -289,6 +289,13 @@ export interface TripHints {
   destination?: string;
   origin?: string;
   /**
+   * A carrier the traveler named, or that a fare search returned
+   * (`airlines.find`). This is how the directory stays useful worldwide: a fare
+   * source names the carrier for any route on earth, and the directory is then
+   * looked up by carrier rather than by a city pair it happens to list.
+   */
+  carrier?: string;
+  /**
    * A free-text web query (`web.search`). Model arguments merge into `TripHints`
    * like every other tool, so a web tool's arguments live here rather than in a
    * parallel shape the planner would have to special-case.

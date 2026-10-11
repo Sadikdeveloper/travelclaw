@@ -38,10 +38,12 @@ export {
   AIRLINE_ROUTES,
   airlineRouteData,
   airlinesInCountry,
+  carrierData,
   DIRECTORY_AIRPORTS,
   directoryAgeDays,
   directoryAirportCode,
   findAirline,
+  findCarrierByName,
   lookupRoute,
 } from './airlines';
 export type { AirlineProfile, AirlineRouteFact, RouteLookup } from './airlines';

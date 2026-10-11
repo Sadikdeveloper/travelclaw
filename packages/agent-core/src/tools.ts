@@ -6,7 +6,7 @@ import {
   type OfferFacts,
 } from '@travelclaw/shared';
 import { z } from 'zod';
-import { airlineRouteData, routePairIn } from './airlines';
+import { airlineRouteData, carrierData, routePairIn } from './airlines';
 import { eachDate, inclusiveDayCount } from './dates';
 import type { DeskKind } from './desks';
 import { findDestinationByName } from './destinations';
@@ -399,6 +399,15 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
         .optional()
         .describe('Origin city or airport code, for example Kaduna or KAD'),
       destination: cityArg.optional().describe('Destination city or airport code'),
+      carrier: z
+        .string()
+        .trim()
+        .min(2)
+        .max(80)
+        .optional()
+        .describe(
+          'A carrier name to look up on its own, for example one that flights.search just returned. Use it when the city pair is not in the directory but the carrier might be.',
+        ),
     }),
     run: async (input, ctx) => {
       const hints = input.hints;
@@ -410,11 +419,23 @@ export const BUNDLED_TOOLS: ToolDefinition[] = [
       const origin = hints.origin || pair?.from;
       const destination = hints.destination || pair?.to;
       if (!origin || !destination) {
+        // No pair, but a carrier the traveler or a fare search named is still
+        // answerable anywhere in the world: the directory is keyed by carrier as
+        // well as by route, and its route table only ever covers a few markets.
+        if (hints.carrier) {
+          const carrier = carrierData(hints.carrier, ctx.now);
+          return {
+            name: 'airlines.find',
+            ok: true,
+            summary: carrier?.summary ?? 'No matching carrier in the desk directory.',
+            data: carrier,
+          };
+        }
         return {
           name: 'airlines.find',
           ok: false,
           summary:
-            'Name both ends of the route and I will look up which carriers the desk directory lists for it.',
+            'Name both ends of the route, or a carrier, and I will look up what the desk directory holds for it.',
           data: null,
         };
       }

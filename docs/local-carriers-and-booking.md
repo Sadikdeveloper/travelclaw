@@ -143,13 +143,18 @@ is search-only by design: its authorization list refuses checkout, account, and
 payment endpoints, it has no signed-in profile, and it cannot upload, download,
 or evaluate JavaScript. Booking on a carrier's site needs all of that.
 
-That is a real security step up, not a config change, and it should be its own
-design: a separate worker class with no provider keys, an operator-approved
-per-site booking script rather than a free-form agent loop, human confirmation
-before submit, and no payment page at all — the handoff at payment is the
-feature. Until then the honest capability is: name the carrier, open its booking
-page with the route and date in the traveler's own browser, and ask for the
-booking reference afterwards.
+The precise blockers, and what OpenClaw and Hermes do about each of them, are in
+[browser prefill research](browser-prefill-research.md). The short version is that
+the worker already has a `fill` action and a canonical travel-field vocabulary;
+what stops a booking is a deliberate control gate that refuses any control
+labelled _Book now_, _Reserve_, or _Confirm booking_, plus a site authorization
+model that grants search paths only. The design that follows is to split that gate
+into three tiers — payment permanently closed, booking fields operator-authorized
+per site, search unchanged — and to add a recorded human confirm before submit.
+
+Until then the honest capability is: name the carrier, open its booking page with
+the route and date in the traveler's own browser, and ask for the booking
+reference afterwards.
 
 ## Not built: email and calendar
 
@@ -217,7 +222,12 @@ saying stop.
 
 Hand-keeping a route table for every country does not scale and goes stale in
 weeks; this desk's table is deliberately a few Nigerian pairs plus carrier
-identity. If route and schedule coverage needs to grow, the answer is a schedule
+identity. The directory is worldwide anyway, because it is keyed by carrier as
+well as by route: `airlines.find` takes the carrier a fare search named and
+returns where that carrier books and how it sequences payment, with no route row
+involved. See
+[browser prefill research](browser-prefill-research.md#worldwide-coverage-of-the-directory)
+for how coverage grows without hand-listing the world. If route and schedule coverage needs to grow, the answer is a schedule
 or content API queried at request time, not a bigger seed file — the fast-changing
 facts should come from a source that is paid to keep them current, and the
 hand-kept table should stay limited to what changes slowly and what no API will

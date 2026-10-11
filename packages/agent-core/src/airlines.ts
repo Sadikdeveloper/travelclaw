@@ -549,6 +549,31 @@ export const AIRLINE_ROUTES: AirlineRouteFact[] = [
 
 const BY_ID = new Map(AIRLINES.map((airline) => [airline.id, airline]));
 
+/**
+ * A carrier the traveler or a fare source named, matched against the directory.
+ *
+ * This is what makes the directory usable worldwide rather than only on the
+ * handful of pairs it lists: any fare source on earth returns a carrier name,
+ * and a name is enough to look up where that carrier books and how it sequences
+ * payment. Matching stays conservative — an exact name, or the name without a
+ * trailing corporate word — because a loose match would attach one airline's
+ * booking terms to a different airline, which is worse than not knowing.
+ */
+export function findCarrierByName(name: string): AirlineProfile | undefined {
+  const wanted = name.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!wanted) return undefined;
+  const exact = AIRLINES.find((airline) => airline.name.toLowerCase() === wanted);
+  if (exact) return exact;
+  const bare = wanted.replace(CORPORATE_SUFFIX, '').trim();
+  if (!bare || bare.length < 3) return undefined;
+  return AIRLINES.find((airline) => {
+    const candidate = airline.name.toLowerCase();
+    return candidate === bare || candidate.replace(CORPORATE_SUFFIX, '').trim() === bare;
+  });
+}
+
+const CORPORATE_SUFFIX = /\s+(airlines?|airways?|air|lines?|group|holding|holdings)$/i;
+
 export function findAirline(id: string): AirlineProfile | undefined {
   return BY_ID.get(id);
 }
@@ -687,6 +712,65 @@ export function directoryAgeDays(verifiedOn: string, now: Date): number {
   const checked = Date.parse(`${verifiedOn}T00:00:00Z`);
   if (Number.isNaN(checked)) return 0;
   return Math.max(0, Math.floor((now.getTime() - checked) / 86_400_000));
+}
+
+/**
+ * One named carrier with no route attached. Used when a fare source named the
+ * carrier but the pair is not in the route table, which is the ordinary case
+ * outside the desk's own market: the carrier is knowable worldwide, the desk's
+ * opinion about who flies a given pair is not.
+ */
+export function carrierData(name: string, now: Date): AirlineData | null {
+  const airline = findCarrierByName(name);
+  if (!airline) {
+    return {
+      known: false,
+      origin: name.trim(),
+      destination: '',
+      from: null,
+      to: null,
+      carriers: [],
+      listed: false,
+      singleCarrier: false,
+      staleDays: 0,
+      verification: `No carrier named "${name.trim()}" is in this desk's directory. Add it, or ask the traveler to book on the site the fare source named.`,
+      caveats: [
+        'Directory data, not a fare: no price or seat was checked here. Call flights.search for what a source actually priced.',
+        'A carrier missing from a hand-kept table is a gap in the table, not proof it does not exist.',
+      ],
+      summary: `No carrier named "${name.trim()}" is in this desk's directory.`,
+    };
+  }
+  const staleDays = directoryAgeDays(airline.verifiedOn, now);
+  const pay =
+    airline.paymentOrder === 'pnr_then_pay'
+      ? 'issues a booking reference before payment'
+      : airline.paymentOrder === 'pay_at_booking'
+        ? 'tickets as part of payment, so there is no unpaid slot to hold'
+        : 'has no payment order this desk has verified';
+  return {
+    known: true,
+    origin: airline.name,
+    destination: '',
+    from: null,
+    to: null,
+    carriers: [describeAirline(airline)],
+    listed: false,
+    singleCarrier: false,
+    staleDays,
+    verification: `Carrier row last checked ${airline.verifiedOn}. No route was matched, so this says nothing about where it flies.`,
+    caveats: [
+      'Directory data, not a fare: no price or seat was checked here. Call flights.search for what a source actually priced.',
+      `Rows were last checked ${staleDays} day${staleDays === 1 ? '' : 's'} ago; airlines change routes and booking terms.`,
+      'No route was matched: this carrier\u2019s booking details are not evidence that it serves the traveler\u2019s pair.',
+      ...(airline.paymentOrder === 'unverified'
+        ? [
+            `Payment order is unverified for ${airline.name}. Assume the traveler must pay at the payment step; do not claim a reservation exists.`,
+          ]
+        : []),
+    ],
+    summary: `${airline.name}${airline.iata ? ` (${airline.iata})` : ''} books at ${airline.bookingUrl} and ${pay}. Row checked ${airline.verifiedOn}; no route was matched.`,
+  };
 }
 
 /**
