@@ -28,6 +28,7 @@ import {
   type TaskDecision,
 } from '@travelclaw/shared';
 import { newId, nowIso } from '../common/util';
+import { BookingConfirmationService } from '../browser/confirmation.service';
 import { BrowserService } from '../browser/browser.service';
 import { loadConfig } from '../config';
 import { ConnectorsService } from '../connectors/connectors.service';
@@ -90,6 +91,7 @@ export class TasksService {
     private readonly sessions: SessionsService,
     private readonly connectors: ConnectorsService,
     private readonly browser: BrowserService,
+    private readonly confirmations: BookingConfirmationService,
   ) {}
 
   /** Whether an authorized browser source can perform a live search without an adapter. */
@@ -332,6 +334,84 @@ export class TasksService {
     await this.browser.stop(id);
     const task = this.get(id);
     return this.forSession(task.session_id).find((item) => item.id === id)!;
+  }
+
+  /**
+   * The traveler approves one browser run filling the details they stated, on the
+   * site this desk is already on.
+   *
+   * Three things keep this narrow. The site is read from the run, not from the
+   * request, so approving one site cannot be replayed against another. The run
+   * must be sitting at a `confirmation_required` handoff, which is the worker
+   * saying out loud that it stopped at a passenger-details step. And the approval
+   * is recorded as a row with an epoch and an expiry, which the run then has to
+   * spend — a second run needs a fresh approval.
+   *
+   * Nothing here fills anything itself; it records consent and starts the run.
+   */
+  async approveBrowserBooking(taskId: string): Promise<AgentTaskRecord> {
+    const task = this.get(taskId);
+    const run = this.browser.state(taskId);
+    if (!run?.siteId)
+      throw new ConflictException('There is no website research waiting on this desk');
+    if (run.reason !== 'confirmation_required')
+      throw new ConflictException(
+        'That desk is not waiting for approval to fill your details',
+      );
+    const siteName = run.siteName || run.siteId;
+    this.confirmations.record({
+      sessionId: task.session_id,
+      taskId,
+      siteId: run.siteId,
+      summary: `Fill the details you stated in this chat on ${siteName}. Payment always stays with you.`,
+    });
+    const started = this.patch(taskId, {
+      status: 'working',
+      summary: `${task.summary} You approved the fill on ${siteName}. The browser will stop before any payment step.`,
+    });
+    void this.runBooking(task);
+    return started;
+  }
+
+  /** Withdraw an approval. Stops the run if it is live; safe to call afterwards. */
+  async revokeBrowserBooking(taskId: string): Promise<AgentTaskRecord> {
+    this.confirmations.revoke(taskId);
+    await this.browser.stop(taskId);
+    const task = this.get(taskId);
+    return this.patch(taskId, {
+      status: 'awaiting',
+      summary: `${task.summary} You withdrew the approval. The browser stopped and nothing was submitted.`,
+    });
+  }
+
+  /**
+   * Re-run this desk as a booking fill. The confirmation is consumed by the run
+   * that picks it up, and the run is fenced by its epoch: if the traveler
+   * withdraws mid-flight the run is voided rather than reported.
+   */
+  private runBooking(task: TaskRow): void {
+    void this.browser
+      .research({
+        id: task.id,
+        session_id: task.session_id,
+        request: task.request,
+        kind: task.kind,
+        booking: true,
+      })
+      .then((result) => {
+        const run = this.browser.state(task.id);
+        this.patch(task.id, {
+          status: run?.status === 'handoff' ? 'awaiting' : 'completed',
+          summary: `${task.summary} Browser fill: ${result}`,
+        });
+      })
+      .catch((err) => {
+        this.logger.error(`Booking run for task ${task.id} failed`, err);
+        this.patch(task.id, {
+          status: 'awaiting',
+          summary: `${task.summary} The booking fill could not run. Nothing was submitted.`,
+        });
+      });
   }
 
   private async browserFallback(task: TaskRow, summary: string): Promise<string> {

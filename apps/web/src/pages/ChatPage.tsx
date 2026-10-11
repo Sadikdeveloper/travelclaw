@@ -67,6 +67,8 @@ export function ChatPage() {
   const [selectedOfferIds, setSelectedOfferIds] = useState<Record<string, string>>({});
   const [feedbackTask, setFeedbackTask] = useState<AgentTaskRecord | null>(null);
   const [givingFeedback, setGivingFeedback] = useState(false);
+  /** Which desk's booking approval is in flight, so the card cannot be pressed twice. */
+  const [browserBusy, setBrowserBusy] = useState<string | null>(null);
   // The turn that is running right now, as the gateway reports it.
   const [live, setLive] = useState<LiveTurnState | null>(null);
   const liveRef = useRef<LiveTurnState | null>(null);
@@ -173,6 +175,49 @@ export function ChatPage() {
       if (sessionId) await loadChat(sessionId, ++generation.current);
     } catch {
       setError('Could not stop the browser search. Please retry.');
+    }
+  }
+
+  /**
+   * The traveler's own go-ahead for one browser run to fill the details they
+   * stated. One approval covers one run on the site this desk is already on, so
+   * there is no site to pick here and nothing to fill in.
+   */
+  async function approveBrowserBooking(taskId: string) {
+    if (browserBusy === taskId) return;
+    setBrowserBusy(taskId);
+    setError('');
+    try {
+      const next = await api<AgentTaskRecord>(`/api/tasks/${taskId}/browser/booking`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true }),
+      });
+      setTasks((current) => current.map((item) => (item.id === next.id ? next : item)));
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : 'Could not record that approval. Nothing was filled.',
+      );
+    } finally {
+      setBrowserBusy(null);
+    }
+  }
+
+  async function revokeBrowserBooking(taskId: string) {
+    if (browserBusy === taskId) return;
+    setBrowserBusy(taskId);
+    setError('');
+    try {
+      const next = await api<AgentTaskRecord>(
+        `/api/tasks/${taskId}/browser/booking/revoke`,
+        { method: 'POST' },
+      );
+      setTasks((current) => current.map((item) => (item.id === next.id ? next : item)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not withdraw that approval.');
+    } finally {
+      setBrowserBusy(null);
     }
   }
 
@@ -443,6 +488,9 @@ export function ChatPage() {
                       setSelectedOfferIds((current) => ({ ...current, [task.id]: offerId }))
                     }
                     onHold={(offerId) => void askProviderToHold(task.id, offerId)}
+                    onApproveBrowserBooking={() => void approveBrowserBooking(task.id)}
+                    onRevokeBrowserBooking={() => void revokeBrowserBooking(task.id)}
+                    browserBusy={browserBusy === task.id}
                   />
                 ))}
               </div>

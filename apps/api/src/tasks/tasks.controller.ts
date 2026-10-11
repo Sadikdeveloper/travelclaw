@@ -35,6 +35,23 @@ export class TasksController {
     return this.tasks.stopBrowser(id);
   }
 
+  @Post('tasks/:id/browser/booking')
+  @ApiOperation({
+    summary:
+      'Traveler approves ONE browser run filling the details they stated on the site this desk is on',
+  })
+  async approveBooking(@CurrentUser() user: UserRecord, @Param('id') id: string) {
+    this.sessions.get(this.tasks.sessionIdFor(id), user.id);
+    return this.tasks.approveBrowserBooking(id);
+  }
+
+  @Post('tasks/:id/browser/booking/revoke')
+  @ApiOperation({ summary: 'Withdraw that approval and stop the run' })
+  async revokeBooking(@CurrentUser() user: UserRecord, @Param('id') id: string) {
+    this.sessions.get(this.tasks.sessionIdFor(id), user.id);
+    return this.tasks.revokeBrowserBooking(id);
+  }
+
   @Post('tasks/:id/decision')
   @ApiOperation({
     summary: 'Traveler gives feedback on a finished desk: yes, no, or keep working',

@@ -117,6 +117,45 @@ produces an explicit handoff, not fabricated results.
    any proposed procedure. Removing the source or origin revokes access. Restart the
    worker after changing authorization; procedure approval cannot expand it.
 
+## Booking fills: what the traveler authorizes
+
+A search run never touches a passenger-details step. Reaching one needs two
+independent grants, and neither can be asserted by a request:
+
+| Grant                      | Who gives it          | Where it lives                  |
+| -------------------------- | --------------------- | ------------------------------- |
+| `bookingPaths` on the site | the operator          | `TRAVELCLAW_BROWSER_SITES_JSON` |
+| a recorded confirmation    | the traveler, per run | `booking_confirmations`         |
+
+The worker grants the tier only on the conjunction. The payment tier ignores both
+and stays closed.
+
+**The loop.** A booking-tier control stops the run with `confirmation_required`.
+The card then names the site, says that only details the traveler already wrote in
+chat will be used, and says that TravelClaw never takes payment.
+`POST /api/tasks/:id/browser/booking` with `{ "confirm": true }` records the
+approval and starts the fill; `POST /api/tasks/:id/browser/booking/revoke`
+withdraws it and stops the run. The site is read from the run, not from the
+request, so approving one site cannot be replayed against another.
+
+**The approval is a lease.** It carries an epoch and a ten-minute expiry, and it is
+spent by the first run that takes it — a second run needs a fresh approval. The
+gateway re-checks the epoch before and after every worker call, so an approval
+withdrawn mid-run voids it: the run ends `human_has_control`, any observation it
+had produced is discarded, and the worker seals the session, closing the page
+rather than leaving it showing the traveler's details. Reads are refused too, not
+just writes.
+
+**What an observation may then say.** `bookingEligibility` describes the page:
+`no_booking_step_seen`, `booking_step_blocked` (the source has a step this run is
+not authorized for), or `booking_step_reachable` (this run was authorized to act on
+one it could see). None of them says anything was filled, submitted, reserved, or
+paid for, and there is no value that could.
+
+**Still out of scope.** No payment, ever, and not configurable. No procedure is
+learned from a booking run. Nothing records what happened after the fill, because
+nothing happens after it — that is the booking lifecycle's job.
+
 ## Network and action boundaries
 
 Every intercepted HTTP request, including redirects/subresources, goes through

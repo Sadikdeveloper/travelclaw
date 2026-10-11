@@ -67,6 +67,8 @@ function render(
       onSelectOffer={vi.fn()}
       onHold={vi.fn()}
       onStopBrowser={vi.fn()}
+      onApproveBrowserBooking={vi.fn()}
+      onRevokeBrowserBooking={vi.fn()}
     />,
   );
 }

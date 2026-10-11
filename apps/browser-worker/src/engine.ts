@@ -15,6 +15,7 @@ import {
   type BrowserStepResult,
   type BrowserHandoffReason,
   type BrowserProcedure,
+  type BookingEligibility,
 } from '@travelclaw/shared';
 import { redactBrowserText } from './redact';
 import { Semaphore } from './semaphore';
@@ -56,6 +57,27 @@ interface Session {
    * payment tier ignores it entirely.
    */
   booking: boolean;
+  /**
+   * The booking authorization this session was opened under, when it has one.
+   *
+   * It is a fence, not a flag: it names an epoch and an expiry, and a mismatch or
+   * an expiry seals the session. Sealing refuses reads as well as writes, because
+   * the page may already be showing the traveler's details and a snapshot taken
+   * after their approval was withdrawn is not a result anybody should receive.
+   */
+  fence?: { epoch: string; expiresAt: number };
+  /**
+   * A passenger-details step was visible on this page, whether or not this
+   * session may reach it. Tracked so an observation can say the source *has* a
+   * booking step, instead of implying it has none.
+   */
+  sawBookingStep: boolean;
+  /**
+   * A passenger-details step was visible AND this session was admitted to act on
+   * it. Decided at snapshot time from the control's real attributes, because a
+   * snapshot element keeps only its label — too little to classify again later.
+   */
+  sawReachableBookingControl: boolean;
   closing?: Promise<void>;
   timer: ReturnType<typeof setTimeout>;
   blocked?: BrowserHandoffReason;
@@ -307,7 +329,12 @@ export class BrowserEngine {
   async open(
     siteId: string,
     request: string,
-    options: { booking?: boolean; bookingConfirmed?: boolean } = {},
+    options: {
+      booking?: boolean;
+      bookingConfirmed?: boolean;
+      /** The traveler's approval this run is fenced by. Ignored without `booking`. */
+      confirmation?: { epoch: string; expiresAt: string };
+    } = {},
   ) {
     const site = this.sites.find((s) => s.id === siteId);
     if (
@@ -321,6 +348,20 @@ export class BrowserEngine {
     const booking = Boolean(
       options.booking && options.bookingConfirmed && site.bookingPaths.length > 0,
     );
+    // An approval with no usable epoch or an expiry already past is not a fence,
+    // and an unfenced booking session is worse than no booking session: it could
+    // not be revoked mid-run. Refuse the tier rather than open it unguarded.
+    const expiresAt = options.confirmation
+      ? Date.parse(options.confirmation.expiresAt)
+      : NaN;
+    const fence =
+      booking &&
+      options.confirmation?.epoch &&
+      Number.isFinite(expiresAt) &&
+      expiresAt > Date.now()
+        ? { epoch: options.confirmation.epoch, expiresAt }
+        : undefined;
+    const authorized = booking && !!fence;
     this.pending++;
     let context: BrowserContext | undefined;
     let session: Session | undefined;
@@ -351,8 +392,11 @@ export class BrowserEngine {
         busy: false,
         touched: Date.now(),
         workflow: [],
-        learnable: !booking,
-        booking,
+        learnable: !authorized,
+        booking: authorized,
+        ...(fence ? { fence } : {}),
+        sawBookingStep: false,
+        sawReachableBookingControl: false,
         timer: setTimeout(() => {
           s.blocked = 'time_limit';
           if (this.sessions.has(id)) void this.close(id, key);
@@ -509,6 +553,13 @@ export class BrowserEngine {
           reason: 'cancelled',
           message: 'Browser search stopped.',
         });
+      // The fence is checked before the action budget and before anything touches
+      // the page, and it applies to reads as well as writes. A session whose
+      // authorization lapsed mid-run has no business producing another snapshot:
+      // the page may be showing the traveler's own details.
+      if (!fenceHolds(s.fence, s.fence?.epoch, Date.now())) this.seal(s);
+      if (s.blocked === 'human_has_control')
+        return await handoff('human_has_control', blockerMessage('human_has_control'));
       if (++s.actions > this.limits.actions)
         return await handoff(
           'action_limit',
@@ -579,7 +630,7 @@ export class BrowserEngine {
             displayedCurrency: action.displayedCurrency,
             visibleConditions: action.visibleConditions,
             verification: 'page_observed',
-            bookingEligibility: 'not_bookable',
+            bookingEligibility: bookingEligibilityOf(s),
           });
           s.workflow.push('observe');
           return await finish({
@@ -764,7 +815,11 @@ export class BrowserEngine {
     previousLabel: string,
   ): [BrowserHandoffReason, string] | undefined {
     const decision = admitControl(sessionPolicy(s), info, previousLabel);
-    return decision.admit ? undefined : [decision.reason, decision.message];
+    if (decision.admit) return undefined;
+    // The model reached for a booking-tier control. Even though the ref came from
+    // a snapshot, the attempt itself is evidence the page has that step.
+    if (decision.reason === 'confirmation_required') s.sawBookingStep = true;
+    return [decision.reason, decision.message];
   }
 
   /**
@@ -836,6 +891,39 @@ export class BrowserEngine {
     // Stop both queued and in-flight HTTP as soon as policy fails, not on the next turn.
     s.controller.abort();
   }
+
+  /**
+   * Close a session because its authorization is gone.
+   *
+   * Distinct from `block`: a blocked session is refused by policy, a sealed one is
+   * destroyed. The context closes, so the page holding the traveler's details does
+   * not stay open waiting for something to act on it, and every later read or
+   * write is refused rather than served from a snapshot taken while the approval
+   * still stood.
+   */
+  private seal(s: Session) {
+    s.blocked = 'human_has_control';
+    s.controller.abort();
+    void this.close(s.id, s.key).catch(() => {});
+  }
+
+  /**
+   * Re-fence a running session.
+   *
+   * The gateway calls this after every worker call, carrying the epoch the run was
+   * authorized by. A match is a no-op; a mismatch means the traveler withdrew or
+   * superseded the approval while the run was in flight, and the session is sealed
+   * immediately rather than left to notice at its next action.
+   */
+  fenceSession(id: string, key: string, epoch: string): { ok: boolean } {
+    const s = this.get(id, key);
+    if (fenceHolds(s.fence, epoch, Date.now())) return { ok: true };
+    // A search session has no fence to break, so it is reported as unfenced but
+    // left alive: sealing it would punish a run that never had authorization to
+    // lose. Anything else is a broken fence and the session goes.
+    if (s.fence) this.seal(s);
+    return { ok: false };
+  }
   private async pageState(s: Session) {
     permittedUrl(s.page.url(), s.site);
     const raw = await s.page.evaluate(() => ({
@@ -882,7 +970,14 @@ export class BrowserEngine {
       // A control this session may not act on is not offered at all, so there is
       // no ref to misuse. A booking session sees the passenger fields a search
       // session never sees; neither ever sees the payment tier.
-      if (!admitControl(sessionPolicy(s), info).admit) {
+      const decision = admitControl(sessionPolicy(s), info);
+      if (controlTier(info) === 'booking') {
+        s.sawBookingStep = true;
+        // Classified here rather than from the snapshot element later, because the
+        // element keeps only a label and the tier needs name/autocomplete/type too.
+        if (decision.admit) s.sawReachableBookingControl = true;
+      }
+      if (!decision.admit) {
         await ref.dispose();
         continue;
       }
@@ -958,6 +1053,44 @@ function bookingSlot(label: string): BrowserProcedure['steps'][number] | undefin
   return fields.find(([pattern]) => pattern.test(label.trim()))?.[1];
 }
 
+/**
+ * What the observed page exposes, decided from facts this session actually has.
+ *
+ * Every value describes the page, never an outcome. `reachable` means this run was
+ * authorized to act on a passenger-details step it could see — not that anything
+ * was filled, submitted, or reserved.
+ */
+export function bookingEligibilityOf(s: {
+  booking: boolean;
+  sawBookingStep: boolean;
+  sawReachableBookingControl: boolean;
+}): BookingEligibility {
+  if (s.booking && s.sawReachableBookingControl) return 'booking_step_reachable';
+  if (s.sawBookingStep) return 'booking_step_blocked';
+  return 'no_booking_step_seen';
+}
+
+/**
+ * Whether a booking authorization is still in force.
+ *
+ * A fence holds only when the epoch the caller presents is the one the session was
+ * opened under *and* it has not expired. Either half failing means the traveler's
+ * go-ahead no longer covers this run: a withdrawn approval, a superseded one, or
+ * one that simply ran out of time.
+ *
+ * Pure and exported for the same reason `admitControl` is: this decides whether a
+ * session keeps running, and that belongs in a test rather than in a browser.
+ */
+export function fenceHolds(
+  fence: { epoch: string; expiresAt: number } | undefined,
+  epoch: string | undefined,
+  now: number,
+): boolean {
+  if (!fence || !epoch) return false;
+  if (fence.epoch !== epoch) return false;
+  return now <= fence.expiresAt;
+}
+
 function sessionPolicy(s: Session): SessionPolicy {
   return {
     siteHasBookingScope: s.site.bookingPaths.length > 0,
@@ -982,6 +1115,8 @@ function blockerMessage(reason: BrowserHandoffReason): string {
     time_limit: 'The browser search exceeded its time budget. No booking was made.',
     confirmation_required:
       'That step needs your explicit approval before the browser takes it. Nothing was filled or submitted, and payment is never taken here.',
+    human_has_control:
+      'Your approval was withdrawn while the browser was working, so this run is voided. Nothing was submitted, and the page was closed rather than left showing your details.',
   };
   return (
     messages[reason] ||

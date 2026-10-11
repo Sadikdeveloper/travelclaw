@@ -38,6 +38,9 @@ export function AgentCard({
   onSelectOffer,
   onHold,
   onStopBrowser,
+  onApproveBrowserBooking,
+  onRevokeBrowserBooking,
+  browserBusy,
 }: {
   task: AgentTaskRecord;
   holdingOfferId: string;
@@ -45,6 +48,9 @@ export function AgentCard({
   onSelectOffer: (offerId: string) => void;
   onHold: (offerId: string) => void;
   onStopBrowser: () => void;
+  onApproveBrowserBooking: () => void;
+  onRevokeBrowserBooking: () => void;
+  browserBusy?: boolean;
 }) {
   const Icon = task.kind === 'flight' ? Plane : Hotel;
   const offers = task.offers ?? [];
@@ -114,7 +120,15 @@ export function AgentCard({
         </section>
       ) : null}
 
-      {task.browser ? <BrowserResearch run={task.browser} onStop={onStopBrowser} /> : null}
+      {task.browser ? (
+        <BrowserResearch
+          run={task.browser}
+          onStop={onStopBrowser}
+          onApproveBooking={onApproveBrowserBooking}
+          onRevokeBooking={onRevokeBrowserBooking}
+          busy={browserBusy}
+        />
+      ) : null}
       {task.status === 'awaiting' ? (
         <p className="agent-card-followup">
           Reply in chat with the requested detail or a change. The desk will not repeat this

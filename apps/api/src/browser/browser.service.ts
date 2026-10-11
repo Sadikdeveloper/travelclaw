@@ -7,6 +7,7 @@ import {
   type BrowserRunRecord,
   type BrowserStepResult,
 } from '@travelclaw/shared';
+import { BookingConfirmationService } from './confirmation.service';
 import { proposeProcedure, reviewedSteps } from './procedures';
 import { RateLimiter } from '../auth/rate-limiter';
 import { loadConfig } from '../config';
@@ -64,6 +65,7 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     private readonly events: EventsService,
     private readonly sessions: SessionsService,
     private readonly models: ModelService,
+    private readonly confirmations: BookingConfirmationService,
   ) {}
 
   onModuleInit() {
@@ -113,11 +115,17 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
   /**
    * Run a browser search, or — with `booking` — a booking fill.
    *
-   * A booking run needs two things the desk does not hold yet: a site the
-   * operator granted a booking scope, and the traveler's own recorded
-   * confirmation. Both are passed through to the worker, which grants the tier
-   * only when it has both. Nothing here can manufacture either, so a run opened
-   * today is a search run; the confirmation surface is what unlocks the rest.
+   * A booking run needs two things, and neither can be asserted by a caller: a
+   * site the operator granted a booking scope, and the traveler's own recorded
+   * confirmation. The second is read from `booking_confirmations` here, so the
+   * input carries an *intent* and never an authorization. A `booking` run with no
+   * live confirmation is a search run, which is the safe default.
+   *
+   * The confirmation is also the lease fence. Its epoch is captured before the
+   * first worker call and re-checked before and after every one of them: if the
+   * traveler withdraws the approval mid-run, the run is voided with
+   * `human_has_control` and whatever the worker returned in the meantime is
+   * discarded rather than reported.
    */
   async research(input: {
     id: string;
@@ -126,8 +134,6 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     kind: 'flight' | 'stay';
     /** Ask the worker for the booking tier on a site that has a booking scope. */
     booking?: boolean;
-    /** The traveler explicitly approved this run filling their details. */
-    bookingConfirmed?: boolean;
   }): Promise<string> {
     if (this.active.has(input.id))
       return 'A browser search is already running for this desk.';
@@ -160,6 +166,12 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     };
     // A live turn watches these arrive; a task card can only poll for them.
     let seq = 0;
+    /**
+     * The lease fence. Set only when this run carries a live confirmation, and
+     * checked before and after every worker call. `undefined` means a search run,
+     * which has nothing to fence.
+     */
+    let fence: string | undefined;
     const emitStep = (action?: string) => {
       this.events.emit('browser.step', {
         sessionId: input.session_id,
@@ -172,6 +184,12 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     };
     const assertAuthority = () => {
       if (this.sessions.ownerOf(input.session_id) !== userId) active.controller.abort();
+      // The fence is checked alongside ownership, not instead of it. A withdrawn
+      // approval aborts the same way a lost chat does, and because this runs after
+      // every worker call, a result that arrived while the approval was being
+      // withdrawn is never accepted — the run ends voided.
+      if (fence && !this.confirmations.holds(input.id, fence))
+        active.controller.abort(new Error('human_has_control'));
       active.controller.signal.throwIfAborted();
     };
     const save = () => {
@@ -294,6 +312,27 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
           // rather than a silently downgraded search: the traveler was told this
           // would fill their details, so a quiet search would be a lie.
           if (input.booking && !site.canBook) throw new Error('invalid_action');
+          /**
+           * The traveler's approval, read from the record rather than trusted from
+           * the input. Two things bind it here:
+           *
+           * - It names the site. Approving one site's form cannot be replayed
+           *   against another, so a site the model chose must match the approval
+           *   or this is a search run.
+           * - It is spent. `consume` marks it used, so a second run needs a fresh
+           *   approval — the traveler approved one fill on one site, not a
+           *   standing permission.
+           *
+           * Its epoch becomes the lease fence for the rest of the run.
+           */
+          const approval = input.booking
+            ? this.confirmations.activeFor(input.id)
+            : undefined;
+          const approved =
+            !!approval &&
+            approval.siteId === siteId &&
+            this.confirmations.consume(input.id, approval.epoch, input.id);
+          if (approved) fence = approval!.epoch;
           active.lease = leaseSchema.parse(
             await this.rpc(
               '/sessions',
@@ -302,13 +341,24 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
                 siteId,
                 request: input.request,
                 ...(input.booking ? { booking: true } : {}),
-                ...(input.bookingConfirmed ? { bookingConfirmed: true } : {}),
+                ...(approved
+                  ? {
+                      bookingConfirmed: true,
+                      confirmation: {
+                        epoch: approval!.epoch,
+                        expiresAt: approval!.expiresAt,
+                      },
+                    }
+                  : {}),
               },
               signal,
             ),
           );
           assertAuthority();
           state.sourceUrl = site.startUrl;
+          state.siteId = siteId;
+          state.siteName = site.name;
+          state.booking = approved;
           latest = browserStepResultSchema.parse(
             await this.rpc(
               `/sessions/${active.lease.id}/actions`,
@@ -345,6 +395,16 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
           status: latest.status,
         });
         accept(latest);
+        /**
+         * The closing half of the fence. Re-fencing after the action — not only
+         * before it — is what makes a mid-command withdrawal void the run: the
+         * worker seals the session and discards the page rather than sitting on a
+         * snapshot of the traveler's details. A failed re-fence is not fatal here,
+         * because `assertAuthority` at the top of the next turn catches the same
+         * condition from the record of truth.
+         */
+        if (fence && active.lease)
+          await this.reFence(active.lease, fence, signal).catch(() => {});
       }
       if (state.status === 'running')
         accept({
@@ -355,29 +415,42 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
         });
     } catch (error) {
       const aborted = active.controller.signal.aborted;
-      const timedOut =
-        active.controller.signal.reason instanceof Error &&
-        active.controller.signal.reason.message === 'time_limit';
+      const cause =
+        active.controller.signal.reason instanceof Error
+          ? active.controller.signal.reason.message
+          : '';
+      const timedOut = cause === 'time_limit';
+      /**
+       * The fence broke. This is not "stopped": the run's authorization changed
+       * while it was in flight, so whatever the worker returned is discarded
+       * rather than reported, and the message says so plainly instead of implying
+       * the traveler's own Stop button did it.
+       */
+      const fenced = cause === 'human_has_control';
       const invalid =
         error instanceof z.ZodError ||
         error instanceof SyntaxError ||
         (error instanceof Error && error.message === 'invalid_action');
       accept({
-        status: aborted && !timedOut ? 'stopped' : 'handoff',
+        status: aborted && !timedOut && !fenced ? 'stopped' : 'handoff',
         reason: timedOut
           ? 'time_limit'
-          : aborted
-            ? 'cancelled'
-            : invalid
-              ? 'invalid_action'
-              : 'worker_unavailable',
+          : fenced
+            ? 'human_has_control'
+            : aborted
+              ? 'cancelled'
+              : invalid
+                ? 'invalid_action'
+                : 'worker_unavailable',
         message: timedOut
           ? 'The browser time limit was reached. No booking was made.'
-          : aborted
-            ? 'Browser search stopped. No booking was made.'
-            : invalid
-              ? 'The model requested an invalid or unauthorized browser action. The search stopped safely.'
-              : 'The isolated browser worker could not complete this search. No booking was made.',
+          : fenced
+            ? 'Your approval was withdrawn while the browser was working, so this run is voided and anything it had shown is discarded. Nothing was submitted. Approve again if you still want this filled.'
+            : aborted
+              ? 'Browser search stopped. No booking was made.'
+              : invalid
+                ? 'The model requested an invalid or unauthorized browser action. The search stopped safely.'
+                : 'The isolated browser worker could not complete this search. No booking was made.',
       });
     } finally {
       clearTimeout(timer);
@@ -385,6 +458,19 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
       this.active.delete(input.id);
     }
     return state.message;
+  }
+  /** Tell the worker whether the approval this run was opened under still stands. */
+  private async reFence(lease: Lease, epoch: string, signal: AbortSignal) {
+    const result = await this.rpc(
+      `/sessions/${lease.id}/fence`,
+      'POST',
+      { epoch },
+      signal,
+      lease.key,
+    );
+    // A sealed session is gone; drop the lease so nothing else tries to use it.
+    if (result && typeof result === 'object' && 'ok' in result && !result.ok)
+      await this.release(lease);
   }
   private async release(lease: Lease) {
     await this.rpc(

@@ -190,6 +190,29 @@ CREATE TABLE IF NOT EXISTS browser_runs (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- The traveler's recorded go-ahead for ONE browser run to fill their details on
+-- ONE site. It is the only thing that can authorize the booking tier, so it is
+-- narrow by construction: bound to a task and a site, spent by the first run that
+-- uses it, and expired or revocable at any moment. It stores no personal value —
+-- the worker fills only what the traveler already stated in the request.
+CREATE TABLE IF NOT EXISTS booking_confirmations (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  epoch TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  consumed_by TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_booking_confirmations_task
+  ON booking_confirmations(task_id, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_offers_task ON offers(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_offers_session ON offers(session_id, created_at);

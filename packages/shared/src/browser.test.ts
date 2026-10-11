@@ -13,7 +13,7 @@ const observation = {
   displayedCurrency: '$',
   visibleConditions: ['One adult; taxes included; baggage extra'],
   verification: 'page_observed',
-  bookingEligibility: 'not_bookable',
+  bookingEligibility: 'no_booking_step_seen',
 };
 
 describe('browser wire contracts', () => {
@@ -37,6 +37,38 @@ describe('browser wire contracts', () => {
     delete value[key];
     expect(browserObservationSchema.safeParse(value).success).toBe(false);
   });
+
+  /**
+   * The whole point of the vocabulary: every value describes the page. A value
+   * that could be read as an outcome is rejected, including the ones a caller
+   * would most plausibly reach for when they want to imply a reservation.
+   */
+  it.each([
+    'booked',
+    'reserved',
+    'holdable',
+    'held',
+    'confirmed',
+    'paid',
+    'ticketed',
+    'not_bookable',
+    'bookable',
+  ])('has no booking-eligibility value that claims an outcome: %s', (value) => {
+    expect(
+      browserObservationSchema.safeParse({ ...observation, bookingEligibility: value })
+        .success,
+    ).toBe(false);
+  });
+
+  it.each(['no_booking_step_seen', 'booking_step_blocked', 'booking_step_reachable'])(
+    'accepts the page-shaped booking-eligibility values: %s',
+    (value) => {
+      expect(
+        browserObservationSchema.parse({ ...observation, bookingEligibility: value })
+          .bookingEligibility,
+      ).toBe(value);
+    },
+  );
 
   it.each([
     { verification: 'api_confirmed' },

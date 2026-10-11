@@ -765,6 +765,31 @@ h3 {
   color: var(--muted);
   font-size: 0.8rem;
 }
+/* The one place the desk asks the traveler to authorize an action on their
+   behalf. It is deliberately not styled like the offer rows around it: it is a
+   decision, not a result, and it should read as the thing that stops the card. */
+.browser-approval {
+  background: #fbf6ec;
+  border: 1px solid var(--copper-deep);
+  border-radius: 12px;
+  padding: 12px 13px;
+  display: grid;
+  gap: 6px;
+}
+.browser-approval h4 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.browser-approval p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.browser-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
 .provider-offer {
   min-width: 0;
   background: white;

@@ -15,8 +15,21 @@ const openSchema = z
      */
     booking: z.boolean().optional(),
     bookingConfirmed: z.boolean().optional(),
+    /**
+     * The traveler's recorded approval, which fences the session. The engine
+     * refuses the booking tier without it: an unfenced booking session could not
+     * be revoked mid-run, which is worse than no booking session at all.
+     */
+    confirmation: z
+      .object({
+        epoch: z.string().uuid(),
+        expiresAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+const fenceSchema = z.object({ epoch: z.string().uuid() }).strict();
 async function jsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -58,10 +71,11 @@ export function workerServer(engine: BrowserEngine, token: string) {
           await engine.open(input.siteId, input.request, {
             ...(input.booking ? { booking: true } : {}),
             ...(input.bookingConfirmed ? { bookingConfirmed: true } : {}),
+            ...(input.confirmation ? { confirmation: input.confirmation } : {}),
           }),
         );
       }
-      const route = /^\/sessions\/([a-f0-9-]{36})(\/actions)?$/.exec(req.url || '');
+      const route = /^\/sessions\/([a-f0-9-]{36})(\/actions|\/fence)?$/.exec(req.url || '');
       if (!route) return send(404, { error: 'Not found' });
       const key =
         typeof req.headers['x-session-key'] === 'string'
@@ -70,6 +84,16 @@ export function workerServer(engine: BrowserEngine, token: string) {
       if (req.method === 'DELETE' && !route[2]) {
         await engine.close(route[1], key);
         return send(200, { ok: true });
+      }
+      /**
+       * Re-fence. The gateway calls this after every action with the epoch the run
+       * was authorized by; a mismatch seals the session immediately instead of
+       * waiting for its next action to notice. `{ ok: false }` is not an error —
+       * it is the answer, and the gateway voids the run on it.
+       */
+      if (req.method === 'POST' && route[2] === '/fence') {
+        const { epoch } = fenceSchema.parse(await jsonBody(req));
+        return send(200, engine.fenceSession(route[1], key, epoch));
       }
       if (req.method === 'POST' && route[2])
         return send(200, await engine.act(route[1], key, await jsonBody(req)));

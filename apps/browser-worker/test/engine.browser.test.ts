@@ -157,7 +157,7 @@ describe('real Chromium, local travel fixtures', () => {
       expect(result.observation).toMatchObject({
         sourceUrl: 'https://fixture.test/search',
         sourceName: 'Fixture Air',
-        bookingEligibility: 'not_bookable',
+        bookingEligibility: 'no_booking_step_seen',
         evidence: fare,
       });
       expect(result.observation?.observedAt).toBe(page.observedAt);

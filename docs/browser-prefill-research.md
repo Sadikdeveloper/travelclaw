@@ -341,23 +341,97 @@ After any state-changing action the worker rechecks the URL at 0/250/500ms, as
 OpenClaw does. If the page moved, the result carries a fresh snapshot and says the
 earlier controls are gone, so the next action cannot be aimed at a dead ref.
 
+### 4. The traveler's confirmation surface
+
+`bookingConfirmed` used to be a parameter nothing ever set, so no booking run
+could be opened. It is now a database row with a lifetime, and it is the only
+thing in the system that can authorize a fill.
+
+The loop runs through the existing handoff. A booking-tier control stops the run
+with `confirmation_required`; the card then names the site, states that only the
+details the traveler already wrote in chat will be used, and states that
+TravelClaw never takes payment. Approving calls
+`POST /api/tasks/:id/browser/booking` with `{ "confirm": true }`.
+
+Three things keep it narrow, and each is a test rather than a comment:
+
+- **The site comes from the run, not the request.** An approval is recorded
+  against the site the desk is already on, so approving one site's form cannot be
+  replayed against another. A run whose chosen site does not match the approval
+  opens as a search.
+- **One approval, one run.** `consume()` marks it spent. A second run needs the
+  traveler to approve again, because they approved one fill on one site, not a
+  standing permission for their details.
+- **Ten minutes, checked not trusted.** Expiry is evaluated on read, so a row
+  that outlives its TTL is not an authorization.
+
+The gateway derives the flag from that record and never from a caller argument —
+`bookingConfirmed` was removed from `research()`'s input precisely so nothing can
+assert it.
+
+### 5. The lease fence
+
+Hermes brackets a whole run in a lease epoch: if a human takes control
+mid-command, the result is voided rather than merely stopped. The same shape is
+here, with the traveler's approval as the lease.
+
+The approval's `epoch` is captured when the run opens and `fenceHolds` is asked
+twice per worker call — before, so a withdrawn approval stops the run, and after,
+so a result that arrived _while_ it was being withdrawn is discarded rather than
+reported. The worker holds the epoch and expiry too, so it can refuse on its own
+schedule, and `POST /sessions/:id/fence` seals the session the moment the gateway
+notices.
+
+Sealing is stronger than blocking. A blocked session is refused by policy; a
+sealed one is destroyed, context and all. Both reads and writes stop, because a
+page may already be showing the traveler's details and a snapshot taken after
+their approval lapsed is not a result anyone should receive. The run ends
+`human_has_control`, not `cancelled`, and the message says the run is voided.
+
+### 6. `bookingEligibility` is no longer a literal
+
+It was `z.literal('not_bookable')`, correct only while no booking step could be
+reached. It is now three values describing the page —
+`no_booking_step_seen`, `booking_step_blocked`, `booking_step_reachable` — each
+derived from something the worker actually observed, and none able to say that
+anything was reserved, held, or paid for. There is deliberately no `booked`
+value, and a test asserts that `booked`, `reserved`, `held`, `confirmed`, `paid`,
+`ticketed`, `bookable`, and the old `not_bookable` are all rejected.
+
+The invariant moved from the value to the vocabulary: it used to be "this one
+literal cannot lie", and now it is "no value in this enum can lie".
+
 ### What is still missing
 
-- **No confirmation surface.** `bookingConfirmed` is plumbed gateway → worker, but
-  nothing sets it yet: there is no traveler-facing "yes, fill my details" step.
-  Until that exists every run is a search run, which is the safe default.
-- **No lease fence.** Hermes's epoch check — a human takeover mid-run voids the
-  result — is not implemented, and it should be before a booking run is reachable.
 - **No procedure learning for bookings, by design.** A booking session opens with
   `learnable` false, because a booking depends on one traveler's details and a
   procedure is shared.
+- **No payment watch, no `bookings` table.** A booking run can reach a
+  passenger-details step and stop there. Nothing records what happened after,
+  because nothing happens after — that is the
+  [booking lifecycle](roadmap.md)'s job, and it is still open.
+- **Consent controls stay in the `never` tier.** See
+  [Do not mistake a dialog for a logged-out state](#4-do-not-mistake-a-dialog-for-a-logged-out-state).
 - **The Chromium fixture suite did not run here.** See
   [Verification](#verification).
 
 ## Verification
 
-`pnpm test` passes 686 tests: 42 shared, 267 agent-core, 273 api, 80
-browser-worker, 24 web. `pnpm build` and `pnpm typecheck` are clean.
+`pnpm test` passes 728 tests: 54 shared, 267 agent-core, 289 api, 91
+browser-worker, 27 web. `pnpm build` and `pnpm typecheck` are clean.
+
+The confirmation, fence, and eligibility work is covered by tests that execute
+the shipped code paths rather than restating them: `BookingConfirmationService`
+against a real SQLite table (8), `fenceHolds` and `bookingEligibilityOf` as the
+pure decisions they are (11), and the gateway end-to-end through a mocked worker
+— including the case where the approval is withdrawn between two worker calls and
+the run must come back `human_has_control` with no observation recorded.
+
+One bug was found this way rather than by reading: the gateway was sending
+`confirmationEpoch`/`confirmationExpiresAt` as flat fields while the worker's
+strict `openSchema` expected a nested `confirmation` object. The mock worker does
+not validate, so the mismatch would have reached production as a 400 on every
+booking run.
 
 The 27 real-Chromium fixture tests were **skipped, not passed**. Chromium could
 not be launched in this sandbox: the Playwright and Google download CDNs are

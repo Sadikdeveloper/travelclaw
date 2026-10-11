@@ -11,6 +11,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { AuthService } from '../src/auth/auth.service';
 import { SessionsService } from '../src/sessions/sessions.service';
+import { BookingConfirmationService } from '../src/browser/confirmation.service';
 import { BrowserService } from '../src/browser/browser.service';
 import { proposeProcedure, reviewedSteps } from '../src/browser/procedures';
 import { DatabaseService } from '../src/db/database.service';
@@ -29,7 +30,7 @@ const observation = {
   displayedCurrency: 'NGN',
   visibleConditions: ['Taxes included'],
   verification: 'page_observed',
-  bookingEligibility: 'not_bookable',
+  bookingEligibility: 'no_booking_step_seen',
   evidence,
 };
 const procedure = {
@@ -60,6 +61,9 @@ describe('browser fallback through the authenticated gateway', () => {
   let blockModel = false;
   let onModelBlocked: (() => void) | undefined;
   let workerDown = false;
+  /** What the gateway actually asked the worker to open, per booking test. */
+  let sessionPosts: Array<Record<string, unknown>> = [];
+  let siteCanBook = false;
   let afterModel: (() => void) | undefined;
   let afterObservation: (() => void) | undefined;
   let modelCalls: Array<Parameters<ModelProvider['complete']>[0]> = [];
@@ -149,11 +153,14 @@ describe('browser fallback through the authenticated gateway', () => {
               name: 'Fixture Air',
               kind: 'flight',
               startUrl: 'https://fixture.test/',
+              ...(siteCanBook ? { canBook: true } : {}),
             },
           ]),
         );
-      if (address.pathname === '/sessions')
+      if (address.pathname === '/sessions') {
+        sessionPosts.push(JSON.parse(String(init?.body)));
         return new Response(JSON.stringify({ id: randomUUID(), key: randomUUID() }));
+      }
       const action = JSON.parse(String(init?.body)).action;
       if (action === 'observe') afterObservation?.();
       return new Response(
@@ -186,6 +193,8 @@ describe('browser fallback through the authenticated gateway', () => {
     endlesslyInspect = false;
     blockModel = false;
     workerDown = false;
+    sessionPosts = [];
+    siteCanBook = false;
     afterModel = undefined;
     afterObservation = undefined;
     delete process.env.TRAVELCLAW_FLIGHT_BASE_URL;
@@ -419,6 +428,226 @@ describe('browser fallback through the authenticated gateway', () => {
     expect(reviewedSteps(db, 'fixture', 'https://different.test')).toBeUndefined();
     db.run("UPDATE browser_procedures SET review_status = 'rejected' WHERE id = ?", row.id);
     expect(reviewedSteps(db, 'fixture', 'https://fixture.test')).toBeUndefined();
+  });
+  /**
+   * A real second desk on the same chat.
+   *
+   * `browser_runs.task_id` is a foreign key, so a run cannot be opened against an
+   * invented id — each direct `research()` call needs a task row behind it.
+   */
+  function bookingDesk(task: { sessionId: string }) {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO agent_tasks (id, session_id, kind, agent_name, status, summary, request, pass, created_at, updated_at)
+       VALUES (?, ?, 'flight', 'Flight desk', 'working', 'Working.', 'Book it for Ada Obi', 1, ?, ?)`,
+      id,
+      task.sessionId,
+      now,
+      now,
+    );
+    return { id, sessionId: task.sessionId };
+  }
+  /**
+   * Park a finished run at the moment the worker stopped at a passenger-details
+   * step, which is the only state an approval can be granted from.
+   */
+  function parkAtBookingStep(taskId: string) {
+    const row = db.get<{ state_json: string }>(
+      'SELECT state_json FROM browser_runs WHERE task_id = ?',
+      taskId,
+    )!;
+    const state = JSON.parse(row.state_json);
+    Object.assign(state, {
+      status: 'handoff',
+      reason: 'confirmation_required',
+      siteId: 'fixture',
+      siteName: 'Fixture Air',
+      message: 'That step needs your explicit approval.',
+    });
+    db.run(
+      'UPDATE browser_runs SET state_json = ? WHERE task_id = ?',
+      JSON.stringify(state),
+      taskId,
+    );
+  }
+  /** Wait for the detached booking run to write a terminal state. */
+  async function settled(taskId: string) {
+    for (let i = 0; i < 200; i++) {
+      const run = app.get(BrowserService).state(taskId);
+      if (run && run.status !== 'running') return run;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('booking run never settled');
+  }
+  describe("the traveler's booking approval", () => {
+    it('opens a search session when a booking is asked for with no approval recorded', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      // Asked for the booking tier directly, with nothing on record. The run must
+      // still be a search: no `bookingConfirmed` may reach the worker, because
+      // nothing in a request can assert the traveler's consent.
+      const desk = bookingDesk(task);
+      await app.get(BrowserService).research({
+        id: desk.id,
+        session_id: desk.sessionId,
+        request: 'Book it for Ada Obi',
+        kind: 'flight',
+        booking: true,
+      });
+      // The last post is this run's, not the search that ran before it.
+      expect(sessionPosts.at(-1)).toEqual({
+        siteId: 'fixture',
+        request: 'Book it for Ada Obi',
+        booking: true,
+      });
+    });
+    it('refuses to book on a site the operator gave no booking scope', async () => {
+      const agent = await traveler(true);
+      const task = await search(agent);
+      const desk = bookingDesk(task);
+      const openedBefore = sessionPosts.length;
+      const message = await app.get(BrowserService).research({
+        id: desk.id,
+        session_id: desk.sessionId,
+        request: 'Book it',
+        kind: 'flight',
+        booking: true,
+      });
+      expect(message).toContain('invalid or unauthorized');
+      // No session was opened at all: a booking request the desk cannot serve is a
+      // refusal, not a search quietly substituted for one.
+      expect(sessionPosts).toHaveLength(openedBefore);
+    });
+    it('refuses an approval when the desk is not stopped at a passenger step', async () => {
+      const agent = await traveler(true);
+      const task = await search(agent);
+      const res = await agent.post(`/api/tasks/${task.id}/browser/booking`).send({
+        confirm: true,
+      });
+      expect(res.status).toBe(409);
+      expect(
+        db.all('SELECT * FROM booking_confirmations WHERE task_id = ?', task.id),
+      ).toHaveLength(0);
+    });
+    it('sends the approval to the worker, spends it, and needs a fresh one to run again', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      parkAtBookingStep(task.id);
+      const approved = await agent
+        .post(`/api/tasks/${task.id}/browser/booking`)
+        .send({ confirm: true });
+      expect(approved.status).toBe(201);
+      const run = await settled(task.id);
+      expect(run.booking).toBe(true);
+      expect(run.siteId).toBe('fixture');
+      const post = sessionPosts.at(-1)!;
+      expect(post.booking).toBe(true);
+      expect(post.bookingConfirmed).toBe(true);
+      // The fence travels with the session: an epoch and an expiry the worker can
+      // check on its own, without asking the gateway again.
+      expect(post.confirmation).toMatchObject({ epoch: expect.any(String) });
+      const row = db.get<{ consumed_by: string | null }>(
+        'SELECT consumed_by FROM booking_confirmations WHERE task_id = ?',
+        task.id,
+      )!;
+      expect(row.consumed_by).toBe(task.id);
+      // Spent. A second run without a new approval is a search again.
+      const second = bookingDesk(task);
+      await app.get(BrowserService).research({
+        id: second.id,
+        session_id: second.sessionId,
+        request: 'Book it',
+        kind: 'flight',
+        booking: true,
+      });
+      expect(sessionPosts.at(-1)).not.toHaveProperty('bookingConfirmed');
+    });
+    it('ignores an approval recorded for a different site than the run opens', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      parkAtBookingStep(task.id);
+      // The approval names `fixture`; point the recorded row at another site and
+      // the run must not pick it up. Approving one site cannot be replayed.
+      app.get(BookingConfirmationService).record({
+        sessionId: task.sessionId,
+        taskId: task.id,
+        siteId: 'some-other-site',
+        summary: 'Fill on another site.',
+      });
+      const desk = bookingDesk(task);
+      await app.get(BrowserService).research({
+        id: desk.id,
+        session_id: desk.sessionId,
+        request: 'Book it',
+        kind: 'flight',
+        booking: true,
+      });
+      expect(sessionPosts.at(-1)).not.toHaveProperty('bookingConfirmed');
+    });
+    it('voids the run when the approval is withdrawn mid-flight', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      parkAtBookingStep(task.id);
+      // Withdraw it after the first action has been issued but before the next one,
+      // which is exactly the window the fence exists to cover. `afterModel` fires
+      // from the second model call of the file onward, so count this run's own
+      // calls: revoking on the first would take the approval away before the run
+      // ever consumed it, and the test would prove nothing about the fence.
+      let calls = 0;
+      afterModel = () => {
+        calls += 1;
+        if (calls >= 2) app.get(BookingConfirmationService).revoke(task.id);
+      };
+      await agent.post(`/api/tasks/${task.id}/browser/booking`).send({ confirm: true });
+      const run = await settled(task.id);
+      expect(run.reason).toBe('human_has_control');
+      expect(run.message).toContain('voided');
+      // The result the worker had already produced is discarded, not reported.
+      expect(run.observations).toHaveLength(0);
+    });
+    it('stops the run when the traveler withdraws the approval from the card', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      parkAtBookingStep(task.id);
+      await agent.post(`/api/tasks/${task.id}/browser/booking`).send({ confirm: true });
+      const revoked = await agent.post(`/api/tasks/${task.id}/browser/booking/revoke`);
+      expect(revoked.status).toBe(201);
+      expect(
+        db.get<{ revoked_at: string | null }>(
+          'SELECT revoked_at FROM booking_confirmations WHERE task_id = ?',
+          task.id,
+        )!.revoked_at,
+      ).not.toBeNull();
+      expect(app.get(BookingConfirmationService).activeFor(task.id)).toBeUndefined();
+    });
+    it('does not let another traveler approve or withdraw it', async () => {
+      siteCanBook = true;
+      const agent = await traveler(true);
+      const task = await search(agent);
+      parkAtBookingStep(task.id);
+      const intruder = await traveler(true);
+      expect(
+        (
+          await intruder
+            .post(`/api/tasks/${task.id}/browser/booking`)
+            .send({ confirm: true })
+        ).status,
+      ).toBe(404);
+      expect(
+        (await intruder.post(`/api/tasks/${task.id}/browser/booking/revoke`)).status,
+      ).toBe(404);
+      // Scoped to this desk: the table is shared across the file's tests, and the
+      // point is that the intruder's attempts recorded nothing for it.
+      expect(
+        db.all('SELECT * FROM booking_confirmations WHERE task_id = ?', task.id),
+      ).toHaveLength(0);
+    });
   });
   it('marks persisted running browser work interrupted after a gateway restart', () => {
     const row = db.get<{ task_id: string; state_json: string }>(

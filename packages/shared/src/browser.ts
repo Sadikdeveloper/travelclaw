@@ -28,6 +28,14 @@ export const browserHandoffReasonSchema = z.enum([
   // Distinct from the others because nothing is wrong with the page: the desk is
   // waiting on a human, and the same action becomes valid once they approve.
   'confirmation_required',
+  /**
+   * The traveler's authorization changed while this run was in flight — they
+   * withdrew the approval, it expired, or a newer approval superseded it. The run
+   * is voided rather than merely stopped, because a result produced under a
+   * withdrawn authorization must not be trusted or reported: the page may already
+   * be showing their details, so reads are refused too, not just writes.
+   */
+  'human_has_control',
   'missing_information',
   'ambiguous_form',
   'site_restriction',
@@ -123,6 +131,36 @@ export const browserActionSchema = z.discriminatedUnion('action', [
 ]);
 
 /**
+ * What the source page exposes, stated as a fact about the page and nothing else.
+ *
+ * It used to be the literal `'not_bookable'`, which was correct only because the
+ * worker could not reach a booking step. That is no longer true, and a literal
+ * would have made the new fact unrepresentable rather than false — the opposite
+ * of the reason it was a literal.
+ *
+ * So the invariant moved from the value to the vocabulary: every value here
+ * describes what the page showed, and none of them can say that anything was
+ * reserved, held, priced, or paid for. There is deliberately no `booked` value.
+ */
+export const bookingEligibilitySchema = z.enum([
+  /** No passenger-details step was visible in this session's snapshot. */
+  'no_booking_step_seen',
+  /**
+   * A passenger-details step was visible but this session may not reach it: the
+   * operator gave the site no booking scope, or the traveler's confirmation was
+   * not recorded. Nothing was wrong with the page.
+   */
+  'booking_step_blocked',
+  /**
+   * A passenger-details step was visible and this session was authorized to act
+   * on it. That is a statement about the page and the session's scope — not that
+   * anything was filled, submitted, or reserved.
+   */
+  'booking_step_reachable',
+]);
+export type BookingEligibility = z.infer<typeof bookingEligibilitySchema>;
+
+/**
  * A distinct research result, never an OfferRecord or a provider hold input.
  * Preserve the displayed price/currency literally ("$" must not become "USD"
  * by guessing). Empty conditions means none were visible, not "no restrictions".
@@ -142,7 +180,7 @@ export const browserObservationSchema = z
     displayedCurrency: z.string().trim().min(1).max(32),
     visibleConditions: z.array(visibleText).max(20),
     verification: z.literal('page_observed'),
-    bookingEligibility: z.literal('not_bookable'),
+    bookingEligibility: bookingEligibilitySchema,
   })
   .strict();
 
@@ -289,6 +327,59 @@ export interface BrowserRunRecord {
   reason?: BrowserHandoffReason;
   message: string;
   sourceUrl?: string;
+  /**
+   * Which authorized site this run opened, once a lease exists. The traveler's
+   * booking approval is bound to it, so approving one site's form cannot be
+   * replayed against another — and the UI can name the site it is asking about.
+   */
+  siteId?: string;
+  /** Its display name, so an approval card can name the site in words. */
+  siteName?: string;
+  /**
+   * This run was opened with the traveler's approval, so it may fill their
+   * details. The UI uses it to offer a withdrawal while the run is live.
+   */
+  booking?: boolean;
   steps: Array<{ action: string; at: string; status: string }>;
   observations: Array<BrowserObservation & { evidence: string }>;
 }
+
+/**
+ * The traveler's recorded go-ahead for one browser run to fill their details on
+ * one site. This is the only thing that can set `bookingConfirmed`; no caller
+ * argument can assert it.
+ *
+ * It is deliberately narrow: one run, one site, one epoch, ten minutes, spent by
+ * the first run that uses it. A second run needs a fresh approval.
+ */
+export const bookingConfirmationSchema = z
+  .object({
+    id: z.string().uuid(),
+    sessionId: z.string().max(64),
+    taskId: z.string().max(64),
+    siteId: z.string().regex(/^[a-z0-9-]{1,50}$/),
+    /**
+     * Random per approval. The gateway and the worker both carry it, so a
+     * confirmation recorded *after* a run started can never be mistaken for the
+     * one that run was authorized by.
+     */
+    epoch: z.string().uuid(),
+    /** What was approved, in plain words the traveler can read back later. */
+    summary: z.string().trim().min(1).max(400),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    revokedAt: z.string().datetime().nullable(),
+    /** The run that spent this approval, once one has. */
+    consumedBy: z.string().max(64).nullable(),
+  })
+  .strict();
+export type BookingConfirmation = z.infer<typeof bookingConfirmationSchema>;
+
+/**
+ * The approval request. `confirm: z.literal(true)` is required, following the
+ * provider-hold endpoint: a generic POST or a stale link must not be able to
+ * become an authorization to fill someone's personal details.
+ */
+export const requestBookingConfirmationSchema = z
+  .object({ confirm: z.literal(true) })
+  .strict();
