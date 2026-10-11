@@ -24,6 +24,10 @@ export const browserHandoffReasonSchema = z.enum([
   'sign_in',
   'verification',
   'consent',
+  // A booking-tier control was reached without the traveler's recorded approval.
+  // Distinct from the others because nothing is wrong with the page: the desk is
+  // waiting on a human, and the same action becomes valid once they approve.
+  'confirmation_required',
   'missing_information',
   'ambiguous_form',
   'site_restriction',
@@ -52,6 +56,34 @@ export const browserActionSchema = z.discriminatedUnion('action', [
       snapshotId: opaqueRef,
       elementId: opaqueRef,
       value: z.string().max(500),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('fillMany'),
+      snapshotId: opaqueRef,
+      /**
+       * Several fields in one action, as two parallel arrays: the control refs
+       * from the current snapshot, and the value for each, in the same order.
+       *
+       * Parallel arrays rather than one array of objects because the model-facing
+       * JSON Schema for a tool argument is generated from this shape, and that
+       * generator deliberately supports only flat types — an object array would
+       * fail at import rather than describe itself.
+       *
+       * Bounded because a whole passenger form in one call is the point and an
+       * unbounded list is not. Validated all-or-nothing: one field that fails
+       * grounding fills nothing, so a batch can never leave a form part-filled
+       * and looking complete.
+       */
+      elementIds: z.array(opaqueRef).min(1).max(12),
+      /**
+       * One value per control, in the same order. The lengths must match; that
+       * cannot be a schema refinement here, because a refined object stops being
+       * a discriminated-union option and the whole action union would fail to
+       * build. The executor refuses a mismatched pair instead.
+       */
+      values: z.array(z.string().max(500)).min(1).max(12),
     })
     .strict(),
   z
@@ -136,6 +168,25 @@ export const browserSiteSchema = z
       )
       .max(20)
       .default([]),
+    /**
+     * Paths where a booking-tier control may be reached, granted per site by the
+     * operator. Empty means the site is search-only and the booking tier stays
+     * closed, which is the default and the previous behaviour.
+     *
+     * Two things this cannot grant, by construction: a payment path (the network
+     * policy refuses `checkout`, `payment`, `creditcard`, `login`, `password`,
+     * and `authorization` regardless of what is listed here) and a session that
+     * is not carrying the traveler's own recorded confirmation.
+     */
+    bookingPaths: z
+      .array(
+        z
+          .string()
+          .regex(/^\/[^?#]*$/)
+          .max(500),
+      )
+      .max(20)
+      .default([]),
   })
   .strict();
 export type BrowserSite = z.infer<typeof browserSiteSchema>;
@@ -181,6 +232,13 @@ export const browserWorkflowStepSchema = z.enum([
   'fill_currency',
   'fill_language',
   'click_search',
+  // Booking-tier slots. They exist so a booking flow is describable in the same
+  // finite vocabulary, but the engine never proposes a procedure for a booking
+  // run: a booking depends on one traveler's details, and a procedure is shared.
+  'fill_passenger_name',
+  'fill_contact_email',
+  'fill_contact_phone',
+  'click_submit_booking',
   'observe',
 ]);
 export const browserProcedureSchema = z

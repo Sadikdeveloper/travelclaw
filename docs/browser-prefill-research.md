@@ -1,5 +1,11 @@
 # Browser prefill research — how OpenClaw and Hermes do it
 
+**Status: the three pieces this page recommends are now built** — force-redaction
+of browser output, the tiered control gate with an operator booking scope, and a
+batched fill with a post-action navigation recheck. See
+[What was built](#what-was-built) for what exists, what is tested, and what is
+still missing. The research below is what those decisions were made from.
+
 Reviewed on 2026-10-11 against the same commit-pinned revisions
 [browser-research.md](browser-research.md) already records:
 OpenClaw `a754556`, Hermes `4393341`. Everything attributed to either project
@@ -106,7 +112,10 @@ Directly relevant: a cookie-consent overlay on an airline site is the single mos
 common reason a booking flow looks blocked. TravelClaw's `forbiddenControl` list
 includes `accept cookies|accept all|consent`, which means the worker refuses to
 dismiss the very overlay that is hiding the form. That is an edge case worth
-solving deliberately — consent dismissal is not a credential action.
+solving deliberately — consent dismissal is not a credential action. _Still open:_
+consent controls remain in the `never` tier, because a dismissal that is safe on
+one site is an account-scoping decision on another and the worker cannot tell
+them apart from the label alone.
 
 ### 5. Waits are conditions, not sleeps
 
@@ -187,7 +196,11 @@ Worth stating, because the gap is narrower than it looks:
 - A DNS-pinning Node transport, no `evaluate`, no uploads or downloads, no
   signed-in profile.
 
-## What blocks the prefill, concretely
+## What blocked the prefill, concretely
+
+Status as of 2026-10-11: **1–5 and 7 are resolved**, 6 is open. Row 1 is resolved
+as a _tiering_ — `pay` is still refused everywhere; it is `book now` and
+`confirm booking` that an authorized, confirmed session may now reach.
 
 | #   | Blocker                                                                    | Where                                                                                                                                  | Why it exists                                                                 |
 | --- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -255,6 +268,107 @@ provenance — and `bookingEligibility` should stay a closed enum so that
 8. **Takeover mid-run voids the result.** Even a successful read.
 9. **Page text is untrusted.** Already a TravelClaw rule; it matters more on a
    booking page, where injected text could read like a confirmation.
+
+## What was built
+
+Three changes, in the order the research recommends.
+
+### 1. Force-redaction of browser output (`apps/browser-worker/src/redact.ts`)
+
+`redactBrowserText` runs on page text at the point `pageState` reads it, and on
+every control's `name`/`id`/`autocomplete` triple in `controlInfo`, so nothing
+downstream — snapshot, observation evidence, a refusal message — sees the
+unredacted page. There is no configuration that disables it.
+
+It redacts card-length digit runs, emails, phone numbers, bearer tokens, JWTs,
+cloud and platform keys, and private key blocks. Two false positives were found
+and fixed by the tests rather than by inspection, and both are recorded in the
+source because they will recur:
+
+- a per-digit `[ -]?` separator let the card pattern run through an ISO date and
+  into the digits after it, so `Departs 2026-11-02 at 08:00` was redacted whole;
+- treating `-` as a phone separator made every `YYYY-MM-DD` on a page a phone
+  number.
+
+The rule that fell out: separators in a secret pattern must be anchored to the
+shape of the secret, and a hyphen is not distinctive enough to be one.
+
+### 2. The tiered control gate (`admitControl` in `engine.ts`)
+
+The single `forbiddenControl` list is gone. `admitControl(policy, info, previousLabel)`
+is now a pure, exported function that both call sites go through — the snapshot,
+which decides what a session is offered at all, and the action handler, which
+decides what it may touch — so they cannot drift.
+
+| Tier      | Contents                                                                    | Reachable by                                                     |
+| --------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `never`   | payment, card, CVV, expiry, credentials, OTP, passport/national ID, consent | nobody, including a confirmed booking session                    |
+| `booking` | passenger name, contact email/phone, the submit control                     | operator site scope **and** the traveler's recorded confirmation |
+| `search`  | the travel-field vocabulary that already worked                             | every session, unchanged                                         |
+
+Three properties worth naming:
+
+- **Order decides.** `never` is tested first, so "Confirm booking and pay" is
+  refused rather than pressed.
+- **The page cannot rename its way in.** The tier is classified from the label
+  _and_ the control's `name`/`id`/`autocomplete` _and_ its own `sensitive` flag,
+  so a card field labelled "Details" is still closed. A test caught `cardNumber`
+  slipping past a word-boundary regex; the regex gained `card.?number` rather than
+  the test being relaxed.
+- **Neither half substitutes for the other.** A traveler's yes does not grant a
+  site the operator never scoped, and an operator scope does not stand in for the
+  traveler's confirmation. The refusal names which half is missing, because the
+  remedies differ.
+
+A site opts in with `bookingPaths` in `TRAVELCLAW_BROWSER_SITES_JSON`. Empty means
+search-only, which is the default and the previous behaviour. The network policy
+splits to match: `reserve`/`reservation` may pass for an exact listed booking
+path, while `checkout`, `payment`, `purchase`, `creditcard`, `login`, `password`,
+and `authorization` are refused regardless of what an operator lists — and a
+booking session's bypass is scoped to the exact listed path, not a general
+widening (a test caught it widening every GET).
+
+### 3. Batched fill and the navigation recheck
+
+`fillMany` takes parallel `elementIds`/`values` arrays — parallel rather than an
+array of objects because the model-facing JSON Schema generator supports flat
+types only, which a nested object array broke at import. It is validated
+all-or-nothing before anything is written, so a batch can never leave a form
+part-filled and looking complete, and every field passes the same tiered gate as
+a single fill.
+
+After any state-changing action the worker rechecks the URL at 0/250/500ms, as
+OpenClaw does. If the page moved, the result carries a fresh snapshot and says the
+earlier controls are gone, so the next action cannot be aimed at a dead ref.
+
+### What is still missing
+
+- **No confirmation surface.** `bookingConfirmed` is plumbed gateway → worker, but
+  nothing sets it yet: there is no traveler-facing "yes, fill my details" step.
+  Until that exists every run is a search run, which is the safe default.
+- **No lease fence.** Hermes's epoch check — a human takeover mid-run voids the
+  result — is not implemented, and it should be before a booking run is reachable.
+- **No procedure learning for bookings, by design.** A booking session opens with
+  `learnable` false, because a booking depends on one traveler's details and a
+  procedure is shared.
+- **The Chromium fixture suite did not run here.** See
+  [Verification](#verification).
+
+## Verification
+
+`pnpm test` passes 686 tests: 42 shared, 267 agent-core, 273 api, 80
+browser-worker, 24 web. `pnpm build` and `pnpm typecheck` are clean.
+
+The 27 real-Chromium fixture tests were **skipped, not passed**. Chromium could
+not be launched in this sandbox: the Playwright and Google download CDNs are
+unreachable, the npm-distributed Chromium that was reachable needs `NSS_3.30`
+symbols, and the only NSS build available over npm is older than that, with every
+Debian mirror blocked. So the gate, the redaction, and the network policy are
+covered by 45 new direct unit tests that execute the shipped functions —
+`admitControl`, `controlTier`, `redactBrowserText`, `permittedUrl` — but the
+Playwright integration paths (fill actually writing to a page, the navigation
+recheck firing against a real submit, redaction inside a real snapshot) are
+**unverified** and must be run on a host with a browser before this is trusted.
 
 ## Worldwide coverage of the directory
 

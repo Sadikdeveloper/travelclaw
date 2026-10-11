@@ -52,6 +52,78 @@ describe('browser egress policy', () => {
     expect(() => permittedUrl('https://search.example/other', site, 'POST')).toThrow();
     expect(() => permittedUrl('https://search.example/search', site, 'DELETE')).toThrow();
   });
+  it('keeps a search-only session off a booking path', () => {
+    // The default site has no booking scope, so `reserve` stays closed and a
+    // booking POST is refused even if the path were somehow named.
+    expect(() => permittedUrl('https://search.example/reserve', site)).toThrow();
+    expect(() => permittedUrl('https://search.example/reservation', site)).toThrow();
+    expect(() => permittedUrl('https://search.example/reserve', site, 'POST')).toThrow();
+  });
+
+  it('opens a booking path only for a session that was authorized for booking', () => {
+    const scoped: BrowserSite = { ...site, bookingPaths: ['/reserve'] };
+    // Same site, same URL: the session's authorization is what differs.
+    expect(() => permittedUrl('https://search.example/reserve', scoped)).toThrow();
+    expect(
+      permittedUrl('https://search.example/reserve', scoped, 'GET', { booking: true })
+        .pathname,
+    ).toBe('/reserve');
+    // Only the exact listed path. A step the operator did not list stays closed.
+    expect(() =>
+      permittedUrl('https://search.example/reserve/step2', scoped, 'GET', {
+        booking: true,
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    '/checkout',
+    '/payment',
+    '/purchase',
+    '/creditcard',
+    '/login',
+    '/password',
+    '/authorization',
+    '/reserve/payment',
+    '/booking?next=/checkout',
+  ])('refuses %s even for an authorized booking session', (path) => {
+    // A booking scope grants the passenger-details step. Money and credentials
+    // are refused regardless of what an operator listed, which is what makes
+    // granting the scope safe at all.
+    const scoped: BrowserSite = {
+      ...site,
+      bookingPaths: ['/reserve', '/booking', path],
+    };
+    expect(() =>
+      permittedUrl(`https://search.example${path}`, scoped, 'GET', { booking: true }),
+    ).toThrow();
+    expect(() =>
+      permittedUrl(`https://search.example${path}`, scoped, 'POST', { booking: true }),
+    ).toThrow();
+  });
+
+  it('lets a booking POST through on a listed booking path only', () => {
+    // Submitting the passenger form is the write a booking scope exists to allow.
+    const scoped: BrowserSite = { ...site, bookingPaths: ['/reserve'] };
+    expect(
+      permittedUrl('https://search.example/reserve', scoped, 'POST', { booking: true })
+        .pathname,
+    ).toBe('/reserve');
+    // An unlisted path is refused, and a search path is not widened by booking.
+    expect(() =>
+      permittedUrl('https://search.example/passengers', scoped, 'POST', {
+        booking: true,
+      }),
+    ).toThrow();
+    expect(() =>
+      permittedUrl('https://search.example/passengers', scoped, 'POST'),
+    ).toThrow();
+    expect(
+      permittedUrl('https://search.example/search', scoped, 'POST', { booking: true })
+        .pathname,
+    ).toBe('/search');
+  });
+
   it('rejects a private target even if an operator accidentally allowlists its origin', async () => {
     const local = { ...site, origins: ['http://127.0.0.1'] };
     await expect(

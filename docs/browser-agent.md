@@ -99,14 +99,21 @@ produces an explicit handoff, not fabricated results.
    stealth, residential proxies, CAPTCHA solving or restricted endpoints to force it.
 2. Add a unique site ID, display name, kind and public start URL to the worker's list.
    This is search-scope configuration, not a bespoke airline API adapter.
-3. Enumerate exact HTTP(S) origins required by the search, including permitted assets.
+3. Optionally add `bookingPaths` — exact paths where a passenger-details step may
+   be reached. Empty means search-only, which is the default. A booking session
+   also needs the traveler's recorded confirmation, and no listed path can grant
+   `checkout`, `payment`, `purchase`, `creditcard`, `login`, `password`, or
+   `authorization`: those are refused regardless. See
+   [browser prefill research](browser-prefill-research.md).
+4. Enumerate exact HTTP(S) origins required by the search, including permitted assets.
    Wildcards, URL credentials and nonstandard ports are not accepted. Only GET/HEAD
-   and explicitly listed **search-only** POST paths can pass. Do not list checkout,
+   and explicitly listed **search-only** POST paths can pass, plus POST to a listed
+   `bookingPaths` entry when a booking session is open. Do not list checkout,
    account or payment endpoints. Do not put credentials or personal values in config.
-4. Exercise the flow on a local fixture first. Check controls, redirects, subresources,
+5. Exercise the flow on a local fixture first. Check controls, redirects, subresources,
    result evidence, denied operations and the handoff copy. The conservative worker
    can hand off rather than support every modern travel-site widget.
-5. Validate a permitted live flow manually, record source/date/conditions, and review
+6. Validate a permitted live flow manually, record source/date/conditions, and review
    any proposed procedure. Removing the source or origin revokes access. Restart the
    worker after changing authorization; procedure approval cannot expand it.
 

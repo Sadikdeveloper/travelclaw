@@ -4,7 +4,18 @@ import { z } from 'zod';
 import { BrowserEngine, BusySession, MissingSession } from './engine';
 
 const openSchema = z
-  .object({ siteId: z.string().max(50), request: z.string().min(1).max(8000) })
+  .object({
+    siteId: z.string().max(50),
+    request: z.string().min(1).max(8000),
+    /**
+     * The booking tier, asked for by the gateway. Granting it is the engine's
+     * decision, not this route's: it also needs the operator's site scope and the
+     * traveler's recorded confirmation, and a request that omits either simply
+     * gets a search session.
+     */
+    booking: z.boolean().optional(),
+    bookingConfirmed: z.boolean().optional(),
+  })
   .strict();
 async function jsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -42,7 +53,13 @@ export function workerServer(engine: BrowserEngine, token: string) {
         return send(200, engine.listSites());
       if (req.method === 'POST' && req.url === '/sessions') {
         const input = openSchema.parse(await jsonBody(req));
-        return send(201, await engine.open(input.siteId, input.request));
+        return send(
+          201,
+          await engine.open(input.siteId, input.request, {
+            ...(input.booking ? { booking: true } : {}),
+            ...(input.bookingConfirmed ? { bookingConfirmed: true } : {}),
+          }),
+        );
       }
       const route = /^\/sessions\/([a-f0-9-]{36})(\/actions)?$/.exec(req.url || '');
       if (!route) return send(404, { error: 'Not found' });

@@ -23,10 +23,37 @@ export function publicAddress(address: string): boolean {
   }
 }
 
-// A second, deliberately conservative barrier alongside exact origin/method scope.
-const restricted =
-  /(?:^|[\W_])(checkout|payment|purchase|reserve|reservation|login|logout|signin|signup|password|passport|creditcard|authorization)(?:$|[\W_])/i;
-export function permittedUrl(raw: string, site: BrowserSite, method = 'GET'): URL {
+/**
+ * Path tokens that are refused no matter what an operator listed. Credentials and
+ * money: a booking scope grants the passenger-details step, never the payment
+ * step or a sign-in. Splitting this out of the old single list is what lets a
+ * booking path be authorized at all without widening what payment can reach.
+ */
+const neverPath =
+  /(?:^|[\W_])(checkout|payment|purchase|creditcard|login|logout|signin|signup|password|passport|authorization)(?:$|[\W_])/i;
+/**
+ * The rest of the conservative barrier. These still block a search-only session,
+ * but an explicitly authorized booking path may pass — `reserve` and
+ * `reservation` are the passenger-details step on most carrier sites, which is
+ * exactly what a booking scope is for.
+ */
+const searchOnlyPath = /(?:^|[\W_])(reserve|reservation)(?:$|[\W_])/i;
+
+export interface PermittedUrlOptions {
+  /**
+   * Set only for a session the operator authorized for booking and the traveler
+   * confirmed. It widens `searchOnlyPath` for an exact listed booking path and
+   * nothing else; `neverPath` ignores it.
+   */
+  booking?: boolean;
+}
+
+export function permittedUrl(
+  raw: string,
+  site: BrowserSite,
+  method = 'GET',
+  options: PermittedUrlOptions = {},
+): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -39,16 +66,28 @@ export function permittedUrl(raw: string, site: BrowserSite, method = 'GET'): UR
     url.password ||
     (url.port && !['80', '443'].includes(url.port)) ||
     !site.origins.includes(url.origin) ||
-    restricted.test(decodeURIComponentSafe(url.pathname + url.search)) ||
+    neverPath.test(decodeURIComponentSafe(url.pathname + url.search)) ||
+    // The booking bypass is scoped to the exact paths the operator listed. It is
+    // not a general widening for a booking session: an unlisted path keeps the
+    // search-only barrier even mid-booking.
+    (!(options.booking && isBookingPath(site, url.pathname)) &&
+      searchOnlyPath.test(decodeURIComponentSafe(url.pathname + url.search))) ||
     !(
       ['GET', 'HEAD'].includes(method) ||
-      (method === 'POST' && site.searchPostPaths.includes(url.pathname))
+      (method === 'POST' &&
+        (site.searchPostPaths.includes(url.pathname) ||
+          (options.booking && site.bookingPaths.includes(url.pathname))))
     )
   ) {
     throw new NetworkDenied();
   }
   return url;
 }
+/** An exact, operator-listed booking path. No prefix, no pattern, no inference. */
+function isBookingPath(site: BrowserSite, pathname: string): boolean {
+  return site.bookingPaths.includes(pathname);
+}
+
 function decodeURIComponentSafe(value: string) {
   try {
     return decodeURIComponent(value);

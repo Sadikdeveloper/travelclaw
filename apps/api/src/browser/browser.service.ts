@@ -28,6 +28,8 @@ const sitesSchema = z
         name: z.string().max(100),
         kind: z.enum(['flight', 'stay']),
         startUrl: z.string().url().max(2048),
+        /** The worker grants a booking tier only on a site that reports this. */
+        canBook: z.boolean().optional(),
       })
       .strict(),
   )
@@ -108,11 +110,24 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
     await Promise.all([...this.active.keys()].map((id) => this.stop(id)));
   }
 
+  /**
+   * Run a browser search, or — with `booking` — a booking fill.
+   *
+   * A booking run needs two things the desk does not hold yet: a site the
+   * operator granted a booking scope, and the traveler's own recorded
+   * confirmation. Both are passed through to the worker, which grants the tier
+   * only when it has both. Nothing here can manufacture either, so a run opened
+   * today is a search run; the confirmation surface is what unlocks the rest.
+   */
   async research(input: {
     id: string;
     session_id: string;
     request: string;
     kind: 'flight' | 'stay';
+    /** Ask the worker for the booking tier on a site that has a booking scope. */
+    booking?: boolean;
+    /** The traveler explicitly approved this run filling their details. */
+    bookingConfirmed?: boolean;
   }): Promise<string> {
     if (this.active.has(input.id))
       return 'A browser search is already running for this desk.';
@@ -275,8 +290,22 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
           if (call.name !== 'browser_choose_source') throw new Error('invalid_action');
           const { siteId } = choose.parse(raw);
           const site = sites.find((s) => s.id === siteId)!;
+          // Asked for a booking on a site with no booking scope is a refusal
+          // rather than a silently downgraded search: the traveler was told this
+          // would fill their details, so a quiet search would be a lie.
+          if (input.booking && !site.canBook) throw new Error('invalid_action');
           active.lease = leaseSchema.parse(
-            await this.rpc('/sessions', 'POST', { siteId, request: input.request }, signal),
+            await this.rpc(
+              '/sessions',
+              'POST',
+              {
+                siteId,
+                request: input.request,
+                ...(input.booking ? { booking: true } : {}),
+                ...(input.bookingConfirmed ? { bookingConfirmed: true } : {}),
+              },
+              signal,
+            ),
           );
           assertAuthority();
           state.sourceUrl = site.startUrl;
