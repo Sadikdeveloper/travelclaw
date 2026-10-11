@@ -50,7 +50,10 @@ Without a configured search source, flight and stay requests remain ordinary cha
 Browser-capable search is the next feature priority following pairing hardening.
 The [staged delivery plan](browser-agent.md) tracks the security foundation, isolated
 execution, provider-first fallback, provenance/UI, and reviewed procedures. An opt-in worker now provides browser fallback, provenance/UI, cancellation and
-reviewed finite workflows. Local Chromium fixtures pass; #25 remains open pending
+reviewed finite workflows. The worker now also learns two things per site: the
+shape of a run that worked (`browser_procedures`) and the wall that stopped one
+(`browser_site_notes`), each behind operator review and neither able to carry a
+value, a selector, or a permission. Local Chromium fixtures pass; #25 remains open pending
 a permitted live-site demonstration and deployment validation. This work does not mark the remaining numbered roadmap items complete.
 
 ## Not in scope

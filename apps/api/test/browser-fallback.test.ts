@@ -64,6 +64,8 @@ describe('browser fallback through the authenticated gateway', () => {
   /** What the gateway actually asked the worker to open, per booking test. */
   let sessionPosts: Array<Record<string, unknown>> = [];
   let siteCanBook = false;
+  /** Make the worker hand off with this reason, to exercise site-note recording. */
+  let workerHandoff: string | undefined;
   let afterModel: (() => void) | undefined;
   let afterObservation: (() => void) | undefined;
   let modelCalls: Array<Parameters<ModelProvider['complete']>[0]> = [];
@@ -163,6 +165,14 @@ describe('browser fallback through the authenticated gateway', () => {
       }
       const action = JSON.parse(String(init?.body)).action;
       if (action === 'observe') afterObservation?.();
+      if (workerHandoff)
+        return new Response(
+          JSON.stringify({
+            status: 'handoff',
+            reason: workerHandoff,
+            message: 'The page needs the traveler.',
+          }),
+        );
       return new Response(
         JSON.stringify(
           action === 'observe'
@@ -195,6 +205,8 @@ describe('browser fallback through the authenticated gateway', () => {
     workerDown = false;
     sessionPosts = [];
     siteCanBook = false;
+    workerHandoff = undefined;
+    db.run('DELETE FROM browser_site_notes');
     afterModel = undefined;
     afterObservation = undefined;
     delete process.env.TRAVELCLAW_FLIGHT_BASE_URL;
@@ -648,6 +660,58 @@ describe('browser fallback through the authenticated gateway', () => {
         db.all('SELECT * FROM booking_confirmations WHERE task_id = ?', task.id),
       ).toHaveLength(0);
     });
+  });
+  describe('site notes', () => {
+    it('records what stopped a run, quarantined, and never supplies it unreviewed', async () => {
+      workerHandoff = 'consent';
+      const agent = await traveler(true);
+      const task = await search(agent);
+      expect(task.browser.status).toBe('handoff');
+      const row = db.get<{
+        kind: string;
+        note_origin: string;
+        review_status: string;
+        runs: number;
+      }>('SELECT * FROM browser_site_notes')!;
+      expect(row).toMatchObject({
+        kind: 'consent_wall',
+        // Matched out of page text, so it is a claim by the page, not a fact.
+        note_origin: 'page_claimed',
+        review_status: 'pending',
+        runs: 1,
+      });
+      // Pending notes are invisible to the model, so nothing about this site is
+      // repeated before an operator has looked at it. The worker handed off on the
+      // first action, so this run made exactly one model call.
+      const sources = JSON.parse(modelCalls[0].user).authorizedSources;
+      expect(sources[0].siteNotes).toEqual([]);
+    });
+    it('supplies an approved note on the next run so the wall is not rediscovered', async () => {
+      workerHandoff = 'consent';
+      const agent = await traveler(true);
+      const first = await search(agent);
+      db.run("UPDATE browser_site_notes SET review_status = 'approved'");
+      // A second run for the same request now carries the site's known blocker.
+      // The count read here is still 1: the sites are fetched before this run
+      // hits the wall, so its own repeat is recorded afterwards.
+      const second = await search(agent);
+      expect(second.id).not.toBe(first.id);
+      const sources = JSON.parse(modelCalls[1].user).authorizedSources;
+      expect(sources[0].siteNotes).toEqual([
+        { kind: 'consent_wall', noteOrigin: 'page_claimed', runs: 1 },
+      ]);
+      // One row, and the second run's repeat landed on it.
+      expect(db.all('SELECT * FROM browser_site_notes')).toHaveLength(1);
+      expect(db.get<{ runs: number }>('SELECT runs FROM browser_site_notes')!.runs).toBe(2);
+    });
+    it.each(['time_limit', 'missing_information'])(
+      'records nothing when the run stopped for a reason that is not about the site: %s',
+      async (reason) => {
+        workerHandoff = reason;
+        await search(await traveler(true));
+        expect(db.all('SELECT * FROM browser_site_notes')).toHaveLength(0);
+      },
+    );
   });
   it('marks persisted running browser work interrupted after a gateway restart', () => {
     const row = db.get<{ task_id: string; state_json: string }>(

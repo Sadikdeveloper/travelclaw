@@ -9,6 +9,7 @@ import {
 } from '@travelclaw/shared';
 import { BookingConfirmationService } from './confirmation.service';
 import { proposeProcedure, reviewedSteps } from './procedures';
+import { proposeSiteNote, reviewedSiteNotes } from './site-notes';
 import { RateLimiter } from '../auth/rate-limiter';
 import { loadConfig } from '../config';
 import { DatabaseService } from '../db/database.service';
@@ -235,6 +236,16 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
         state.status = result.status;
         state.reason = result.reason;
       }
+      // A wall this site put up is worth remembering; a run that merely ran out of
+      // our own budget or the traveler's details is not. `proposeSiteNote` makes
+      // that distinction and records nothing for the reasons that are about us.
+      if (result.status === 'handoff' && result.reason && state.siteId)
+        proposeSiteNote(this.db, {
+          siteId: state.siteId,
+          origin: state.sourceUrl ? safeOrigin(state.sourceUrl) : '',
+          reason: result.reason,
+          at: new Date().toISOString(),
+        });
       save();
       emitStep(state.steps.at(-1)?.action);
     };
@@ -248,6 +259,10 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
         .map((s) => ({
           ...s,
           reviewedSteps: reviewedSteps(this.db, s.id, new URL(s.startUrl).origin),
+          // What this site has reliably done to past runs, operator-approved only.
+          // Supplied alongside the procedure so the model can hand off early
+          // instead of spending its actions rediscovering the same wall.
+          siteNotes: reviewedSiteNotes(this.db, s.id, new URL(s.startUrl).origin),
         }));
       assertAuthority();
       const provider = this.models.providerFor(this.models.best());
@@ -517,6 +532,14 @@ export class BrowserService implements OnModuleInit, OnModuleDestroy {
       await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
+  }
+}
+/** The origin of a recorded source URL, or empty if it is not one. */
+function safeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
   }
 }
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

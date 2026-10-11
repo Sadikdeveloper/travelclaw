@@ -213,6 +213,30 @@ CREATE TABLE IF NOT EXISTS booking_confirmations (
 CREATE INDEX IF NOT EXISTS idx_booking_confirmations_task
   ON booking_confirmations(task_id, created_at);
 
+-- What a site reliably does to a browser run: the wall it puts up, not the shape
+-- of a run that got past it (that is browser_procedures). One row per site and
+-- blocker, so the table is bounded by the vocabulary rather than by traffic, and
+-- repeated runs raise the runs column instead of adding rows.
+--
+-- note_origin is the whole point of keeping this separate from procedures: a
+-- blocker the worker observed structurally is a fact, while one matched out of
+-- the page's own text is a claim the page made about itself, and only an operator
+-- review promotes it to something the desk repeats.
+CREATE TABLE IF NOT EXISTS browser_site_notes (
+  id TEXT PRIMARY KEY,
+  site_id TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  note_origin TEXT NOT NULL CHECK (note_origin IN ('worker_observed', 'page_claimed')),
+  runs INTEGER NOT NULL DEFAULT 1,
+  review_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (review_status IN ('pending', 'approved', 'rejected')),
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  reviewed_at TEXT,
+  UNIQUE(site_id, origin, kind)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_offers_task ON offers(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_offers_session ON offers(session_id, created_at);

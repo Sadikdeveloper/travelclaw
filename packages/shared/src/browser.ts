@@ -184,6 +184,81 @@ export const browserObservationSchema = z
   })
   .strict();
 
+/**
+ * What a site reliably does to a browser run, as a fact about the site.
+ *
+ * Procedures record the shape of a run that *worked*. These record what stopped
+ * one, so the desk stops rediscovering the same wall on every attempt.
+ *
+ * A finite vocabulary for the same reason the procedure steps are finite: the
+ * blocker is named by the worker, never quoted from the page, so no page text can
+ * become a durable claim about a site.
+ */
+export const browserSiteNoteKindSchema = z.enum([
+  'consent_wall',
+  'sign_in_wall',
+  'human_verification',
+  'refused_access',
+  'content_too_large',
+]);
+export type BrowserSiteNoteKind = z.infer<typeof browserSiteNoteKindSchema>;
+
+/**
+ * How the blocker was detected, which decides how much a note may be trusted.
+ *
+ * `worker_observed` is structural: a real browser dialog, a visible password
+ * field, an HTTP 401/403/429. `page_claimed` means it matched a pattern in the
+ * page's own text — which a page can plant on purpose to leave a false, durable
+ * claim about itself behind. Those are quarantined until an operator approves
+ * them, and the card says which of the two an operator is looking at.
+ */
+export const browserNoteOriginSchema = z.enum(['worker_observed', 'page_claimed']);
+export type BrowserNoteOrigin = z.infer<typeof browserNoteOriginSchema>;
+
+/**
+ * The handoff reasons that are facts about a site rather than about our own
+ * budget, the operator's authorization, or the traveler's request. Only these
+ * become notes; `time_limit`, `action_limit` and `network_restriction` describe
+ * TravelClaw, and `missing_information` describes the traveler.
+ */
+export const SITE_NOTE_REASONS: Partial<
+  Record<BrowserHandoffReason, { kind: BrowserSiteNoteKind; origin: BrowserNoteOrigin }>
+> = {
+  // Structural: a real dialog event, or a visible password input.
+  sign_in: { kind: 'sign_in_wall', origin: 'worker_observed' },
+  // Structural: HTTP 401/403/429, a popup window, or a forced download.
+  site_restriction: { kind: 'refused_access', origin: 'worker_observed' },
+  page_limit: { kind: 'content_too_large', origin: 'worker_observed' },
+  // Both of these can also come from a regex over page text, and the gateway
+  // cannot tell which it was from the reason alone. So they are recorded as
+  // page-claimed: when in doubt, the untrusted origin is the one that sticks.
+  consent: { kind: 'consent_wall', origin: 'page_claimed' },
+  verification: { kind: 'human_verification', origin: 'page_claimed' },
+};
+
+export const browserSiteNoteSchema = z
+  .object({
+    id: z.string().max(64),
+    siteId: z.string().regex(/^[a-z0-9-]{1,50}$/),
+    origin: webUrl.refine((url) => {
+      try {
+        return new URL(url).origin === url;
+      } catch {
+        return false;
+      }
+    }),
+    kind: browserSiteNoteKindSchema,
+    noteOrigin: browserNoteOriginSchema,
+    /** How many runs hit this. Bounded by the enum, so the table cannot grow. */
+    runs: z.number().int().min(1).max(100000),
+    reviewStatus: z.enum(['pending', 'approved', 'rejected']),
+    firstSeenAt: z.string().datetime(),
+    lastSeenAt: z.string().datetime(),
+    reviewedAt: z.string().datetime().nullable(),
+  })
+  .strict();
+export type BrowserSiteNote = z.infer<typeof browserSiteNoteSchema>;
+
 export type BrowserAction = z.infer<typeof browserActionSchema>;
 export type BrowserObservation = z.infer<typeof browserObservationSchema>;
 export type BrowserHandoffReason = z.infer<typeof browserHandoffReasonSchema>;

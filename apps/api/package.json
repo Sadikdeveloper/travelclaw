@@ -8,7 +8,8 @@
     "start": "node --disable-warning=ExperimentalWarning dist/main.js",
     "test": "jest --runInBand",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "browser:procedures": "node scripts/browser-procedures.mjs"
+    "browser:procedures": "node scripts/browser-procedures.mjs",
+    "browser:notes": "node scripts/browser-site-notes.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",

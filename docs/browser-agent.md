@@ -228,6 +228,49 @@ candidate after another verified result; there is no automatic promotion of a
 failure or free-form correction into a general rule. These are deliberately small
 workflow hints, not Hermes/OpenClaw Markdown-skill compatibility.
 
+## Site notes: what a site reliably does to a run
+
+Procedures learn the shape of a run that worked. Notes learn what stopped one, so
+the desk stops rediscovering the same wall on every attempt.
+
+They live in `browser_site_notes`, one row per site, origin and blocker, with a
+`runs` count. A finite vocabulary of five — `consent_wall`, `sign_in_wall`,
+`human_verification`, `refused_access`, `content_too_large` — chosen from the
+handoff reason, never quoted from the page. Reasons that describe TravelClaw
+rather than the site (`time_limit`, `action_limit`, `network_restriction`) or the
+traveler (`missing_information`, `confirmation_required`) record nothing.
+
+**`note_origin` is the part that matters.** It records how the blocker was
+detected, because the two kinds of evidence are not equally trustworthy:
+
+| `note_origin`     | Detected by                                                  | Trust                 |
+| ----------------- | ------------------------------------------------------------ | --------------------- |
+| `worker_observed` | a real dialog, a visible password field, an HTTP 401/403/429 | a fact about the site |
+| `page_claimed`    | a pattern matched in the page's own text                     | a claim by the site   |
+
+A page can plant text to leave a durable false claim about itself behind, so
+`consent` and `verification` — which the worker matches in page text — are always
+recorded as `page_claimed`. The gateway cannot tell a text match from a real
+dialog from the reason alone, and when it cannot tell, the untrusted origin is the
+one that sticks.
+
+Notes start **pending** and are invisible to the model until an operator approves
+them. A rejected note stays rejected however often the blocker recurs, so it cannot
+drift back into the review queue and be approved by accident.
+
+```sh
+DATABASE_PATH=/absolute/path/travelclaw.db pnpm --filter @travelclaw/api browser:notes list
+DATABASE_PATH=/absolute/path/travelclaw.db pnpm --filter @travelclaw/api browser:notes approve <id>
+DATABASE_PATH=/absolute/path/travelclaw.db pnpm --filter @travelclaw/api browser:notes reject <id>
+```
+
+`list` labels each row with how it was detected, so an operator can see which
+approvals are confirming a fact and which are trusting a page.
+
+Approved notes are supplied alongside the site with `reviewedSteps`, at most five,
+most-repeated first. They are hints about what to expect, not permissions: a note
+cannot widen the network scope, unlock a control tier, or supply a value.
+
 ## Verification and remaining acceptance work
 
 ```sh
