@@ -271,6 +271,31 @@ Approved notes are supplied alongside the site with `reviewedSteps`, at most fiv
 most-repeated first. They are hints about what to expect, not permissions: a note
 cannot widen the network scope, unlock a control tier, or supply a value.
 
+## Worked example: ibomair.com, step by step
+
+A traveler session on Ibom Air (2026-10-11) walked the whole flow. Each step maps
+to a capability the worker either has or deliberately lacks. This is the reference
+for "can the agent do this site".
+
+| Step (as the traveler saw it)                                | Worker capability                                                                                                                                                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search form on `ibomair.com` (From/To/dates/party)           | Fillable. From/To are a combobox; the snapshot offers `role=combobox`/`option` refs and the chosen city must be stated in the request.                                                                  |
+| From list shows only QUO, ABV, CBQ, LOS, PHC, ACC            | Not needed up front: the dropdown's options are read from the page, and grounding ties the pick to the traveler's words. The fixed origin list is recorded in the carrier directory as a note instead.  |
+| Date fields hold `26.10.2026`                                | Now grounded. Date slots accept the page's notation of a date the traveler stated (`26 October 2026` → `26.10.2026`). A different day is still refused.                                                 |
+| Search click navigates to `book-ibomair.crane.aero`          | Allowed only if the operator lists that origin in the site config; it is a different origin from the marketing site.                                                                                    |
+| Cloudflare "Verify you are human" on the results page        | **The worker stops.** `pageState` matches the challenge and hands off `verification`, records a `human_verification` site note, and leaves the deep link for the traveler. It never bypasses a CAPTCHA. |
+| Availability page (date-price strip, fare columns)           | Observable: `browser_observe` quotes one result verbatim with its fare-family conditions.                                                                                                               |
+| Fare family page (Saver/Discount rules, price button)        | Conditions are captured as `visibleConditions`; the price button is a control the model may click within scope.                                                                                         |
+| Passenger page (gender, title, first/last name, nationality) | Booking tier. Reachable only with the operator's `bookingPaths` **and** the traveler's recorded approval; name fields fill, payment never does.                                                         |
+| Payment / confirmation steps                                 | **Closed by construction.** `neverControl` and the network `neverPath` refuse them for every session. The carrier directory marks Ibom `pay_at_booking`, so the desk hands off at payment.              |
+
+The honest summary: the worker can fill the search form, read the results and fare
+rules, and — with the operator's scope plus the traveler's approval — fill the
+passenger page. The two places it stops are exactly the two places it must: the
+Cloudflare human-verification challenge and the payment step. Both stops are
+recorded (a site note and the carrier directory respectively) so the next run and
+the next traveler get the truth instead of a retry.
+
 ## Verification and remaining acceptance work
 
 ```sh

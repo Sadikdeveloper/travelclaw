@@ -216,6 +216,65 @@ export function grounded(value: string, request: string): boolean {
   );
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
+};
+/** `YYYY-MM-DD`, or null. The only canonical shape dates are compared in. */
+function dateKey(year: number, month: number, day: number): string | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2100)
+    return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+/**
+ * Parse one calendar date out of the many notations a page and a traveler can
+ * each happen to use: `26.10.2026`, `26/10/2026`, `2026-10-26`, `26 Oct 2026`,
+ * `26 October 2026`, `October 26, 2026`, `Oct 26 2026`. Returns the canonical key,
+ * or null when the text is not unambiguously one date.
+ *
+ * This is translation, not guessing: it never chooses a date, it only lets a fill
+ * value whose calendar day equals a date the traveler stated pass grounding even
+ * though the strings differ.
+ */
+export function parseDateKey(text: string): string | null {
+  const t = text.trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if (m) return dateKey(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(t); // day-first, as ibomair shows
+  if (m) return dateKey(+m[3], +m[2], +m[1]);
+  m = /^(\d{1,2})\s+([a-z]{3,9})\.?,?\s+(\d{4})$/i.exec(t); // 26 Oct 2026 / 26 October 2026
+  if (m && MONTHS[m[2].slice(0, 3).toLowerCase()])
+    return dateKey(+m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1]);
+  m = /^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/i.exec(t); // October 26, 2026
+  if (m && MONTHS[m[1].slice(0, 3).toLowerCase()])
+    return dateKey(+m[3], MONTHS[m[1].slice(0, 3).toLowerCase()], +m[2]);
+  return null;
+}
+const DATE_TOKEN =
+  /\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\b\d{1,2}\s+[a-z]{3,9}\.?,?\s+\d{4}\b|\b[a-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b/gi;
+/**
+ * True when `value` is the same calendar day as a date the traveler stated in the
+ * request, in any of the recognized notations. Used only for the date slots, where
+ * the page's notation and the traveler's notation routinely differ.
+ */
+export function dateMatchesStated(value: string, request: string): boolean {
+  const target = parseDateKey(value);
+  if (!target) return false;
+  for (const token of request.match(DATE_TOKEN) ?? [])
+    if (parseDateKey(token.replace(/[.,](?=\s|$)/, '')) === target) return true;
+  return false;
+}
+
 /** No model code is evaluated. This fixed function extracts only visible control metadata. */
 function controlInfo(el: Element) {
   const input = el as HTMLInputElement;
@@ -1130,8 +1189,21 @@ export function groundedField(
   request: string,
   optionLabel?: string,
 ): boolean {
-  if (fieldSlot(label) !== 'fill_travelers')
-    return grounded(value, request) || (!!optionLabel && grounded(optionLabel, request));
+  const slot = fieldSlot(label);
+  if (slot !== 'fill_travelers') {
+    if (grounded(value, request) || (!!optionLabel && grounded(optionLabel, request)))
+      return true;
+    // A date slot may hold the page's notation of a date the traveler stated in a
+    // different notation. Same calendar day is grounded; a different day is not.
+    if (
+      slot === 'fill_departure_date' ||
+      slot === 'fill_return_date' ||
+      slot === 'fill_check_in' ||
+      slot === 'fill_check_out'
+    )
+      return dateMatchesStated(value, request);
+    return false;
+  }
   const text = normalized(request);
   // A number in a date, flight number or budget is NOT a party size. Ambiguous
   // mixed adult/child parties need an explicit clarification rather than a sum.

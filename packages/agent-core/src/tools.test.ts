@@ -335,7 +335,11 @@ describe('carrier directory', () => {
   });
 
   it('flags carriers whose payment order nobody has verified', async () => {
-    const result = await lookup('Lagos', 'Uyo');
+    // Lagos to Port Harcourt still pairs a verified carrier (Air Peace) with an
+    // unverified one (Green Africa), which is what this guard needs. Lagos to Uyo
+    // lost its unverified carrier when Ibom Air's pay-at-booking order was
+    // confirmed from a live session.
+    const result = await lookup('Lagos', 'Port Harcourt');
     const data = result.data as AirlineData;
     expect(data.carriers.length).toBeGreaterThan(1);
     expect(data.carriers.some((airline) => airline.paymentOrder === 'unverified')).toBe(

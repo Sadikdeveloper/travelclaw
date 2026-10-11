@@ -240,8 +240,24 @@ export const AIRLINES: AirlineProfile[] = [
     hubs: ['QUO', 'LOS'],
     bookingUrl: 'https://www.ibomair.com/',
     channels: [{ url: 'https://www.ibomair.com/', kind: 'airline_site' }],
-    paymentOrder: 'unverified',
+    // The live flow (2026-10-11) runs Flight Section, Passenger, Additional
+    // Services, Payment, Confirmation in one pass on the carrier's own site, so a
+    // reservation is only created as part of payment. The worker therefore stops at
+    // the passenger step and leaves payment to the traveler.
+    paymentOrder: 'pay_at_booking',
+    evidence:
+      'book-ibomair.crane.aero booking stepper (Flight Section to Payment to Confirmation), traveler session 2026-10-11',
+    bookingSteps: [
+      'Choose origin and destination from the fixed airport list on ibomair.com.',
+      'Search opens book-ibomair.crane.aero on a separate origin.',
+      'A Cloudflare human-verification challenge guards the results page; a person must pass it.',
+      'Pick a fare family (City Saver, Ibom Saver, Ibom Discount) on the availability page.',
+      'Enter passenger gender, title, first and last name, nationality.',
+      'Pay on the carrier site; TravelClaw never reaches this step.',
+    ],
     verifiedOn: '2026-10-11',
+    notes:
+      'Search results and booking run on book-ibomair.crane.aero, a different origin from the marketing site, behind a Cloudflare human-verification challenge an automated browser will not pass. The origin list is fixed: Uyo (QUO), Abuja (ABV), Calabar (CBQ), Lagos (LOS), Port Harcourt (PHC) and Accra (ACC). Dates on the form use day.month.year notation.',
   },
   {
     id: 'max-air',
@@ -457,9 +473,12 @@ export const AIRLINE_ROUTES: AirlineRouteFact[] = [
   {
     from: 'LOS',
     to: 'ABV',
-    carrierIds: ['air-peace', 'rano-air', 'green-africa'],
+    // Ibom Air added from a live session that showed nonstop QI-561/551/553 on the
+    // pair; the other three were already listed. Direction is not stored.
+    carrierIds: ['air-peace', 'rano-air', 'green-africa', 'ibom-air'],
     confidence: 'shared',
     verifiedOn: '2026-10-11',
+    note: 'Ibom Air nonstop Abuja to Lagos observed live on the carrier site 2026-10-11.',
   },
   {
     from: 'ABV',
